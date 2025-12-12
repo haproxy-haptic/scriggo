@@ -1283,7 +1283,7 @@ func (tc *typechecker) checkReturn(node *ast.Return) ast.Node {
 			}
 		}
 		msg += ")"
-		panic(tc.errorf(node, msg))
+		panic(tc.errorf(node, "%s", msg))
 	}
 
 	for i, typ := range expectedTypes {

@@ -1535,7 +1535,7 @@ func (l *lexer) lexNumber() error {
 			base = 10
 		}
 		if base < 10 {
-			return l.errorf("invalid radix point in " + numberBaseName[base] + " literal")
+			return l.errorf("%s", "invalid radix point in "+numberBaseName[base]+" literal")
 		}
 		dot = true
 		p++
@@ -1591,7 +1591,7 @@ DIGITS:
 					base = 10
 				}
 				if base < 10 {
-					return l.errorf("invalid radix point in " + numberBaseName[base] + " literal")
+					return l.errorf("%s", "invalid radix point in "+numberBaseName[base]+" literal")
 				}
 				dot = true
 				p++
@@ -1642,7 +1642,7 @@ DIGITS:
 	switch l.src[p-1] {
 	case 'x', 'X', 'o', 'O', 'b', 'B':
 		if p == 2 {
-			return l.errorf(numberBaseName[base] + " literal has no digits")
+			return l.errorf("%s", numberBaseName[base]+" literal has no digits")
 		}
 	case '.':
 		if p == 3 && base == 16 {
