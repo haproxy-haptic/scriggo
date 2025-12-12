@@ -660,6 +660,16 @@ var checkerTemplateStmts = []struct {
 	{src: `{% m := map[interface{}]int{} %}{% m.x := "a" %}`, expected: `non-name m.x on left side of :=`},
 	{src: `{% m := map[string]int{} %}{{ m.x + "a" }}`, expected: `invalid operation: m.x + "a" (cannot convert "a" (type untyped string) to type int)`},
 	{src: `{% m := map[interface{}]int{} %}{{ m.x + "a" }}`, expected: `invalid operation: m.x + "a" (cannot convert "a" (type untyped string) to type int)`},
+
+	// Pipe operator (filter syntax).
+	{src: `{% f := func(s string) string { return s } %}{{ "hello" | f() }}`, expected: ok},
+	{src: `{% f := func(s string, n int) string { return s } %}{{ "hello" | f(5) }}`, expected: ok},
+	{src: `{% f := func(x int) int { return x * 2 } %}{% g := func(x int) string { return "" } %}{{ 5 | f() | g() }}`, expected: ok},
+	{src: `{% f := func(a, b int) int { return a + b } %}{{ 1 + 2 | f(3) }}`, expected: ok},
+	{src: `{{ 5 | 3 }}`, expected: `pipe operator requires a function call on the right side`},
+	{src: `{% x := 5 %}{{ x | x }}`, expected: `pipe operator requires a function call on the right side`},
+	{src: `{% f := func(x int) int { return x } %}{{ "hello" | f() }}`, expected: `cannot use "hello" (type untyped string) as type int in argument to f`},
+	{src: `{% f := func(x int) int { return x } %}{{ 5 | f(6) }}`, expected: `too many arguments in call to f`},
 }
 
 func TestCheckerTemplatesStatements(t *testing.T) {

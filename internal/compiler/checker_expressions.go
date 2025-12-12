@@ -446,6 +446,11 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 			}
 		}
 
+		// Handle 'a | f()' pipe expressions (template filter syntax).
+		if expr.Op == ast.OperatorPipe {
+			return tc.checkPipeExpression(expr)
+		}
+
 		t, err := tc.binaryOp(expr.Expr1, expr.Op, expr.Expr2)
 		if err != nil {
 			if err == errDivisionByZero {
@@ -2317,6 +2322,35 @@ func (tc *typechecker) checkDefault(expr *ast.Default, show bool) typeInfoPair {
 	tc.compilation.typeInfos[expr] = tis.TypeInfo()
 
 	return tis
+}
+
+// checkPipeExpression type checks a pipe expression 'a | f(args...)'.
+// The pipe operator transforms the expression into f(a, args...).
+func (tc *typechecker) checkPipeExpression(expr *ast.BinaryOperator) *typeInfo {
+	// The right side must be a function call.
+	call, ok := expr.Expr2.(*ast.Call)
+	if !ok {
+		panic(tc.errorf(expr.Expr2, "pipe operator requires a function call on the right side"))
+	}
+
+	// Prepend the left expression to the call's arguments.
+	// We modify the AST so that the emitter can just emit the call directly.
+	newArgs := make([]ast.Expression, len(call.Args)+1)
+	newArgs[0] = expr.Expr1
+	copy(newArgs[1:], call.Args)
+	call.Args = newArgs
+
+	// Type check the modified call expression.
+	tis := tc.checkCallExpression(call)
+
+	// Store type info for the pipe expression (same as the call result).
+	if len(tis) > 0 {
+		tc.compilation.typeInfos[expr] = tis[0]
+		return tis[0]
+	}
+
+	// Call returns no values.
+	return nil
 }
 
 // checkRender checks the 'render' expression and changes its internal
