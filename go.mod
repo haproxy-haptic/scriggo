@@ -2,7 +2,7 @@ module github.com/open2b/scriggo
 
 go 1.24.0
 
-toolchain go1.24.11
+toolchain go1.25.5
 
 require (
 	github.com/fsnotify/fsnotify v1.9.0
