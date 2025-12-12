@@ -372,6 +372,8 @@ func (d *deps) nodeDeps(n ast.Node, scopes depScopes) []*ast.Identifier {
 		return nil
 	case *ast.Render:
 		return nil
+	case *ast.Include:
+		return nil
 	case *ast.Index:
 		deps := d.nodeDeps(n.Expr, scopes)
 		return append(deps, d.nodeDeps(n.Index, scopes)...)

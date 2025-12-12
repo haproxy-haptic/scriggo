@@ -99,6 +99,14 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 				}
 			}
 
+		case *ast.Include:
+			// include "path" - Jinja2-style include statement.
+			// Similar to render but as a statement, not an expression.
+			em.fb.enterStack()
+			em.emitNodes([]ast.Node{node.IR.Import})
+			em.emitCallNode(node.IR.Call, false, false, ast.Format(node.Format))
+			em.fb.exitStack()
+
 		case *ast.Fallthrough:
 			// Nothing to do: fallthrough nodes are handled by method
 			// emitter.emitSwitch.

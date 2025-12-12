@@ -184,6 +184,9 @@ nodesLoop:
 				panic(err)
 			}
 
+		case *ast.Include:
+			tc.checkInclude(node)
+
 		case *ast.Text:
 
 		case *ast.Block:
@@ -1589,4 +1592,37 @@ func checkShowJSON(t reflect.Type, types []reflect.Type) error {
 		return fmt.Errorf("cannot show type %s as JSON", t)
 	}
 	return nil
+}
+
+// checkInclude checks the 'include' statement and transforms its internal
+// representation to a macro call, similar to how render expressions work.
+func (tc *typechecker) checkInclude(include *ast.Include) {
+	tree := include.Tree
+	if tree == nil {
+		return
+	}
+
+	stored, ok := tc.compilation.renderImportMacro[tree]
+	if !ok {
+		macroDecl := ast.NewFunc(
+			nil,
+			ast.NewIdentifier(nil, "M"+strconv.Quote(tree.Path)),
+			ast.NewFuncType(nil, true, nil, nil, false), // func()
+			ast.NewBlock(nil, tree.Nodes),
+			false,
+			tree.Format,
+		)
+		importt := ast.NewImport(nil, ast.NewIdentifier(nil, "."), "/"+include.Path, nil)
+		importt.Tree = tree
+		importt.Tree.Nodes = []ast.Node{macroDecl}
+		stored.Macro = macroDecl
+		stored.Import = importt
+		tc.compilation.renderImportMacro[tree] = stored
+	}
+
+	include.IR.Call = ast.NewCall(include.Pos(), stored.Macro.Ident, nil, false)
+	include.IR.Import = stored.Import
+
+	tc.checkNodes([]ast.Node{stored.Import})
+	tc.checkExpr(include.IR.Call)
 }

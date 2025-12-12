@@ -119,6 +119,8 @@ func (pp *templateExpansion) parseNodeFile(node ast.Node) (*ast.Tree, error) {
 		imported = true
 	case *ast.Render:
 		name = n.Path
+	case *ast.Include:
+		name = n.Path
 	}
 	parent := pp.paths[len(pp.paths)-1]
 	name, err = rooted(parent, name)
@@ -143,14 +145,23 @@ func (pp *templateExpansion) parseNodeFile(node ast.Node) (*ast.Tree, error) {
 				return nil, syntaxError(node.Pos(), "import of file extended at %s:%s", parsed.parent.path, n.Pos())
 			case *ast.Render:
 				return nil, syntaxError(node.Pos(), "render of file extended at %s:%s", parsed.parent.path, n.Pos())
+			case *ast.Include:
+				return nil, syntaxError(node.Pos(), "include of file extended at %s:%s", parsed.parent.path, n.Pos())
 			}
 		case *ast.Import:
-			if _, ok := node.(*ast.Render); ok {
+			switch node.(type) {
+			case *ast.Render:
 				return nil, syntaxError(node.Pos(), "render of file imported at %s:%s", parsed.parent.path, n.Pos())
+			case *ast.Include:
+				return nil, syntaxError(node.Pos(), "include of file imported at %s:%s", parsed.parent.path, n.Pos())
 			}
 		case *ast.Render:
 			if _, ok := node.(*ast.Import); ok {
 				return nil, syntaxError(node.Pos(), "import of file rendered at %s:%s", parsed.parent.path, n.Pos())
+			}
+		case *ast.Include:
+			if _, ok := node.(*ast.Import); ok {
+				return nil, syntaxError(node.Pos(), "import of file included at %s:%s", parsed.parent.path, n.Pos())
 			}
 		}
 		tree = parsed.tree
@@ -251,6 +262,26 @@ func (pp *templateExpansion) expand(nodes []ast.Node) error {
 					parent := pp.paths[len(pp.paths)-1]
 					rootedPath, _ := rooted(parent, n.Path)
 					e.msg = "\n\timports " + rootedPath + e.msg
+					if e.path == pp.paths[len(pp.paths)-1] {
+						e.pos = *(n.Pos())
+					}
+				}
+				return err
+			}
+
+		case *ast.Include:
+			// include "path"
+
+			var err error
+			pp.canExtend = false
+			n.Tree, err = pp.parseNodeFile(n)
+			if err != nil {
+				parent := pp.paths[len(pp.paths)-1]
+				rootedPath, _ := rooted(parent, n.Path)
+				if errors.Is(err, os.ErrNotExist) {
+					err = syntaxError(n.Pos(), "include path %q does not exist", rootedPath)
+				} else if e, ok := err.(*CycleError); ok {
+					e.msg = "\n\tincludes " + rootedPath + e.msg
 					if e.path == pp.paths[len(pp.paths)-1] {
 						e.pos = *(n.Pos())
 					}
