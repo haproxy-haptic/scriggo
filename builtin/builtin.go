@@ -900,7 +900,7 @@ func UnmarshalJSON(data string, v interface{}) error {
 	rv := reflect.ValueOf(v)
 	rt := rv.Type()
 	if rv.Kind() != reflect.Ptr {
-		return fmt.Errorf("unmarshalJSON: cannot unmarshal into non-pointer value of type " + rt.String())
+		return errors.New("unmarshalJSON: cannot unmarshal into non-pointer value of type " + rt.String())
 	}
 	if rv.IsZero() {
 		return errors.New("unmarshalJSON: cannot unmarshal into a nil pointer of type " + rt.String())
@@ -937,7 +937,7 @@ func UnmarshalYAML(data string, v interface{}) (err error) {
 	rv := reflect.ValueOf(v)
 	rt := rv.Type()
 	if rv.Kind() != reflect.Ptr {
-		return fmt.Errorf("unmarshalYAML: cannot unmarshal into non-pointer value of type " + rt.String())
+		return errors.New("unmarshalYAML: cannot unmarshal into non-pointer value of type " + rt.String())
 	}
 	if rv.IsZero() {
 		return errors.New("unmarshalYAML: cannot unmarshal into a nil pointer of type " + rt.String())
