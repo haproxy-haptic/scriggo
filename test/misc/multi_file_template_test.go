@@ -31,6 +31,7 @@ func TestMultiFileTemplate(t *testing.T) {
 	templateMultiFileCases := map[string]struct {
 		sources          fs.FS                  // can be fstest.Files or fstest.FormatFiles
 		expectedBuildErr string                 // default to empty string (no build error). Mutually exclusive with expectedOut.
+		expectedRunErr   string                 // default to empty string (no run error). Mutually exclusive with expectedOut.
 		expectedOut      string                 // default to "". Mutually exclusive with expectedBuildErr.
 		main             native.Package         // default to nil
 		vars             map[string]interface{} // default to nil
@@ -3386,6 +3387,79 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 			expectedOut: "hello",
 		},
+
+		// Dynamic include tests - path is computed at runtime
+		"include statement - dynamic with variable": {
+			sources: fstest.Files{
+				"index.txt":   `{% var name = "partial.txt" %}{% include name %}`,
+				"partial.txt": `DYNAMIC`,
+			},
+			expectedOut: "DYNAMIC",
+		},
+
+		"include statement - dynamic in loop": {
+			sources: fstest.Files{
+				"index.txt": `{% var templates = []string{"a.txt", "b.txt"} %}{% for _, t := range templates %}{% include t %}{% end %}`,
+				"a.txt":     `A`,
+				"b.txt":     `B`,
+			},
+			expectedOut: "AB",
+		},
+
+		"include statement - dynamic with concatenation": {
+			sources: fstest.Files{
+				"index.txt":   `{% var prefix = "part" %}{% include prefix + "ial.txt" %}`,
+				"partial.txt": `CONCAT`,
+			},
+			expectedOut: "CONCAT",
+		},
+
+		"include statement - dynamic file not found": {
+			sources: fstest.Files{
+				"index.txt": `{% var name = "missing.txt" %}{% include name %}`,
+			},
+			expectedRunErr: `template not found: missing.txt`,
+		},
+
+		"include statement - dynamic with subdirectory": {
+			sources: fstest.Files{
+				"index.txt":         `{% var dir = "sub" %}{% include dir + "/partial.txt" %}`,
+				"sub/partial.txt":   `SUBDIR`,
+			},
+			expectedOut: "SUBDIR",
+		},
+
+		"include statement - dynamic nested includes": {
+			sources: fstest.Files{
+				"index.txt":  `{% var name = "outer.txt" %}{% include name %}`,
+				"outer.txt":  `OUTER[{% var inner = "inner.txt" %}{% include inner %}]`,
+				"inner.txt":  `INNER`,
+			},
+			expectedOut: "OUTER[INNER]",
+		},
+
+		"include statement - dynamic empty path": {
+			sources: fstest.Files{
+				"index.txt": `{% var name = "" %}{% include name %}`,
+			},
+			expectedRunErr: `template not found: `,
+		},
+
+		"include statement - hidden files excluded from dynamic": {
+			sources: fstest.Files{
+				"index.txt":    `{% var name = ".hidden.txt" %}{% include name %}`,
+				".hidden.txt":  `HIDDEN`,
+			},
+			expectedRunErr: `template not found: .hidden.txt`,
+		},
+
+		"include statement - files in hidden directories excluded": {
+			sources: fstest.Files{
+				"index.txt":            `{% var name = ".secret/file.txt" %}{% include name %}`,
+				".secret/file.txt":     `SECRET`,
+			},
+			expectedRunErr: `template not found: .secret/file.txt`,
+		},
 	}
 
 	for name, cas := range templateMultiFileCases {
@@ -3437,8 +3511,19 @@ func TestMultiFileTemplate(t *testing.T) {
 			}
 			w := &bytes.Buffer{}
 			err = template.Run(w, cas.vars, &scriggo.RunOptions{Print: printFunc(w)})
-			if err != nil {
-				t.Fatalf("run error: %s", err)
+			switch {
+			case err == nil && cas.expectedRunErr == "":
+				// Ok, no run errors expected: continue with output check.
+			case err != nil && cas.expectedRunErr == "":
+				t.Fatalf("unexpected run error: %s", err)
+			case err == nil && cas.expectedRunErr != "":
+				t.Fatalf("expected run error %q but no errors have been returned by Run", cas.expectedRunErr)
+			case err != nil && cas.expectedRunErr != "":
+				if strings.Contains(err.Error(), cas.expectedRunErr) {
+					// Ok, the error returned by Run contains the expected error.
+					return // this test is done.
+				}
+				t.Fatalf("expected run error %q, got %q", cas.expectedRunErr, err)
 			}
 			if cas.expectedOut != w.String() {
 				t.Fatalf("expecting %q, got %q", cas.expectedOut, w.String())

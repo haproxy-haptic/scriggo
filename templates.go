@@ -41,10 +41,11 @@ type Converter func(src []byte, out io.Writer) error
 
 // Template is a template compiled with the BuildTemplate function.
 type Template struct {
-	fn      *runtime.Function
-	typeof  runtime.TypeOfFunc
-	globals []compiler.Global
-	conv    runtime.Converter
+	fn            *runtime.Function
+	typeof        runtime.TypeOfFunc
+	globals       []compiler.Global
+	conv          runtime.Converter
+	dynamicMacros map[string]*runtime.Function
 }
 
 // FormatFS is the interface implemented by a file system that can determine
@@ -115,7 +116,7 @@ func BuildTemplate(fsys fs.FS, name string, options *BuildOptions) (*Template, e
 		}
 		return nil, err
 	}
-	return &Template{fn: code.Main, typeof: code.TypeOf, globals: code.Globals, conv: runtime.Converter(conv)}, nil
+	return &Template{fn: code.Main, typeof: code.TypeOf, globals: code.Globals, conv: runtime.Converter(conv), dynamicMacros: code.DynamicMacros}, nil
 }
 
 // Run runs the template and write the rendered code to out. vars contains
@@ -151,6 +152,9 @@ func (t *Template) Run(out io.Writer, vars map[string]interface{}, options *RunO
 		}
 	}
 	vm.SetRenderer(out, t.conv)
+	if t.dynamicMacros != nil {
+		vm.SetDynamicMacros(t.dynamicMacros)
+	}
 	err := vm.Run(t.fn, t.typeof, initGlobalVariables(t.globals, vars))
 	if err != nil {
 		if p, ok := err.(*runtime.PanicError); ok {

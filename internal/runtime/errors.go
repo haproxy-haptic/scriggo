@@ -120,6 +120,8 @@ func (vm *VM) convertPanic(msg interface{}) error {
 		return err
 	case outError:
 		return vm.newPanic(err)
+	case *PanicError:
+		return err
 	}
 	switch op := vm.fn.Body[vm.pc-1].Op; op {
 	case OpAddr, OpIndex, -OpIndex, OpIndexRef, -OpIndexRef, OpSetSlice, -OpSetSlice:

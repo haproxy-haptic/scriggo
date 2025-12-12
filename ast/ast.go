@@ -1174,11 +1174,14 @@ func (n *Render) String() string {
 
 // Include node represents an "include <path>" statement.
 // It's similar to Render but uses statement syntax instead of expression syntax.
+// Include supports both static paths (string literals, resolved at compile time)
+// and dynamic paths (expressions, resolved at runtime).
 type Include struct {
-	*Position        // position in the source.
-	Path      string // path of the file to include.
-	Format    Format // format of the included content.
-	Tree      *Tree  // expanded tree of <path>.
+	*Position         // position in the source.
+	Path      string  // path of the file to include (for static includes).
+	PathExpr  Expression // path expression (for dynamic includes, nil if static).
+	Format    Format  // format of the included content.
+	Tree      *Tree   // expanded tree of <path> (only for static includes).
 
 	// IR holds the internal representation. The type checker transforms the
 	// 'include' statement into a macro call, where the macro body is the
@@ -1192,13 +1195,26 @@ type Include struct {
 	}
 }
 
-// NewInclude returns a new [Include] node.
+// NewInclude returns a new static [Include] node with a string path.
 func NewInclude(pos *Position, path string, format Format) *Include {
 	return &Include{Position: pos, Path: path, Format: format}
 }
 
+// NewDynamicInclude returns a new dynamic [Include] node with an expression path.
+func NewDynamicInclude(pos *Position, pathExpr Expression, format Format) *Include {
+	return &Include{Position: pos, PathExpr: pathExpr, Format: format}
+}
+
+// IsDynamic returns true if this is a dynamic include (path computed at runtime).
+func (n *Include) IsDynamic() bool {
+	return n.PathExpr != nil
+}
+
 // String returns the string representation of n.
 func (n *Include) String() string {
+	if n.PathExpr != nil {
+		return "include <dynamic>"
+	}
 	return "include " + strconv.Quote(n.Path)
 }
 

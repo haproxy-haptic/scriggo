@@ -76,6 +76,46 @@ func (vm *VM) runRecoverable() (err error) {
 	return nil
 }
 
+// executeMacro sets up and executes a macro function.
+// This is shared by OpCallMacro and OpDynamicInclude to avoid code duplication.
+// The format parameter specifies the expected output format (or ReturnString for string return).
+func (vm *VM) executeMacro(fn *Function, format int8) {
+	call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc + 1}
+	off := vm.fn.Body[vm.pc]
+	vm.fp[0] += Addr(off.Op)
+	if vm.fp[0]+Addr(fn.NumReg[0]) > vm.st[0] {
+		vm.moreIntStack()
+	}
+	vm.fp[1] += Addr(off.A)
+	if vm.fp[1]+Addr(fn.NumReg[1]) > vm.st[1] {
+		vm.moreFloatStack()
+	}
+	vm.fp[2] += Addr(off.B)
+	if vm.fp[2]+Addr(fn.NumReg[2]) > vm.st[2] {
+		vm.moreStringStack()
+	}
+	vm.fp[3] += Addr(off.C)
+	if vm.fp[3]+Addr(fn.NumReg[3]) > vm.st[3] {
+		vm.moreGeneralStack()
+	}
+	if format == ReturnString {
+		vm.renderer = newRenderer(&strings.Builder{})
+	} else if ast.Format(format) != fn.Format {
+		if fn.Format == ast.FormatMarkdown && ast.Format(format) == ast.FormatHTML {
+			if vm.env.conv == nil {
+				panic(vm.newPanic(errors.New("no Markdown converter available")))
+			}
+			vm.renderer = newRenderer(&bytes.Buffer{})
+		} else {
+			vm.renderer = newRenderer(vm.renderer.out)
+		}
+	}
+	vm.fn = fn
+	vm.vars = vm.env.globals
+	vm.calls = append(vm.calls, call)
+	vm.pc = 0
+}
+
 func (vm *VM) run() (Addr, bool) {
 
 	var hasDefaultCase bool
@@ -310,41 +350,18 @@ func (vm *VM) run() (Addr, bool) {
 				vm.pc = 0
 			}
 		case OpCallMacro:
-			call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc + 1}
 			fn := vm.fn.Functions[uint8(a)]
-			off := vm.fn.Body[vm.pc]
-			vm.fp[0] += Addr(off.Op)
-			if vm.fp[0]+Addr(fn.NumReg[0]) > vm.st[0] {
-				vm.moreIntStack()
+			vm.executeMacro(fn, b)
+		case OpDynamicInclude:
+			// Dynamic include - looks up macro by path at runtime.
+			// a: string register containing the template path
+			// b: format (same as OpCallMacro)
+			path := vm.string(a)
+			fn, ok := vm.env.dynamicMacros[path]
+			if !ok {
+				panic(vm.newPanic(errors.New("template not found: " + path)))
 			}
-			vm.fp[1] += Addr(off.A)
-			if vm.fp[1]+Addr(fn.NumReg[1]) > vm.st[1] {
-				vm.moreFloatStack()
-			}
-			vm.fp[2] += Addr(off.B)
-			if vm.fp[2]+Addr(fn.NumReg[2]) > vm.st[2] {
-				vm.moreStringStack()
-			}
-			vm.fp[3] += Addr(off.C)
-			if vm.fp[3]+Addr(fn.NumReg[3]) > vm.st[3] {
-				vm.moreGeneralStack()
-			}
-			if b == ReturnString {
-				vm.renderer = newRenderer(&strings.Builder{})
-			} else if ast.Format(b) != fn.Format {
-				if fn.Format == ast.FormatMarkdown && ast.Format(b) == ast.FormatHTML {
-					if vm.env.conv == nil {
-						panic(&fatalError{env: vm.env, msg: errors.New("no Markdown convert available")})
-					}
-					vm.renderer = newRenderer(&bytes.Buffer{})
-				} else {
-					vm.renderer = newRenderer(vm.renderer.out)
-				}
-			}
-			vm.fn = fn
-			vm.vars = vm.env.globals
-			vm.calls = append(vm.calls, call)
-			vm.pc = 0
+			vm.executeMacro(fn, b)
 		case OpCallNative:
 			fn := vm.fn.NativeFunctions[uint8(a)]
 			off := vm.fn.Body[vm.pc]

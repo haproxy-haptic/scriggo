@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io/fs"
 	"reflect"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -99,6 +100,58 @@ func (e *GoModError) Position() ast.Position {
 	return e.pos
 }
 
+// isHiddenPath returns true if any component of the path starts with '.'.
+// This handles both hidden files (e.g., ".hidden") and files in hidden directories
+// (e.g., ".hidden/file.txt" or "dir/.secret/file.txt").
+func isHiddenPath(path string) bool {
+	for _, part := range strings.Split(path, "/") {
+		if len(part) > 0 && part[0] == '.' {
+			return true
+		}
+	}
+	return false
+}
+
+// compileTemplateFile compiles a single template file and returns the compiled code.
+// This is a helper that contains the common compilation logic used by BuildTemplate
+// and buildDynamicMacros to avoid code duplication.
+func compileTemplateFile(fsys fs.FS, path string, opts Options) (*Code, error) {
+	// Parse the source code.
+	tree, err := ParseTemplate(fsys, path, opts.NoParseShortShowStmt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Transform the tree if transformer is provided.
+	if opts.TreeTransformer != nil {
+		if err := opts.TreeTransformer(tree); err != nil {
+			return nil, err
+		}
+	}
+
+	// Type check the tree.
+	checkerOpts := checkerOptions{
+		allowGoStmt: opts.AllowGoStmt,
+		formatTypes: opts.FormatTypes,
+		globals:     opts.Globals,
+		mdConverter: opts.MDConverter,
+		mod:         templateMod,
+	}
+	tci, err := typecheck(tree, opts.Importer, checkerOpts)
+	if err != nil {
+		return nil, err
+	}
+	typeInfos := map[ast.Node]*typeInfo{}
+	for _, pkgInfos := range tci {
+		for node, ti := range pkgInfos.TypeInfos {
+			typeInfos[node] = ti
+		}
+	}
+
+	// Emit the code.
+	return emitTemplate(tree, typeInfos, tci["main"].IndirectVars, opts.FormatTypes)
+}
+
 // BuildProgram builds a Go program from the package in the root of fsys with
 // the given options, importing the imported packages from packages.
 //
@@ -152,47 +205,64 @@ func BuildProgram(fsys fs.FS, opts Options) (*Code, error) {
 // Format method, otherwise it depends on the extension of the file name.
 // Any error related to the compilation itself is returned as a CompilerError.
 func BuildTemplate(fsys fs.FS, name string, opts Options) (*Code, error) {
-
-	var tree *ast.Tree
-
-	// Parse the source code.
-	var err error
-	tree, err = ParseTemplate(fsys, name, opts.NoParseShortShowStmt)
+	// Compile the main template.
+	code, err := compileTemplateFile(fsys, name, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	// Transform the tree.
-	if opts.TreeTransformer != nil {
-		err := opts.TreeTransformer(tree)
+	// Compile all other templates in the filesystem for dynamic includes.
+	// This allows {% include variable %} to work at runtime.
+	code.DynamicMacros, err = buildDynamicMacros(fsys, name, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	return code, nil
+}
+
+// buildDynamicMacros compiles all templates in the filesystem (except the main template)
+// and returns a map of path -> compiled function for use with dynamic includes.
+func buildDynamicMacros(fsys fs.FS, mainName string, opts Options) (map[string]*runtime.Function, error) {
+	dynamicMacros := make(map[string]*runtime.Function)
+
+	// Walk the filesystem to find all template files
+	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil, err
+			return err
 		}
-	}
+		if d.IsDir() {
+			return nil
+		}
 
-	// Type check the tree.
-	checkerOpts := checkerOptions{
-		allowGoStmt: opts.AllowGoStmt,
-		formatTypes: opts.FormatTypes,
-		globals:     opts.Globals,
-		mdConverter: opts.MDConverter,
-		mod:         templateMod,
-	}
-	tci, err := typecheck(tree, opts.Importer, checkerOpts)
+		// Skip the main template (already compiled)
+		if path == mainName {
+			return nil
+		}
+
+		// Skip hidden files and files in hidden directories
+		if isHiddenPath(path) {
+			return nil
+		}
+
+		// Try to compile this file as a template.
+		// If it fails (not a valid template), silently skip it.
+		code, err := compileTemplateFile(fsys, path, opts)
+		if err != nil {
+			// Skip files that fail to compile (not valid templates)
+			return nil
+		}
+
+		// Store the compiled function
+		dynamicMacros[path] = code.Main
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
-	typeInfos := map[ast.Node]*typeInfo{}
-	for _, pkgInfos := range tci {
-		for node, ti := range pkgInfos.TypeInfos {
-			typeInfos[node] = ti
-		}
-	}
 
-	// Emit the code.
-	code, err := emitTemplate(tree, typeInfos, tci["main"].IndirectVars, opts.FormatTypes)
-
-	return code, err
+	return dynamicMacros, nil
 }
 
 // CheckingError records a type checking error with the path and the position
@@ -244,6 +314,9 @@ type Code struct {
 	Main *runtime.Function
 	// TypeOf returns the type of a value, including new types defined in code.
 	TypeOf runtime.TypeOfFunc
+	// DynamicMacros maps template paths to compiled functions for dynamic includes.
+	// This map is populated at compile time and used at runtime for {% include variable %}.
+	DynamicMacros map[string]*runtime.Function
 }
 
 // emitProgram emits the code for a program given its ast node, the type info

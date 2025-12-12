@@ -100,12 +100,22 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 			}
 
 		case *ast.Include:
-			// include "path" - Jinja2-style include statement.
-			// Similar to render but as a statement, not an expression.
-			em.fb.enterStack()
-			em.emitNodes([]ast.Node{node.IR.Import})
-			em.emitCallNode(node.IR.Call, false, false, ast.Format(node.Format))
-			em.fb.exitStack()
+			// include "path" or include <expr> - Jinja2-style include statement.
+			if node.IsDynamic() {
+				// Dynamic include - path computed at runtime.
+				// Emit the path expression into a string register.
+				em.fb.enterStack()
+				pathReg := em.emitExpr(node.PathExpr, stringType)
+				stackShift := em.fb.currentStackShift()
+				em.fb.emitDynamicInclude(pathReg, stackShift, node.Pos(), ast.Format(node.Format))
+				em.fb.exitStack()
+			} else {
+				// Static include - similar to render but as a statement, not an expression.
+				em.fb.enterStack()
+				em.emitNodes([]ast.Node{node.IR.Import})
+				em.emitCallNode(node.IR.Call, false, false, ast.Format(node.Format))
+				em.fb.exitStack()
+			}
 
 		case *ast.Fallthrough:
 			// Nothing to do: fallthrough nodes are handled by method

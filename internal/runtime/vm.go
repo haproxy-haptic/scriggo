@@ -201,6 +201,14 @@ func (vm *VM) SetPrint(p PrintFunc) {
 	vm.env.print = p
 }
 
+// SetDynamicMacros sets the map of dynamically-includable templates.
+// This map is used by OpDynamicInclude to look up template functions by path.
+//
+// SetDynamicMacros must not be called after vm has been started.
+func (vm *VM) SetDynamicMacros(macros map[string]*Function) {
+	vm.env.dynamicMacros = macros
+}
+
 // Stack returns the current stack trace.
 func (vm *VM) Stack(buf []byte, all bool) int {
 	// TODO(marco): implement all == true
@@ -1068,6 +1076,7 @@ const (
 	OpCallFunc
 	OpCallIndirect
 	OpCallMacro
+	OpDynamicInclude // Dynamic include - looks up macro by path at runtime
 	OpCallNative
 
 	OpCap
