@@ -479,7 +479,7 @@ LABEL:
 	case *ast.Tree:
 		if p.imported || p.hasExtend {
 			switch tok.typ {
-			case tokenExtends, tokenImport, tokenMacro, tokenVar, tokenConst, tokenType:
+			case tokenExtends, tokenImport, tokenInclude, tokenMacro, tokenVar, tokenConst, tokenType:
 			default:
 				return p.parseDistFreeMacro(tok, end)
 			}
@@ -493,7 +493,7 @@ LABEL:
 	case *ast.Statements:
 		if (p.imported || p.hasExtend) && len(p.ancestors) == 2 {
 			switch tok.typ {
-			case tokenExtends, tokenImport, tokenMacro, tokenVar, tokenConst, tokenType:
+			case tokenExtends, tokenImport, tokenInclude, tokenMacro, tokenVar, tokenConst, tokenType:
 			default:
 				panic(syntaxError(tok.pos, "unexpected %s, expecting declaration statement", tok))
 			}
@@ -1030,6 +1030,28 @@ LABEL:
 		p.unexpanded = append(p.unexpanded, node)
 		p.addNode(node)
 		p.hasExtend = true
+		tok = p.next()
+		tok = p.parseEnd(tok, tokenSemicolon, end)
+		return tok
+
+	// include "path"
+	case tokenInclude:
+		pos := tok.pos
+		if tok.ctx != ast.Context(p.format) {
+			panic(syntaxError(tok.pos, "include not in %s content", ast.Context(p.format)))
+		}
+		tok = p.next()
+		if tok.typ != tokenInterpretedString && tok.typ != tokenRawString {
+			panic(syntaxError(tok.pos, "unexpected %s, expecting string", tok))
+		}
+		path := unquoteString(tok.txt)
+		if !ValidTemplatePath(path) {
+			panic(syntaxError(tok.pos, "invalid include path %q", path))
+		}
+		pos.End = tok.pos.End
+		node := ast.NewInclude(pos, path, p.format)
+		p.unexpanded = append(p.unexpanded, node)
+		p.addNode(node)
 		tok = p.next()
 		tok = p.parseEnd(tok, tokenSemicolon, end)
 		return tok

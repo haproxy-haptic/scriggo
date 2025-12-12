@@ -3310,6 +3310,82 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 			expectedOut: "Hello",
 		},
+
+		// Tests for {% include "path" %} statement (Jinja2-compliant syntax)
+		"include statement - basic": {
+			sources: fstest.Files{
+				"index.txt":   `before {% include "partial.txt" %} after`,
+				"partial.txt": `INCLUDED`,
+			},
+			expectedOut: "before INCLUDED after",
+		},
+
+		"include statement - with variables": {
+			sources: fstest.Files{
+				"index.txt":   `{% var x = "hello" %}{% include "partial.txt" %} end`,
+				"partial.txt": `{{ x }}`,
+			},
+			expectedBuildErr: "undefined: x", // Variables are not shared with included file
+		},
+
+		"include statement - nested": {
+			sources: fstest.Files{
+				"index.txt": `{% include "a.txt" %}`,
+				"a.txt":     `A{% include "b.txt" %}A`,
+				"b.txt":     `B`,
+			},
+			expectedOut: "ABA",
+		},
+
+		"include statement - without extension": {
+			sources: fstest.FormatFiles{
+				Files: fstest.Files{
+					"index":   `{% include "partial" %}`,
+					"partial": `INCLUDED`,
+				},
+				Fmt: ast.FormatText,
+			},
+			entryPoint:  "index",
+			expectedOut: "INCLUDED",
+		},
+
+		"include statement - file not found": {
+			sources: fstest.Files{
+				"index.txt": `{% include "missing.txt" %}`,
+			},
+			expectedBuildErr: `include path "missing.txt" does not exist`,
+		},
+
+		"include statement - multiple includes of same file": {
+			sources: fstest.Files{
+				"index.txt":   `{% include "partial.txt" %}{% include "partial.txt" %}`,
+				"partial.txt": `X`,
+			},
+			expectedOut: "XX",
+		},
+
+		"include statement - in subdirectory": {
+			sources: fstest.Files{
+				"index.txt":          `{% include "dir/partial.txt" %}`,
+				"dir/partial.txt":    `INCLUDED`,
+			},
+			expectedOut: "INCLUDED",
+		},
+
+		"include statement - invalid path": {
+			sources: fstest.Files{
+				"index.txt": `{% include "" %}`,
+			},
+			expectedBuildErr: "invalid include path",
+		},
+
+		"include statement - with macro definition": {
+			sources: fstest.Files{
+				"index.txt":   `{% include "partial.txt" %}`,
+				"partial.txt": `{% macro M %}hello{% end %}{{ M() }}`,
+			},
+			expectedOut: "hello",
+		},
 	}
 
 	for name, cas := range templateMultiFileCases {

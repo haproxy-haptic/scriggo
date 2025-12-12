@@ -1172,6 +1172,36 @@ func (n *Render) String() string {
 	return "render " + strconv.Quote(n.Path)
 }
 
+// Include node represents an "include <path>" statement.
+// It's similar to Render but uses statement syntax instead of expression syntax.
+type Include struct {
+	*Position        // position in the source.
+	Path      string // path of the file to include.
+	Format    Format // format of the included content.
+	Tree      *Tree  // expanded tree of <path>.
+
+	// IR holds the internal representation. The type checker transforms the
+	// 'include' statement into a macro call, where the macro body is the
+	// included file.
+	IR struct {
+		// Import is the 'import' declaration that imports the dummy file
+		// declaring the dummy macro.
+		Import *Import
+		// Call is the call to the dummy macro.
+		Call *Call
+	}
+}
+
+// NewInclude returns a new [Include] node.
+func NewInclude(pos *Position, path string, format Format) *Include {
+	return &Include{Position: pos, Path: path, Format: format}
+}
+
+// String returns the string representation of n.
+func (n *Include) String() string {
+	return "include " + strconv.Quote(n.Path)
+}
+
 // Return node represents a "return" statement.
 type Return struct {
 	*Position
