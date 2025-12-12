@@ -689,6 +689,7 @@ type aStruct struct {
 type VariadicMethoder interface {
 	Join(args ...string) string
 	JoinAny(args ...interface{}) string
+	ArgCount(args ...interface{}) int
 }
 
 // Concrete implementation
@@ -704,6 +705,10 @@ func (v variadicImpl) JoinAny(args ...interface{}) string {
 		strs[i] = fmt.Sprint(a)
 	}
 	return strings.Join(strs, ",")
+}
+
+func (v variadicImpl) ArgCount(args ...interface{}) int {
+	return len(args)
 }
 
 func TestVariadicInterfaceMethodCalls(t *testing.T) {
@@ -741,6 +746,53 @@ func TestVariadicInterfaceMethodCalls(t *testing.T) {
 
 			var buf bytes.Buffer
 			err = template.Run(&buf, nil, nil)
+			if err != nil {
+				t.Fatalf("run error: %v", err)
+			}
+
+			if got := buf.String(); got != tc.expected {
+				t.Errorf("got %q, want %q", got, tc.expected)
+			}
+		})
+	}
+}
+
+// TestVariadicConcreteMethodCalls tests the pattern where a global is declared
+// as a nil pointer to a concrete type at compile time and assigned via vars at
+// runtime. This triggers the methodCallConcrete code path.
+func TestVariadicConcreteMethodCalls(t *testing.T) {
+	cases := []struct {
+		name     string
+		src      string
+		expected string
+	}{
+		{"argcount zero", `{{ v.ArgCount() }}`, "0"},
+		{"argcount one", `{{ v.ArgCount("a") }}`, "1"},
+		{"argcount two", `{{ v.ArgCount("a", "b") }}`, "2"},
+		{"argcount three", `{{ v.ArgCount("a", "b", "c") }}`, "3"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fsys := fstest.Files{"test.txt": tc.src}
+
+			// Declare as nil pointer to concrete type at compile time
+			opts := &scriggo.BuildOptions{
+				Globals: native.Declarations{
+					"v": (*variadicImpl)(nil),
+				},
+			}
+
+			template, err := scriggo.BuildTemplate(fsys, "test.txt", opts)
+			if err != nil {
+				t.Fatalf("build error: %v", err)
+			}
+
+			var buf bytes.Buffer
+			// Pass actual value at runtime via vars
+			err = template.Run(&buf, map[string]interface{}{
+				"v": &variadicImpl{},
+			}, nil)
 			if err != nil {
 				t.Fatalf("run error: %v", err)
 			}
