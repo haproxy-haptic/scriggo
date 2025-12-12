@@ -53,7 +53,7 @@
 //		"unmarshalYAML":     builtin.UnmarshalYAML,
 //
 //		// filters
-//		"default": builtin.Default,
+//		"fallback": builtin.Fallback,
 //
 //		// html
 //		"htmlEscape": builtin.HtmlEscape,
@@ -277,20 +277,20 @@ func Date(year, month, day, hour, min, sec, nsec int, location string) (Time, er
 	return NewTime(time.Date(year, time.Month(month), day, hour, min, sec, nsec, loc)), nil
 }
 
-// Default returns value if it is not a zero value, otherwise returns
-// defaultValue. A zero value includes nil, false, 0, empty string, and empty
+// Fallback returns value if it is not a zero value, otherwise returns
+// fallbackValue. A zero value includes nil, false, 0, empty string, and empty
 // slices/maps/channels.
 //
 // This function is useful as a filter with the pipe operator:
 //
-//	{{ name | default("anonymous") }}
-func Default(value, defaultValue any) any {
+//	{{ name | fallback("anonymous") }}
+func Fallback(value, fallbackValue any) any {
 	if value == nil {
-		return defaultValue
+		return fallbackValue
 	}
 	v := reflect.ValueOf(value)
 	if v.IsZero() {
-		return defaultValue
+		return fallbackValue
 	}
 	return value
 }
