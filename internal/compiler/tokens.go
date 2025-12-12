@@ -236,13 +236,15 @@ func (tt tokenTyp) String() string {
 
 // Information about a token to return.
 type token struct {
-	typ tokenTyp      // type
-	pos *ast.Position // position in the buffer
-	txt []byte        // token text
-	ctx ast.Context   // context
-	tag string        // tag name
-	att string        // attribute
-	lin int           // line of the lexer when the token was emitted
+	typ       tokenTyp      // type
+	pos       *ast.Position // position in the buffer
+	txt       []byte        // token text
+	ctx       ast.Context   // context
+	tag       string        // tag name
+	att       string        // attribute
+	lin       int           // line of the lexer when the token was emitted
+	trimLeft  bool          // true for {%- or {{- or {#- (Jinja2 whitespace control)
+	trimRight bool          // true for -%} or -}} or -#} (Jinja2 whitespace control)
 }
 
 // String returns the string that represents the token.

@@ -135,6 +135,13 @@ type parsing struct {
 
 	// Unexpanded Extends, Import and Render nodes.
 	unexpanded []ast.Node
+
+	// Jinja2-style whitespace control:
+	// lastText tracks the most recently added Text node for trimLeft handling.
+	lastText *ast.Text
+	// pendingTrimRight is set when -%} or -}} is seen; the next Text node
+	// should have all leading whitespace trimmed.
+	pendingTrimRight bool
 }
 
 // addToAncestors adds node to the ancestors.
@@ -171,6 +178,13 @@ func (p *parsing) next() token {
 			panic("next called after EOF")
 		}
 		panic(p.lex.err)
+	}
+	// Check for Jinja2-style trimRight on end tokens (-%}, -}}, -%%})
+	if tok.trimRight {
+		switch tok.typ {
+		case tokenEndStatement, tokenEndStatements, tokenRightBraces:
+			p.pendingTrimRight = true
+		}
 	}
 	return tok
 }
@@ -340,17 +354,32 @@ func ParseTemplateSource(src []byte, format ast.Format, imported, noParseShow bo
 
 		// Text
 		case tokenText:
+			// Apply Jinja2-style trimRight from previous -%} or -}}
+			if p.pendingTrimRight {
+				trimAllLeading(text)
+				p.pendingTrimRight = false
+			}
 			p.addNode(text)
+			p.lastText = text // Track for trimLeft handling
 			tok = p.next()
 
 		// {%
 		case tokenStartStatement:
+			// Apply Jinja2-style trimLeft from {%-
+			if tok.trimLeft {
+				trimAllTrailing(p.lastText)
+			}
 			numTokenInLine++
 			tok = p.next()
 			tok = p.parse(tok, tokenEndStatement)
+			// Note: trimRight for -%} is handled in next() when tokenEndStatement is seen
 
 		// {%%
 		case tokenStartStatements:
+			// Apply Jinja2-style trimLeft from {%%-
+			if tok.trimLeft {
+				trimAllTrailing(p.lastText)
+			}
 			numTokenInLine++
 			pos := tok.pos
 			var statements = ast.NewStatements(pos, nil)
@@ -368,9 +397,14 @@ func ParseTemplateSource(src []byte, format ast.Format, imported, noParseShow bo
 			pos.End = tok.pos.End
 			p.removeLastAncestor()
 			tok = p.next()
+			// Note: trimRight for -%%} is handled in next() when tokenEndStatements is seen
 
 		// {{
 		case tokenLeftBraces:
+			// Apply Jinja2-style trimLeft from {{-
+			if tok.trimLeft {
+				trimAllTrailing(p.lastText)
+			}
 			pos := tok.pos
 			if len(p.ancestors) == 1 && (p.imported || p.hasExtend) {
 				panic(syntaxError(pos, "unexpected %s, expecting declaration statement", tok))
@@ -391,6 +425,7 @@ func ParseTemplateSource(src []byte, format ast.Format, imported, noParseShow bo
 				p.cutSpacesToken = true
 			}
 			tok = p.next()
+			// Note: trimRight for -}} is handled in next() when tokenRightBraces is seen
 
 		// StartURL
 		case tokenStartURL:
@@ -407,10 +442,18 @@ func ParseTemplateSource(src []byte, format ast.Format, imported, noParseShow bo
 
 		// comment
 		case tokenComment:
+			// Apply Jinja2-style trimLeft from {#-
+			if tok.trimLeft {
+				trimAllTrailing(p.lastText)
+			}
 			numTokenInLine++
 			node := ast.NewComment(tok.pos, string(tok.txt[2:len(tok.txt)-2]))
 			p.addNode(node)
 			p.cutSpacesToken = true
+			// Apply Jinja2-style trimRight from -#}
+			if tok.trimRight {
+				p.pendingTrimRight = true
+			}
 			tok = p.next()
 
 		default:
@@ -2001,9 +2044,43 @@ func cutSpaces(first, last *ast.Text) {
 				return
 			}
 		}
-		last.Cut.Left = lastCut
+		// Only set if not already trimmed by explicit Jinja2-style markers
+		if last.Cut.Left == 0 {
+			last.Cut.Left = lastCut
+		}
 	}
 	if first != nil {
-		first.Cut.Right = len(first.Text) - firstCut
+		// Only set if not already trimmed by explicit Jinja2-style markers
+		if first.Cut.Right == 0 {
+			first.Cut.Right = len(first.Text) - firstCut
+		}
 	}
+}
+
+// trimAllTrailing trims ALL trailing whitespace from a Text node.
+// Used for Jinja2-style {%- trimLeft handling, trimming across line boundaries.
+func trimAllTrailing(text *ast.Text) {
+	if text == nil {
+		return
+	}
+	txt := text.Text
+	i := len(txt)
+	for i > 0 && isWhitespace(txt[i-1]) {
+		i--
+	}
+	text.Cut.Right = len(txt) - i
+}
+
+// trimAllLeading trims ALL leading whitespace from a Text node.
+// Used for Jinja2-style -%} trimRight handling, trimming across line boundaries.
+func trimAllLeading(text *ast.Text) {
+	if text == nil {
+		return
+	}
+	txt := text.Text
+	i := 0
+	for i < len(txt) && isWhitespace(txt[i]) {
+		i++
+	}
+	text.Cut.Left = i
 }

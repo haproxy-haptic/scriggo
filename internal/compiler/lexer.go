@@ -95,6 +95,10 @@ type lexer struct {
 	err            error      // error, reports whether there was an error
 	templateSyntax bool       // support template syntax.
 	noParseShow    bool       // do not parse the short show statement.
+
+	// Jinja2-style whitespace control flags (set before emit, reset after)
+	nextTrimLeft  bool // set to true when {%- or {{- or {#- is detected
+	nextTrimRight bool // set to true when -%} or -}} or -#} is detected
 }
 
 // newline is called when the lexer encounters a new line.
@@ -150,12 +154,17 @@ func (l *lexer) emitAtLineColumn(line, column int, typ tokenTyp, length int) {
 			Start:  start,
 			End:    end,
 		},
-		txt: txt,
-		lin: l.line,
-		ctx: ctx,
-		tag: l.tag.name,
-		att: l.tag.attr,
+		txt:       txt,
+		lin:       l.line,
+		ctx:       ctx,
+		tag:       l.tag.name,
+		att:       l.tag.attr,
+		trimLeft:  l.nextTrimLeft,
+		trimRight: l.nextTrimRight,
 	}
+	// Reset trim flags after emission
+	l.nextTrimLeft = false
+	l.nextTrimRight = false
 	if l.templateSyntax {
 		switch typ {
 		case tokenRaw:
@@ -826,10 +835,42 @@ func isEndScript(s []byte) bool {
 		(s[5] == 'i' || s[5] == 'I') && (s[6] == 'p' || s[6] == 'P') && (s[7] == 't' || s[7] == 'T')
 }
 
-// lexShow emits tokens knowing that src starts with '{{'.
+// isWhitespace reports whether c is ASCII whitespace (space, tab, newline, carriage return).
+func isWhitespace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// checkOpenTrimMarker checks if there's a Jinja2-style trim marker '-' at the given offset,
+// followed by whitespace or the allowedChar. This distinguishes trim markers like {{- x }}
+// from negative numbers like {{-5}}.
+func (l *lexer) checkOpenTrimMarker(offset int, allowedChar byte) bool {
+	if len(l.src) <= offset || l.src[offset] != '-' {
+		return false
+	}
+	if len(l.src) <= offset+1 {
+		return true // at end of input
+	}
+	c := l.src[offset+1]
+	return isWhitespace(c) || c == allowedChar
+}
+
+// consumeTrimRight handles the '-' in closing trim markers (-%}, -}}, -%%}).
+// It sets the trim flag and skips the '-' character.
+func (l *lexer) consumeTrimRight() {
+	l.nextTrimRight = true
+	l.src = l.src[1:]
+	l.column++
+}
+
+// lexShow emits tokens knowing that src starts with '{{' or '{{-'.
 func (l *lexer) lexShow() error {
-	l.emit(tokenLeftBraces, 2)
-	l.column += 2
+	startLen := 2 // length of {{
+	if l.checkOpenTrimMarker(2, '}') {
+		l.nextTrimLeft = true
+		startLen = 3 // length of {{-
+	}
+	l.emit(tokenLeftBraces, startLen)
+	l.column += startLen
 	err := l.lexCode(tokenRightBraces)
 	if err != nil {
 		return err
@@ -840,10 +881,15 @@ func (l *lexer) lexShow() error {
 }
 
 // lexStatement emits the tokens of a statement knowing that src starts with
-// {%.
+// {% or {%-.
 func (l *lexer) lexStatement() error {
-	l.emit(tokenStartStatement, 2)
-	l.column += 2
+	startLen := 2 // length of {%
+	if l.checkOpenTrimMarker(2, '%') {
+		l.nextTrimLeft = true
+		startLen = 3 // length of {%-
+	}
+	l.emit(tokenStartStatement, startLen)
+	l.column += startLen
 	err := l.lexCode(tokenEndStatement)
 	if err != nil {
 		return err
@@ -854,10 +900,15 @@ func (l *lexer) lexStatement() error {
 }
 
 // lexStatements emits the tokens for statements knowing that src starts with
-// {%%.
+// {%% or {%%-.
 func (l *lexer) lexStatements() error {
-	l.emit(tokenStartStatements, 3)
-	l.column += 3
+	startLen := 3 // length of {%%
+	if l.checkOpenTrimMarker(3, '%') {
+		l.nextTrimLeft = true
+		startLen = 4 // length of {%%-
+	}
+	l.emit(tokenStartStatements, startLen)
+	l.column += startLen
 	err := l.lexCode(tokenEndStatements)
 	if err != nil {
 		return err
@@ -867,10 +918,17 @@ func (l *lexer) lexStatements() error {
 	return nil
 }
 
-// lexComment emits a comment token knowing that src starts with '{#'.
+// lexComment emits a comment token knowing that src starts with '{#' or '{#-'.
 func (l *lexer) lexComment() error {
+	// Check for Jinja2-style trim marker: {#-
+	startOffset := 2 // position after {#
+	if len(l.src) > 2 && l.src[2] == '-' {
+		l.nextTrimLeft = true
+		startOffset = 3 // position after {#-
+	}
+
 	nested := 0
-	p := 2
+	p := startOffset
 	for nested >= 0 {
 		i := bytes.IndexByte(l.src[p:], '#')
 		if i == -1 {
@@ -884,10 +942,17 @@ func (l *lexer) lexComment() error {
 		}
 		p += i + 1
 	}
+
+	// Check for Jinja2-style trim marker: -#} at the end
+	// p points past #}, so check if there's a - before #}
+	if p >= 3 && l.src[p-3] == '-' {
+		l.nextTrimRight = true
+	}
+
 	line := l.line
 	column := l.column
 	l.column += 4
-	for i := 2; i < p-2; i++ {
+	for i := startOffset; i < p-2; i++ {
 		if c := l.src[i]; c == '\n' {
 			l.newline()
 		} else if isStartChar(c) {
@@ -1012,6 +1077,22 @@ LOOP:
 					l.column += 2
 					endLineAsSemicolon = false
 					continue LOOP
+				case '%':
+					// Check for Jinja2-style trim marker: -%} or -%%}
+					if len(l.src) > 2 && l.src[2] == '}' {
+						l.consumeTrimRight()
+						continue LOOP
+					}
+					if len(l.src) > 3 && l.src[2] == '%' && l.src[3] == '}' {
+						l.consumeTrimRight()
+						continue LOOP
+					}
+				case '}':
+					// Check for Jinja2-style trim marker: -}}
+					if len(l.src) > 2 && l.src[2] == '}' {
+						l.consumeTrimRight()
+						continue LOOP
+					}
 				}
 			}
 			l.emit(tokenSubtraction, 1)
