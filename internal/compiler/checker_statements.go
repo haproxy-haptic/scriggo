@@ -1596,7 +1596,21 @@ func checkShowJSON(t reflect.Type, types []reflect.Type) error {
 
 // checkInclude checks the 'include' statement and transforms its internal
 // representation to a macro call, similar to how render expressions work.
+// For dynamic includes, it type checks the path expression but does not
+// transform it (dynamic includes are handled at runtime).
 func (tc *typechecker) checkInclude(include *ast.Include) {
+	// Handle dynamic includes (path computed at runtime)
+	if include.IsDynamic() {
+		// Type check the path expression and verify it evaluates to string
+		ti := tc.checkExpr(include.PathExpr)
+		if ti != nil && ti.Type != nil && ti.Type.Kind() != reflect.String {
+			panic(tc.errorf(include.PathExpr, "include path must be string, got %s", ti.Type))
+		}
+		// Dynamic includes are handled at runtime, no compile-time transformation
+		return
+	}
+
+	// Handle static includes (path known at compile time)
 	tree := include.Tree
 	if tree == nil {
 		return

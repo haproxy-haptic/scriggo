@@ -77,7 +77,11 @@ func (d *filesDir) ReadDir(n int) ([]fs.DirEntry, error) {
 	}
 	entries := make([]fs.DirEntry, len(names))
 	for i, name := range names {
-		entries[i] = &mapDirEntry{filesFileInfo{name: name}}
+		mode := fs.FileMode(0)
+		if hasDir[name] {
+			mode = fs.ModeDir
+		}
+		entries[i] = &mapDirEntry{filesFileInfo{name: name, mode: mode}}
 	}
 	return entries, nil
 }
