@@ -1,0 +1,36 @@
+stages:
+  - test
+
+variables:
+  GO_VERSION: "1.23"
+
+.go-cache:
+  variables:
+    GOPATH: $CI_PROJECT_DIR/.go
+  cache:
+    key: go-modules-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .go/pkg/mod/
+
+test-main:
+  stage: test
+  image: golang:${GO_VERSION}
+  extends: .go-cache
+  script:
+    - go mod download
+    - go test -race -v ./...
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+test-integration:
+  stage: test
+  image: golang:${GO_VERSION}
+  extends: .go-cache
+  script:
+    - cd test
+    - go mod download
+    - go test -race -v ./...
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
