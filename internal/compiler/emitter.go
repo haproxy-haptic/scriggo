@@ -630,8 +630,17 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 		numVar := runtime.NoVariadicArgs
 		if funTi.Type.IsVariadic() && !call.IsVariadic {
 			numArgs := len(call.Args)
-			if len(call.Args) == 1 {
-				if callArg, ok := call.Args[0].(*ast.Call); ok {
+			// For concrete method calls, receiver is prepended to args but
+			// funTi.Type doesn't include the receiver, so adjust numArgs.
+			if funTi.MethodType == methodCallConcrete {
+				numArgs--
+			}
+			if numArgs == 1 {
+				argIdx := 0
+				if funTi.MethodType == methodCallConcrete {
+					argIdx = 1 // Skip receiver to check actual first arg
+				}
+				if callArg, ok := call.Args[argIdx].(*ast.Call); ok {
 					if numOut, ok := em.numOut(callArg); ok {
 						numArgs = numOut
 					}
