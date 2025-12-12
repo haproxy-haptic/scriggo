@@ -586,14 +586,25 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 			callHasDots:   call.IsVariadic,
 		}
 		regs, types := em.prepareCallParameters(funTi.Type, call.Args, opts)
-		// TODO(Gianluca): handle variadic method calls.
+		numVar := runtime.NoVariadicArgs
+		if funTi.Type.IsVariadic() && !call.IsVariadic {
+			numArgs := len(call.Args)
+			if len(call.Args) == 1 {
+				if callArg, ok := call.Args[0].(*ast.Call); ok {
+					if numOut, ok := em.numOut(callArg); ok {
+						numArgs = numOut
+					}
+				}
+			}
+			numVar = numArgs - (funTi.Type.NumIn() - 1)
+		}
 		if goStmt {
 			em.fb.emitGo()
 		}
 		if deferStmt {
 			panic(internalError("not implemented"))
 		}
-		em.fb.emitCallIndirect(method, 0, stackShift, call.Pos(), funTi.Type, toFormat)
+		em.fb.emitCallIndirect(method, int8(numVar), stackShift, call.Pos(), funTi.Type, toFormat)
 		return regs, types
 	}
 

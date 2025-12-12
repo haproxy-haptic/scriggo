@@ -685,6 +685,73 @@ type aStruct struct {
 	C string
 }
 
+// Interface for testing variadic method calls
+type VariadicMethoder interface {
+	Join(args ...string) string
+	JoinAny(args ...interface{}) string
+}
+
+// Concrete implementation
+type variadicImpl struct{}
+
+func (v variadicImpl) Join(args ...string) string {
+	return strings.Join(args, ",")
+}
+
+func (v variadicImpl) JoinAny(args ...interface{}) string {
+	strs := make([]string, len(args))
+	for i, a := range args {
+		strs[i] = fmt.Sprint(a)
+	}
+	return strings.Join(strs, ",")
+}
+
+func TestVariadicInterfaceMethodCalls(t *testing.T) {
+	cases := []struct {
+		name     string
+		src      string
+		expected string
+	}{
+		{"zero args", `{{ v.Join() }}`, ""},
+		{"one arg", `{{ v.Join("a") }}`, "a"},
+		{"two args", `{{ v.Join("a", "b") }}`, "a,b"},
+		{"three args", `{{ v.Join("a", "b", "c") }}`, "a,b,c"},
+		{"interface zero args", `{{ v.JoinAny() }}`, ""},
+		{"interface one arg", `{{ v.JoinAny("a") }}`, "a"},
+		{"interface two args", `{{ v.JoinAny("a", "b") }}`, "a,b"},
+		{"interface mixed types", `{{ v.JoinAny("a", 1, true) }}`, "a,1,true"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Declare as interface type (triggers methodCallInterface path)
+			var v VariadicMethoder = variadicImpl{}
+
+			fsys := fstest.Files{"test.txt": tc.src}
+			opts := &scriggo.BuildOptions{
+				Globals: native.Declarations{
+					"v": &v,
+				},
+			}
+
+			template, err := scriggo.BuildTemplate(fsys, "test.txt", opts)
+			if err != nil {
+				t.Fatalf("build error: %v", err)
+			}
+
+			var buf bytes.Buffer
+			err = template.Run(&buf, nil, nil)
+			if err != nil {
+				t.Fatalf("run error: %v", err)
+			}
+
+			if got := buf.String(); got != tc.expected {
+				t.Errorf("got %q, want %q", got, tc.expected)
+			}
+		})
+	}
+}
+
 func TestVars(t *testing.T) {
 	var a int
 	var b int
