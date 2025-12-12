@@ -333,6 +333,20 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 // result in the register reg of type regType.
 func (em *emitter) emitBinaryOp(expr *ast.BinaryOperator, reg int8, regType reflect.Type) {
 
+	// Emit code for pipe expressions (template filter syntax).
+	// The type checker has already modified the Call's Args to prepend the
+	// left expression, so we just emit the Call directly.
+	if expr.Op == ast.OperatorPipe {
+		call := expr.Expr2.(*ast.Call)
+		em.fb.enterStack()
+		regs, types := em.emitCallNode(call, false, false, runtime.ReturnString)
+		if reg != 0 && len(regs) > 0 {
+			em.changeRegister(false, regs[0], reg, types[0], regType)
+		}
+		em.fb.exitStack()
+		return
+	}
+
 	var (
 		ti   = em.ti(expr)
 		typ  = ti.Type

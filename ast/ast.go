@@ -78,6 +78,7 @@ const (
 	OperatorExtendedAnd                        // and
 	OperatorExtendedOr                         // or
 	OperatorExtendedNot                        // not
+	OperatorPipe                               // | (template filter pipe)
 )
 
 // String returns the string representation of the operator type.
@@ -86,7 +87,7 @@ func (op OperatorType) String() string {
 	// compiler.internalOperatorNotZero.
 	return []string{"==", "!=", "<", "<=", ">", ">=", "!", "&", "|", "&&", "||",
 		"+", "-", "*", "/", "%", "^", "&^", "<<", ">>", "contains", "not contains",
-		"<-", "&", "*", "and", "or", "not", "", ""}[op]
+		"<-", "&", "*", "and", "or", "not", "|", "", ""}[op]
 }
 
 // AssignmentType represents a type of assignment.
@@ -477,6 +478,8 @@ func (n *BinaryOperator) Precedence() int {
 		return 2
 	case OperatorOr, OperatorExtendedOr:
 		return 1
+	case OperatorPipe:
+		return 0
 	}
 	panic("invalid operator type")
 }

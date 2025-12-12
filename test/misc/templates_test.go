@@ -804,6 +804,89 @@ func TestVariadicConcreteMethodCalls(t *testing.T) {
 	}
 }
 
+// TestPipeOperator tests the pipe operator for filter expressions.
+// The pipe operator transforms `expr | func(args...)` into `func(expr, args...)`.
+func TestPipeOperator(t *testing.T) {
+	cases := []struct {
+		name     string
+		src      string
+		globals  native.Declarations
+		expected string
+	}{
+		{
+			name:     "basic pipe",
+			src:      `{{ "hello" | upper() }}`,
+			globals:  native.Declarations{"upper": strings.ToUpper},
+			expected: "HELLO",
+		},
+		{
+			name: "pipe with additional args",
+			src:  `{{ "hello" | prefix(">>>") }}`,
+			globals: native.Declarations{
+				"prefix": func(s, p string) string { return p + s },
+			},
+			expected: ">>>hello",
+		},
+		{
+			name: "chained pipes",
+			src:  `{{ 5 | double() | toString() }}`,
+			globals: native.Declarations{
+				"double":   func(n int) int { return n * 2 },
+				"toString": func(n int) string { return fmt.Sprint(n) },
+			},
+			expected: "10",
+		},
+		{
+			name: "pipe with expression",
+			src:  `{{ 3 + 2 | double() }}`,
+			globals: native.Declarations{
+				"double": func(n int) int { return n * 2 },
+			},
+			expected: "10",
+		},
+		{
+			name: "pipe with method call",
+			src:  `{% s := "hello world" %}{{ s | len() }}`,
+			globals: native.Declarations{
+				"len": func(s string) int { return len(s) },
+			},
+			expected: "11",
+		},
+		{
+			name: "pipe with multiple additional args",
+			src:  `{{ "world" | surround("hello ", "!") }}`,
+			globals: native.Declarations{
+				"surround": func(s, prefix, suffix string) string { return prefix + s + suffix },
+			},
+			expected: "hello world!",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fsys := fstest.Files{"test.txt": tc.src}
+			opts := &scriggo.BuildOptions{
+				Globals: tc.globals,
+			}
+
+			template, err := scriggo.BuildTemplate(fsys, "test.txt", opts)
+			if err != nil {
+				t.Fatalf("build error: %v", err)
+			}
+
+			var buf bytes.Buffer
+			err = template.Run(&buf, nil, nil)
+			if err != nil {
+				t.Fatalf("run error: %v", err)
+			}
+
+			if got := buf.String(); got != tc.expected {
+				t.Errorf("got %q, want %q", got, tc.expected)
+			}
+		})
+	}
+}
+
 func TestVars(t *testing.T) {
 	var a int
 	var b int

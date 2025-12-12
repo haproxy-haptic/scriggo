@@ -400,6 +400,17 @@ var tests = []struct {
 	{string(toJS("= undefined;")), "= undefined;"},
 	{string(toJSON("[ 1, 2, 3 ]")), "[ 1, 2, 3 ]"},
 	{string(toMarkdown("# a title")), "# a title"},
+
+	// default
+	{sp(Default(nil, "default")), "default"},
+	{sp(Default("", "default")), "default"},
+	{sp(Default("value", "default")), "value"},
+	{sp(Default(0, 42)), "42"},
+	{sp(Default(5, 42)), "5"},
+	{sp(Default(false, true)), "true"},
+	{sp(Default(true, false)), "true"},
+	{sp(Default(0.0, 3.14)), "3.14"},
+	{sp(Default(2.5, 3.14)), "2.5"},
 }
 
 func TestBuiltins(t *testing.T) {

@@ -157,7 +157,7 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 			tokenXor,            // ^e
 			tokenMultiplication, // *t, *T
 			tokenAmpersand:      // &e
-			operator = ast.NewUnaryOperator(tok.pos, operatorFromTokenType(tok.typ, false), nil)
+			operator = ast.NewUnaryOperator(tok.pos, operatorFromTokenType(tok.typ, false, p.lex.templateSyntax), nil)
 			if mustBeType && tok.typ != tokenMultiplication {
 				panic(syntaxError(tok.pos, "unexpected %s, expecting type", tok.txt))
 			}
@@ -426,7 +426,7 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 				tokenLeftShift,      // e <<
 				tokenRightShift,     // e >>
 				tokenContains:       // e contains
-				operator = ast.NewBinaryOperator(tok.pos, operatorFromTokenType(tok.typ, true), nil, nil)
+				operator = ast.NewBinaryOperator(tok.pos, operatorFromTokenType(tok.typ, true, p.lex.templateSyntax), nil, nil)
 				tok = p.next()
 			case tokenDefault, // e default
 				tokenExtendedNot: // e not contains
@@ -748,8 +748,9 @@ func literalType(typ tokenTyp) ast.LiteralType {
 }
 
 // operatorFromTokenType returns a operator type from a token type. binary
-// reports if the operator is used in a binary expression.
-func operatorFromTokenType(typ tokenTyp, binary bool) ast.OperatorType {
+// reports if the operator is used in a binary expression. templateSyntax
+// reports if the parser is in template syntax mode.
+func operatorFromTokenType(typ tokenTyp, binary, templateSyntax bool) ast.OperatorType {
 	switch typ {
 	case tokenEqual:
 		return ast.OperatorEqual
@@ -763,6 +764,9 @@ func operatorFromTokenType(typ tokenTyp, binary bool) ast.OperatorType {
 		}
 		return ast.OperatorAddress
 	case tokenVerticalBar:
+		if binary && templateSyntax {
+			return ast.OperatorPipe
+		}
 		return ast.OperatorBitOr
 	case tokenLess:
 		return ast.OperatorLess
