@@ -394,13 +394,13 @@ func goldenCompare(testPath string, got []byte) error {
 			if len(expectedLines) > len(gotLines) {
 				err += "expected lines (not returned by the test): \n"
 				for i := len(gotLines); i < len(expectedLines); i++ {
-					err += fmt.Sprintf("> " + expectedLines[i] + "\n")
+					err += "> " + expectedLines[i] + "\n"
 				}
 			}
 			if len(expectedLines) < len(gotLines) {
 				err += "additional lines returned by the test (not expected): \n"
 				for i := len(expectedLines); i < len(gotLines); i++ {
-					err += fmt.Sprintf("> " + gotLines[i] + "\n")
+					err += "> " + gotLines[i] + "\n"
 				}
 			}
 			return errors.New(err)
