@@ -487,6 +487,18 @@ func (em *emitter) canOptimizeShowMacro(expr ast.Expression, ctx ast.Context) bo
 // emitAssignmentNode emits the instructions for an assignment node.
 func (em *emitter) emitAssignmentNode(node *ast.Assignment) {
 
+	// Restore function/macro names for profiling support.
+	// When macros are rewritten to variable declarations + assignments,
+	// the function's Ident is set to nil. Restore it here so the name
+	// is available when emitting the function.
+	for i, rhs := range node.Rhs {
+		if fun, ok := rhs.(*ast.Func); ok && fun.Ident == nil && i < len(node.Lhs) {
+			if ident, ok := node.Lhs[i].(*ast.Identifier); ok && !isBlankIdentifier(ident) {
+				fun.Ident = ident
+			}
+		}
+	}
+
 	// Emit a short declaration.
 	if node.Type == ast.AssignmentDeclaration {
 		addresses := make([]address, len(node.Lhs))

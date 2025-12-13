@@ -42,11 +42,12 @@ type Converter func(src []byte, out io.Writer) error
 
 // Template is a template compiled with the BuildTemplate function.
 type Template struct {
-	fn            *runtime.Function
-	typeof        runtime.TypeOfFunc
-	globals       []compiler.Global
-	conv          runtime.Converter
-	dynamicMacros map[string]*runtime.Function
+	fn               *runtime.Function
+	typeof           runtime.TypeOfFunc
+	globals          []compiler.Global
+	conv             runtime.Converter
+	dynamicMacros    map[string]*runtime.Function
+	profilingEnabled bool
 }
 
 // FormatFS is the interface implemented by a file system that can determine
@@ -108,6 +109,7 @@ func BuildTemplate(fsys fs.FS, name string, options *BuildOptions) (*Template, e
 		co.NoParseShortShowStmt = options.NoParseShortShowStmt
 		co.Importer = options.Packages
 		co.MDConverter = compiler.Converter(options.MarkdownConverter)
+		co.EnableProfiling = options.EnableProfiling
 		conv = options.MarkdownConverter
 	}
 	code, err := compiler.BuildTemplate(fsys, name, co)
@@ -117,7 +119,14 @@ func BuildTemplate(fsys fs.FS, name string, options *BuildOptions) (*Template, e
 		}
 		return nil, err
 	}
-	return &Template{fn: code.Main, typeof: code.TypeOf, globals: code.Globals, conv: runtime.Converter(conv), dynamicMacros: code.DynamicMacros}, nil
+	return &Template{
+		fn:               code.Main,
+		typeof:           code.TypeOf,
+		globals:          code.Globals,
+		conv:             runtime.Converter(conv),
+		dynamicMacros:    code.DynamicMacros,
+		profilingEnabled: code.ProfilingEnabled,
+	}, nil
 }
 
 // Run runs the template and write the rendered code to out. vars contains
@@ -156,7 +165,36 @@ func (t *Template) Run(out io.Writer, vars map[string]interface{}, options *RunO
 	if t.dynamicMacros != nil {
 		vm.SetDynamicMacros(t.dynamicMacros)
 	}
+	// Enable profiling if it was enabled at build time.
+	if t.profilingEnabled {
+		vm.SetProfiling(true)
+	}
 	err := vm.Run(t.fn, t.typeof, initGlobalVariables(t.globals, vars))
+	// Collect profiling data if profiling was enabled and Profile was provided.
+	if t.profilingEnabled && options != nil && options.Profile != nil {
+		if data := vm.GetProfileData(); data != nil {
+			options.Profile.StartTime = data.StartTime
+			options.Profile.EndTime = data.EndTime
+			options.Profile.TotalDuration = data.TotalDuration
+			// Convert runtime.ProfileCallRecord to scriggo.CallRecord.
+			options.Profile.Calls = make([]*CallRecord, len(data.Calls))
+			for i, rc := range data.Calls {
+				options.Profile.Calls[i] = &CallRecord{
+					ID:           rc.ID,
+					ParentID:     rc.ParentID,
+					Name:         rc.Name,
+					Package:      rc.Package,
+					File:         rc.File,
+					Line:         rc.Line,
+					Kind:         CallKind(rc.Kind),
+					StartTime:    rc.StartTime,
+					Duration:     rc.Duration,
+					SelfDuration: rc.SelfDuration,
+					TemplatePath: rc.TemplatePath,
+				}
+			}
+		}
+	}
 	if err != nil {
 		if p, ok := err.(*runtime.PanicError); ok {
 			err = &PanicError{p}

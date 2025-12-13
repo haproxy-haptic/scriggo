@@ -206,6 +206,10 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 			Type:   ti.Type,
 			Parent: em.fb.fn,
 		}
+		// Set the function name if this is a named function/macro (not an anonymous literal).
+		if expr.Ident != nil {
+			fn.Name = expr.Ident.Name
+		}
 		em.fb.emitLoadFunc(false, em.fb.addFunction(fn), tmp)
 		em.setFunctionVarRefs(fn, expr.Upvars)
 
