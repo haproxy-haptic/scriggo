@@ -1333,3 +1333,148 @@ func TestPanicErrorStackFrames(t *testing.T) {
 		t.Errorf("expected second frame path 'index.html', got %q", frames[1].Path)
 	}
 }
+
+// TestRangeOverInterface tests that for-range statements work with interface{}
+// values that contain iterable types at runtime.
+func TestRangeOverInterface(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    interface{}
+		template string
+		want     string
+	}{
+		{
+			name:     "[]int slice",
+			value:    []int{1, 2, 3},
+			template: `{% for _, v := range xs %}{{ v }}{% end %}`,
+			want:     "123",
+		},
+		{
+			name:     "[]string slice",
+			value:    []string{"a", "b", "c"},
+			template: `{% for _, v := range xs %}{{ v }}{% end %}`,
+			want:     "abc",
+		},
+		{
+			name:     "map with single key",
+			value:    map[string]int{"a": 1},
+			template: `{% for k := range xs %}{{ k }}{% end %}`,
+			want:     "a",
+		},
+		{
+			name:     "nil interface iterates zero times",
+			value:    nil,
+			template: `{% for _, v := range xs %}{{ v }}{% end %}done`,
+			want:     "done",
+		},
+		{
+			name:     "slice with index and value",
+			value:    []int{10, 20, 30},
+			template: `{% for i, v := range xs %}{{ i }}:{{ v }},{% end %}`,
+			want:     "0:10,1:20,2:30,",
+		},
+		{
+			name:     "for-in syntax",
+			value:    []int{1, 2, 3},
+			template: `{% for v in xs %}{{ v }}{% end %}`,
+			want:     "123",
+		},
+		{
+			name:     "string iteration",
+			value:    "hi",
+			template: `{% for i, r := range xs %}{{ i }}:{{ r }},{% end %}`,
+			want:     "0:104,1:105,", // 'h'=104, 'i'=105
+		},
+		{
+			name:     "array",
+			value:    [3]int{7, 8, 9},
+			template: `{% for _, v := range xs %}{{ v }}{% end %}`,
+			want:     "789",
+		},
+		{
+			name:     "pointer to array",
+			value:    &[2]string{"x", "y"},
+			template: `{% for _, v := range xs %}{{ v }}{% end %}`,
+			want:     "xy",
+		},
+		{
+			name:     "map key-value iteration",
+			value:    map[string]int{"k": 42},
+			template: `{% for k, v := range xs %}{{ k }}={{ v }}{% end %}`,
+			want:     "k=42",
+		},
+		{
+			name:     "empty slice",
+			value:    []int{},
+			template: `{% for _, v := range xs %}{{ v }}{% end %}empty`,
+			want:     "empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var xs interface{} = tt.value
+			fsys := fstest.Files{"index.txt": tt.template}
+			opts := &scriggo.BuildOptions{
+				Globals: native.Declarations{"xs": &xs},
+			}
+			template, err := scriggo.BuildTemplate(fsys, "index.txt", opts)
+			if err != nil {
+				t.Fatalf("build error: %v", err)
+			}
+			var buf bytes.Buffer
+			err = template.Run(&buf, nil, nil)
+			if err != nil {
+				t.Fatalf("run error: %v", err)
+			}
+			if got := buf.String(); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRangeOverInterfaceErrors tests error cases for ranging over interface{}.
+func TestRangeOverInterfaceErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     interface{}
+		template  string
+		wantError string
+	}{
+		{
+			name:      "non-iterable int",
+			value:     42,
+			template:  `{% for _, v := range xs %}{{ v }}{% end %}`,
+			wantError: "cannot range over int",
+		},
+		{
+			name:      "non-iterable struct",
+			value:     struct{ X int }{X: 1},
+			template:  `{% for _, v := range xs %}{{ v }}{% end %}`,
+			wantError: "cannot range over struct",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var xs interface{} = tt.value
+			fsys := fstest.Files{"index.txt": tt.template}
+			opts := &scriggo.BuildOptions{
+				Globals: native.Declarations{"xs": &xs},
+			}
+			template, err := scriggo.BuildTemplate(fsys, "index.txt", opts)
+			if err != nil {
+				t.Fatalf("build error: %v", err)
+			}
+			var buf bytes.Buffer
+			err = template.Run(&buf, nil, nil)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantError)
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantError)
+			}
+		})
+	}
+}

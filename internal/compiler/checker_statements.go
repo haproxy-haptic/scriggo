@@ -322,6 +322,11 @@ nodesLoop:
 				}
 				typ1 = typ.Elem()
 				maxLhs = 1
+			case reflect.Interface:
+				// Allow ranging over interface{} - actual type checked at runtime.
+				// Loop variables are typed as interface{} since concrete type is unknown.
+				typ1 = emptyInterfaceType
+				typ2 = emptyInterfaceType
 			default:
 				panic(tc.errorf(node.Assignment.Rhs[0], "cannot range over %s (type %s)", expr, ti.StringWithNumber(true)))
 			}

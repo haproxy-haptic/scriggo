@@ -656,11 +656,13 @@ func (fb *functionBuilder) emitRange(k bool, s, i, e int8, kind reflect.Kind) {
 		if k {
 			op = -op
 		}
+	case reflect.Interface:
+		op = runtime.OpRangeInterface
 	default:
-		if k {
-			panic("bug on emitter: emitRange with k = true is compatible only with kind == reflect.String")
-		}
 		op = runtime.OpRange
+	}
+	if k && kind != reflect.String {
+		panic("bug on emitter: emitRange with k = true is compatible only with kind == reflect.String")
 	}
 	fn.Body = append(fn.Body, runtime.Instruction{Op: op, A: s, B: i, C: e})
 }
