@@ -291,6 +291,31 @@ func showInText(env *env, out io.Writer, value interface{}) error {
 func showInHTML(env *env, out io.Writer, value interface{}) error {
 	w := newStringWriter(out)
 	switch v := value.(type) {
+	// Fast paths for basic types - avoid reflection in toString()
+	case int:
+		_, err := w.WriteString(strconv.Itoa(v))
+		return err
+	case int64:
+		_, err := w.WriteString(strconv.FormatInt(v, 10))
+		return err
+	case int32:
+		_, err := w.WriteString(strconv.FormatInt(int64(v), 10))
+		return err
+	case string:
+		return htmlEscape(w, v)
+	case bool:
+		if v {
+			_, err := w.WriteString("true")
+			return err
+		}
+		_, err := w.WriteString("false")
+		return err
+	case float64:
+		_, err := w.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
+		return err
+	case float32:
+		_, err := w.WriteString(strconv.FormatFloat(float64(v), 'f', -1, 32))
+		return err
 	case native.HTML:
 		_, err := w.WriteString(string(v))
 		return err

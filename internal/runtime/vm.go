@@ -80,6 +80,63 @@ func decodeValueIndex(a, b int8) (t registerType, i int) {
 	return registerType(uint8(a) >> 6), int(decodeUint16(a, b) &^ (3 << 14))
 }
 
+// rangeState holds the state for a currently executing inline range loop.
+// This allows range loops to execute without recursive vm.run() calls.
+type rangeState struct {
+	// Iterator state - only one of these is used depending on collection type
+	sliceInt    []int
+	sliceByte   []byte
+	sliceRune   []rune
+	sliceFloat  []float64
+	sliceString []string
+	sliceIface  []interface{}
+	mapIter     *reflect.MapIter
+	reflectVal  reflect.Value // for generic slice/array iteration
+	strVal      string        // for string iteration
+
+	// Current position
+	index int
+	// For strings, byte position
+	bytePos int
+	// Collection length (for slices/arrays)
+	length int
+
+	// Loop control addresses
+	rangeAddr Addr // address of the range instruction (for continue matching)
+	bodyAddr  Addr // address of loop body start
+	endAddr   Addr // address after loop (where to jump on break or completion)
+
+	// Register info for loop variables
+	indexReg int8 // register for index (0 if unused)
+	elemReg  int8 // register for element (0 if unused)
+
+	// Collection type info
+	kind     reflect.Kind
+	elemKind reflect.Kind
+	rangeType rangeType
+}
+
+// rangeType indicates what type of range iteration is being performed
+type rangeType int8
+
+const (
+	rangeSliceInt rangeType = iota
+	rangeSliceByte
+	rangeSliceRune
+	rangeSliceFloat64
+	rangeSliceString
+	rangeSliceInterface
+	rangeMapStringInt
+	rangeMapStringBool
+	rangeMapStringString
+	rangeMapStringInterface
+	rangeMapReflect
+	rangeSliceReflect
+	rangeArrayReflect
+	rangeString
+	rangeChan
+)
+
 // VM represents a Scriggo virtual machine.
 type VM struct {
 	fp       [4]Addr              // frame pointers.
@@ -94,6 +151,7 @@ type VM struct {
 	renderer *renderer            // renderer
 	calls    []callFrame          // call stack frame.
 	cases    []reflect.SelectCase // select cases.
+	ranges   []rangeState         // inline range loop state stack.
 	panic    *PanicError          // panic.
 	main     bool                 // reports whether this VM is executing the main goroutine.
 	profiler *profiler            // profiler for execution timing (nil when disabled).
@@ -126,6 +184,9 @@ func (vm *VM) Reset() {
 	if vm.cases != nil {
 		vm.cases = vm.cases[:0]
 	}
+	if vm.ranges != nil {
+		vm.ranges = vm.ranges[:0]
+	}
 	vm.panic = nil
 }
 
@@ -134,6 +195,217 @@ func (vm *VM) stop() (Addr, bool) {
 	const maxAddr = 1<<32 - 1
 	atomic.StoreInt32(&vm.env.done, 1)
 	return maxAddr, false
+}
+
+// advanceRangeInline advances the iterator for an inline range loop and sets
+// the loop variables. Returns true if there are more elements, false if iteration
+// is complete.
+func (vm *VM) advanceRangeInline(rs *rangeState) bool {
+	rs.index++
+
+	switch rs.rangeType {
+	case rangeSliceInt:
+		if rs.index >= len(rs.sliceInt) {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setInt(rs.indexReg, int64(rs.index))
+		}
+		if rs.elemReg != 0 {
+			vm.setInt(rs.elemReg, int64(rs.sliceInt[rs.index]))
+		}
+		return true
+
+	case rangeSliceByte:
+		if rs.index >= len(rs.sliceByte) {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setInt(rs.indexReg, int64(rs.index))
+		}
+		if rs.elemReg != 0 {
+			vm.setInt(rs.elemReg, int64(rs.sliceByte[rs.index]))
+		}
+		return true
+
+	case rangeSliceRune:
+		if rs.index >= len(rs.sliceRune) {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setInt(rs.indexReg, int64(rs.index))
+		}
+		if rs.elemReg != 0 {
+			vm.setInt(rs.elemReg, int64(rs.sliceRune[rs.index]))
+		}
+		return true
+
+	case rangeSliceFloat64:
+		if rs.index >= len(rs.sliceFloat) {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setInt(rs.indexReg, int64(rs.index))
+		}
+		if rs.elemReg != 0 {
+			vm.setFloat(rs.elemReg, rs.sliceFloat[rs.index])
+		}
+		return true
+
+	case rangeSliceString:
+		if rs.index >= len(rs.sliceString) {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setInt(rs.indexReg, int64(rs.index))
+		}
+		if rs.elemReg != 0 {
+			vm.setString(rs.elemReg, rs.sliceString[rs.index])
+		}
+		return true
+
+	case rangeSliceInterface:
+		if rs.index >= len(rs.sliceIface) {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setInt(rs.indexReg, int64(rs.index))
+		}
+		if rs.elemReg != 0 {
+			vm.setGeneral(rs.elemReg, reflect.ValueOf(rs.sliceIface[rs.index]))
+		}
+		return true
+
+	case rangeMapStringInt:
+		if !rs.mapIter.Next() {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setString(rs.indexReg, rs.mapIter.Key().String())
+		}
+		if rs.elemReg != 0 {
+			vm.setInt(rs.elemReg, rs.mapIter.Value().Int())
+		}
+		return true
+
+	case rangeMapStringBool:
+		if !rs.mapIter.Next() {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setString(rs.indexReg, rs.mapIter.Key().String())
+		}
+		if rs.elemReg != 0 {
+			vm.setBool(rs.elemReg, rs.mapIter.Value().Bool())
+		}
+		return true
+
+	case rangeMapStringString:
+		if !rs.mapIter.Next() {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setString(rs.indexReg, rs.mapIter.Key().String())
+		}
+		if rs.elemReg != 0 {
+			vm.setString(rs.elemReg, rs.mapIter.Value().String())
+		}
+		return true
+
+	case rangeMapStringInterface:
+		if !rs.mapIter.Next() {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setString(rs.indexReg, rs.mapIter.Key().String())
+		}
+		if rs.elemReg != 0 {
+			vm.setGeneral(rs.elemReg, reflect.ValueOf(rs.mapIter.Value().Interface()))
+		}
+		return true
+
+	case rangeMapReflect:
+		if !rs.mapIter.Next() {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setFromReflectValue(rs.indexReg, rs.mapIter.Key())
+		}
+		if rs.elemReg != 0 {
+			vm.setFromReflectValue(rs.elemReg, rs.mapIter.Value())
+		}
+		return true
+
+	case rangeSliceReflect, rangeArrayReflect:
+		if rs.index >= rs.length {
+			return false
+		}
+		if rs.indexReg != 0 {
+			vm.setInt(rs.indexReg, int64(rs.index))
+		}
+		if rs.elemReg != 0 {
+			vm.setFromReflectValue(rs.elemReg, rs.reflectVal.Index(rs.index))
+		}
+		return true
+
+	case rangeString:
+		if rs.bytePos >= len(rs.strVal) {
+			return false
+		}
+		// Decode the next rune
+		r, size := decodeRuneInString(rs.strVal[rs.bytePos:])
+		if rs.indexReg != 0 {
+			vm.setInt(rs.indexReg, int64(rs.bytePos))
+		}
+		if rs.elemReg != 0 {
+			vm.setInt(rs.elemReg, int64(r))
+		}
+		rs.bytePos += size
+		return true
+
+	default:
+		// Unsupported range type - this shouldn't happen for inline ranges
+		return false
+	}
+}
+
+// decodeRuneInString decodes a single UTF-8 rune from a string.
+// Returns the rune and the number of bytes consumed.
+func decodeRuneInString(s string) (rune, int) {
+	if len(s) == 0 {
+		return 0, 0
+	}
+	// Fast path for ASCII
+	if s[0] < 0x80 {
+		return rune(s[0]), 1
+	}
+	// For multi-byte sequences, manually decode UTF-8
+	b := s[0]
+	var r rune
+	var size int
+	switch {
+	case b&0xE0 == 0xC0:
+		if len(s) < 2 {
+			return 0xFFFD, 1
+		}
+		r = rune(b&0x1F)<<6 | rune(s[1]&0x3F)
+		size = 2
+	case b&0xF0 == 0xE0:
+		if len(s) < 3 {
+			return 0xFFFD, 1
+		}
+		r = rune(b&0x0F)<<12 | rune(s[1]&0x3F)<<6 | rune(s[2]&0x3F)
+		size = 3
+	case b&0xF8 == 0xF0:
+		if len(s) < 4 {
+			return 0xFFFD, 1
+		}
+		r = rune(b&0x07)<<18 | rune(s[1]&0x3F)<<12 | rune(s[2]&0x3F)<<6 | rune(s[3]&0x3F)
+		size = 4
+	default:
+		return 0xFFFD, 1
+	}
+	return r, size
 }
 
 // Run starts the execution of the function fn with the given global variables
