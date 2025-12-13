@@ -87,7 +87,9 @@ type emitter struct {
 
 // newEmitter returns a new emitter with the given type infos, format types,
 // indirect variables and options.
-func newEmitter(typeInfos map[ast.Node]*typeInfo, formatTypes map[ast.Format]reflect.Type, indirectVars map[*ast.Identifier]bool) *emitter {
+// If canonicalGlobals is provided (non-nil), it will be used to ensure consistent
+// global variable indexing for dynamic template compilation.
+func newEmitter(typeInfos map[ast.Node]*typeInfo, formatTypes map[ast.Format]reflect.Type, indirectVars map[*ast.Identifier]bool, canonicalGlobals []Global) *emitter {
 	em := &emitter{
 		labels:                         make(map[*runtime.Function]map[string]label),
 		typeInfos:                      typeInfos,
@@ -98,7 +100,7 @@ func newEmitter(typeInfos map[ast.Node]*typeInfo, formatTypes map[ast.Format]ref
 		alreadyInitializedTemplatePkgs: map[string]bool{},
 	}
 	em.fnStore = newFunctionStore(em)
-	em.varStore = newVarStore(em, indirectVars)
+	em.varStore = newVarStore(em, indirectVars, canonicalGlobals)
 	return em
 }
 

@@ -3460,6 +3460,85 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 			expectedRunErr: `template not found: .secret/file.txt`,
 		},
+
+		// Dynamic include with global variables - regression tests for index mismatch bug
+		"include statement - dynamic with global variable": {
+			sources: fstest.Files{
+				"index.txt":   `{% var name = "partial.txt" %}{% include name %}`,
+				"partial.txt": `Value: {{ globalVar }}`,
+			},
+			main: native.Package{
+				Name: "main",
+				Declarations: native.Declarations{
+					"globalVar": (*int)(nil),
+				},
+			},
+			vars: map[string]interface{}{
+				"globalVar": 42,
+			},
+			expectedOut: "Value: 42",
+		},
+
+		"include statement - dynamic with multiple globals different order": {
+			sources: fstest.Files{
+				"index.txt":   `{% var name = "partial.txt" %}Main: {{ a }}, {{ b }}, {{ c }}, {{ d }}. {% include name %}`,
+				"partial.txt": `Partial: {{ c }}, {{ d }}`,
+			},
+			main: native.Package{
+				Name: "main",
+				Declarations: native.Declarations{
+					"a": (*string)(nil),
+					"b": (*string)(nil),
+					"c": (*string)(nil),
+					"d": (*string)(nil),
+				},
+			},
+			vars: map[string]interface{}{
+				"a": "AAA",
+				"b": "BBB",
+				"c": "CCC",
+				"d": "DDD",
+			},
+			expectedOut: "Main: AAA, BBB, CCC, DDD. Partial: CCC, DDD",
+		},
+
+		"include statement - dynamic modifying global variable": {
+			sources: fstest.Files{
+				"index.txt":   `Before: {{ counter }}. {% var name = "partial.txt" %}{% include name %} After: {{ counter }}`,
+				"partial.txt": `{% counter++ %}Incremented.`,
+			},
+			main: native.Package{
+				Name: "main",
+				Declarations: native.Declarations{
+					"counter": (*int)(nil),
+				},
+			},
+			vars: map[string]interface{}{
+				"counter": 10,
+			},
+			expectedOut: "Before: 10. Incremented. After: 11",
+		},
+
+		// Edge case: two dynamic templates each using different globals not used by main
+		"include statement - dynamic templates with disjoint globals": {
+			sources: fstest.Files{
+				"index.txt":  `Main uses none. {% var t1 = "first.txt" %}{% include t1 %}{% var t2 = "second.txt" %}{% include t2 %}`,
+				"first.txt":  `First: {{ alpha }}. `,
+				"second.txt": `Second: {{ beta }}.`,
+			},
+			main: native.Package{
+				Name: "main",
+				Declarations: native.Declarations{
+					"alpha": (*string)(nil),
+					"beta":  (*string)(nil),
+				},
+			},
+			vars: map[string]interface{}{
+				"alpha": "ALPHA",
+				"beta":  "BETA",
+			},
+			expectedOut: "Main uses none. First: ALPHA. Second: BETA.",
+		},
 	}
 
 	for name, cas := range templateMultiFileCases {
