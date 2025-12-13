@@ -5,7 +5,9 @@
 package scriggo
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"reflect"
 	"testing"
 
@@ -137,7 +139,7 @@ func TestInitGlobalsNilError(t *testing.T) {
 }
 
 func TestInitGlobalsInvalidTypeError(t *testing.T) {
-	defer recoverInitGlobalsPanic(t, "variable initializer \"a\" must have type int or *int, but have bool")
+	defer recoverInitGlobalsPanic(t, "variable initializer \"a\" must have type assignable to int, but have bool")
 	global := compiler.Global{
 		Pkg:  "main",
 		Name: "a",
@@ -156,6 +158,72 @@ func TestInitGlobalsNilPointerError(t *testing.T) {
 	}
 	init := map[string]interface{}{"a": (*int)(nil)}
 	_ = initGlobalVariables([]compiler.Global{global}, init)
+}
+
+// TestInitGlobalsInterfaceWithConcreteType tests that a concrete type
+// implementing an interface is accepted when the global is declared with
+// an interface type.
+func TestInitGlobalsInterfaceWithConcreteType(t *testing.T) {
+	var iw io.Writer
+	global := compiler.Global{
+		Pkg:  "main",
+		Name: "writer",
+		Type: reflect.TypeOf(&iw).Elem(), // interface type
+	}
+
+	// Pass a concrete *bytes.Buffer which implements io.Writer
+	buf := &bytes.Buffer{}
+	init := map[string]interface{}{"writer": buf}
+
+	values := initGlobalVariables([]compiler.Global{global}, init)
+	if values[0].IsNil() {
+		t.Fatal("expected non-nil value")
+	}
+	// Verify the value is usable as io.Writer
+	w, ok := values[0].Interface().(io.Writer)
+	if !ok {
+		t.Fatal("value should be usable as io.Writer")
+	}
+	// Verify it's the same underlying buffer
+	if _, err := w.Write([]byte("test")); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "test" {
+		t.Errorf("expected 'test', got %q", buf.String())
+	}
+}
+
+// TestInitGlobalsInterfaceWithPointerToConcreteType tests that a pointer to
+// a concrete type implementing an interface is accepted and properly dereferenced.
+// This handles the case where someone passes **T when *T implements the interface.
+func TestInitGlobalsInterfaceWithPointerToConcreteType(t *testing.T) {
+	var iw io.Writer
+	global := compiler.Global{
+		Pkg:  "main",
+		Name: "writer",
+		Type: reflect.TypeOf(&iw).Elem(), // interface type
+	}
+
+	// buf is *bytes.Buffer, &buf is **bytes.Buffer
+	buf := &bytes.Buffer{}
+	init := map[string]interface{}{"writer": &buf}
+
+	values := initGlobalVariables([]compiler.Global{global}, init)
+	if values[0].IsNil() {
+		t.Fatal("expected non-nil value")
+	}
+	// Verify the value is usable as io.Writer
+	w, ok := values[0].Interface().(io.Writer)
+	if !ok {
+		t.Fatal("value should be usable as io.Writer")
+	}
+	// Verify it's the same underlying buffer (was properly dereferenced)
+	if _, err := w.Write([]byte("test")); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "test" {
+		t.Errorf("expected 'test', got %q", buf.String())
+	}
 }
 
 type testFormatFS struct {
