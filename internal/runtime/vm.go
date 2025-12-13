@@ -158,7 +158,7 @@ func (vm *VM) Run(fn *Function, typeof TypeOfFunc, globals []reflect.Value) erro
 				err = outErr.err
 			}
 		case *fatalError:
-			panic(e.msg)
+			panic(e.Error())
 		case stopError:
 			err = e.err
 		}
