@@ -24,6 +24,13 @@ func (p Position) String() string {
 	return strconv.Itoa(p.Line) + ":" + strconv.Itoa(p.Column)
 }
 
+// StackFrame represents a single frame in the call stack.
+type StackFrame struct {
+	Function string // Function name
+	Path     string // File path
+	Line     int    // Line number
+}
+
 // BuildError represents an error occurred building a program or template.
 type BuildError struct {
 	err compiler.Error
@@ -121,4 +128,26 @@ func (p *PanicError) Path() string {
 func (p *PanicError) Position() Position {
 	pos := p.p.Position()
 	return Position{Line: pos.Line, Column: pos.Column, Start: pos.Start, End: pos.End}
+}
+
+// StackTrace returns the stack trace at the point of the panic.
+// The trace shows the call chain with file paths and line numbers.
+func (p *PanicError) StackTrace() string {
+	return string(p.p.StackTrace())
+}
+
+// StackFrames returns the call stack as structured frames.
+// The first frame is the immediate location of the panic,
+// subsequent frames show the call chain up to the entry point.
+func (p *PanicError) StackFrames() []StackFrame {
+	internal := p.p.StackFrames()
+	frames := make([]StackFrame, len(internal))
+	for i, f := range internal {
+		frames[i] = StackFrame{
+			Function: f.Function,
+			Path:     f.Path,
+			Line:     f.Line,
+		}
+	}
+	return frames
 }

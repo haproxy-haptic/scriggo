@@ -1105,3 +1105,231 @@ func TestRecoveredOutError(t *testing.T) {
 		t.Fatalf("expecting no error, got error %v", err)
 	}
 }
+
+// TestPanicErrorContext tests that PanicError includes correct path and
+// position information when a panic occurs in a template.
+func TestPanicErrorContext(t *testing.T) {
+	// Template with a panic on line 2
+	fsys := fstest.Files{
+		"index.html": "line 1\n{% panic(\"test panic\") %}",
+	}
+	template, err := scriggo.BuildTemplate(fsys, "index.html", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	err = template.Run(&buf, nil, nil)
+	if err == nil {
+		t.Fatal("expected panic error, got nil")
+	}
+	panicErr, ok := err.(*scriggo.PanicError)
+	if !ok {
+		t.Fatalf("expected *scriggo.PanicError, got %T: %v", err, err)
+	}
+	// Check path
+	if panicErr.Path() != "index.html" {
+		t.Errorf("expected path 'index.html', got %q", panicErr.Path())
+	}
+	// Check position - panic is on line 2
+	pos := panicErr.Position()
+	if pos.Line != 2 {
+		t.Errorf("expected line 2, got %d", pos.Line)
+	}
+	// Check message
+	if panicErr.String() != "test panic" {
+		t.Errorf("expected message 'test panic', got %q", panicErr.String())
+	}
+}
+
+// TestPanicErrorContextIndexOutOfRange tests that index out of range panics
+// include correct context.
+func TestPanicErrorContextIndexOutOfRange(t *testing.T) {
+	fsys := fstest.Files{
+		"index.html": `{% var s = []int{1, 2, 3} %}{{ s[10] }}`,
+	}
+	template, err := scriggo.BuildTemplate(fsys, "index.html", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	err = template.Run(&buf, nil, nil)
+	if err == nil {
+		t.Fatal("expected panic error, got nil")
+	}
+	panicErr, ok := err.(*scriggo.PanicError)
+	if !ok {
+		t.Fatalf("expected *scriggo.PanicError, got %T: %v", err, err)
+	}
+	// Check path
+	if panicErr.Path() != "index.html" {
+		t.Errorf("expected path 'index.html', got %q", panicErr.Path())
+	}
+	// Check that error message contains index out of range info
+	msg := panicErr.String()
+	if !strings.Contains(msg, "index out of range") {
+		t.Errorf("expected message to contain 'index out of range', got %q", msg)
+	}
+}
+
+// TestPanicErrorContextRender tests that PanicError includes correct
+// path when panic occurs in a rendered template.
+func TestPanicErrorContextRender(t *testing.T) {
+	fsys := fstest.Files{
+		"index.html":   `before{{ render "partial.html" }}after`,
+		"partial.html": `{% panic("partial panic") %}`,
+	}
+	template, err := scriggo.BuildTemplate(fsys, "index.html", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	err = template.Run(&buf, nil, nil)
+	if err == nil {
+		t.Fatal("expected panic error, got nil")
+	}
+	panicErr, ok := err.(*scriggo.PanicError)
+	if !ok {
+		t.Fatalf("expected *scriggo.PanicError, got %T: %v", err, err)
+	}
+	// Check that path points to the partial where the panic occurred
+	if panicErr.Path() != "partial.html" {
+		t.Errorf("expected path 'partial.html', got %q", panicErr.Path())
+	}
+}
+
+// TestPanicErrorContextInclude tests that PanicError includes correct
+// path when panic occurs in an included template.
+func TestPanicErrorContextInclude(t *testing.T) {
+	fsys := fstest.Files{
+		"index.txt":   `before {% include "partial.txt" %} after`,
+		"partial.txt": `{% panic("include panic") %}`,
+	}
+	template, err := scriggo.BuildTemplate(fsys, "index.txt", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	err = template.Run(&buf, nil, nil)
+	if err == nil {
+		t.Fatal("expected panic error, got nil")
+	}
+	panicErr, ok := err.(*scriggo.PanicError)
+	if !ok {
+		t.Fatalf("expected *scriggo.PanicError, got %T: %v", err, err)
+	}
+	// Check that path points to the included file where the panic occurred
+	if panicErr.Path() != "partial.txt" {
+		t.Errorf("expected path 'partial.txt', got %q", panicErr.Path())
+	}
+}
+
+// TestPanicErrorStackTrace tests that PanicError.StackTrace() returns a
+// stack trace containing both the immediate file and parent includes.
+func TestPanicErrorStackTrace(t *testing.T) {
+	fsys := fstest.Files{
+		"index.html":   `before{{ render "partial.html" }}after`,
+		"partial.html": `{% panic("nested panic") %}`,
+	}
+	template, err := scriggo.BuildTemplate(fsys, "index.html", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	err = template.Run(&buf, nil, nil)
+	if err == nil {
+		t.Fatal("expected panic error, got nil")
+	}
+	panicErr, ok := err.(*scriggo.PanicError)
+	if !ok {
+		t.Fatalf("expected *scriggo.PanicError, got %T: %v", err, err)
+	}
+	// Check that StackTrace() contains both files
+	stackTrace := panicErr.StackTrace()
+	if !strings.Contains(stackTrace, "partial.html") {
+		t.Errorf("expected stack trace to contain 'partial.html', got:\n%s", stackTrace)
+	}
+	if !strings.Contains(stackTrace, "index.html") {
+		t.Errorf("expected stack trace to contain 'index.html', got:\n%s", stackTrace)
+	}
+	// Check that Error() includes the stack trace
+	errorStr := panicErr.Error()
+	if !strings.Contains(errorStr, "partial.html") || !strings.Contains(errorStr, "index.html") {
+		t.Errorf("expected Error() to include stack trace with both files, got:\n%s", errorStr)
+	}
+}
+
+// TestPanicErrorStackTraceDeepNesting tests stack trace with multiple levels
+// of includes to verify the full call chain is captured.
+func TestPanicErrorStackTraceDeepNesting(t *testing.T) {
+	fsys := fstest.Files{
+		"index.txt":  `{% include "level1.txt" %}`,
+		"level1.txt": `{% include "level2.txt" %}`,
+		"level2.txt": `{% panic("deep panic") %}`,
+	}
+	template, err := scriggo.BuildTemplate(fsys, "index.txt", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	err = template.Run(&buf, nil, nil)
+	if err == nil {
+		t.Fatal("expected panic error, got nil")
+	}
+	panicErr, ok := err.(*scriggo.PanicError)
+	if !ok {
+		t.Fatalf("expected *scriggo.PanicError, got %T: %v", err, err)
+	}
+	// Check that StackTrace() contains all three files in the chain
+	stackTrace := panicErr.StackTrace()
+	if !strings.Contains(stackTrace, "level2.txt") {
+		t.Errorf("expected stack trace to contain 'level2.txt', got:\n%s", stackTrace)
+	}
+	if !strings.Contains(stackTrace, "level1.txt") {
+		t.Errorf("expected stack trace to contain 'level1.txt', got:\n%s", stackTrace)
+	}
+	if !strings.Contains(stackTrace, "index.txt") {
+		t.Errorf("expected stack trace to contain 'index.txt', got:\n%s", stackTrace)
+	}
+}
+
+// TestPanicErrorStackFrames tests that PanicError.StackFrames() returns
+// structured frame data with file paths, line numbers, and function names.
+func TestPanicErrorStackFrames(t *testing.T) {
+	fsys := fstest.Files{
+		"index.html":   `before{{ render "partial.html" }}after`,
+		"partial.html": `{% panic("nested panic") %}`,
+	}
+	template, err := scriggo.BuildTemplate(fsys, "index.html", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	err = template.Run(&buf, nil, nil)
+	if err == nil {
+		t.Fatal("expected panic error, got nil")
+	}
+	panicErr, ok := err.(*scriggo.PanicError)
+	if !ok {
+		t.Fatalf("expected *scriggo.PanicError, got %T: %v", err, err)
+	}
+
+	frames := panicErr.StackFrames()
+
+	// Verify we have at least 2 frames
+	if len(frames) < 2 {
+		t.Fatalf("expected at least 2 frames, got %d", len(frames))
+	}
+
+	// First frame should be partial.html (where the panic occurred)
+	if frames[0].Path != "partial.html" {
+		t.Errorf("expected first frame path 'partial.html', got %q", frames[0].Path)
+	}
+	if frames[0].Line != 1 {
+		t.Errorf("expected first frame line 1, got %d", frames[0].Line)
+	}
+
+	// Second frame should be index.html (the caller)
+	if frames[1].Path != "index.html" {
+		t.Errorf("expected second frame path 'index.html', got %q", frames[1].Path)
+	}
+}

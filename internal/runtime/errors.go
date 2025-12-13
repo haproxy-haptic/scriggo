@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"fmt"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -23,7 +24,11 @@ type fatalError struct {
 }
 
 func (err *fatalError) Error() string {
-	return "fatal error: " + panicToString(err.msg)
+	base := "fatal error: " + panicToString(err.msg)
+	if err.path != "" && err.pos.Line > 0 {
+		base += fmt.Sprintf("\n    at %s:%d:%d", err.path, err.pos.Line, err.pos.Column)
+	}
+	return base
 }
 
 // runtimeError represents a runtime error.
@@ -104,13 +109,76 @@ func (vm *VM) errIndexOutOfRange() runtimeError {
 	return runtimeError(s)
 }
 
-// newPanic returns a new *PanicError with the given error message.
-func (vm *VM) newPanic(msg interface{}) *PanicError {
-	return &PanicError{
-		message:  msg,
-		path:     vm.fn.InstructionInfo[vm.pc].Path,
-		position: vm.fn.InstructionInfo[vm.pc].Position,
+// captureStackFrames returns the current call stack as structured frames.
+func (vm *VM) captureStackFrames() []StackFrame {
+	size := len(vm.calls)
+	frames := make([]StackFrame, 0, size+1)
+
+	for i := size; i >= 0; i-- {
+		var fn *Function
+		var ppc Addr
+		if i == size {
+			fn = vm.fn
+			ppc = vm.pc - 1
+		} else {
+			call := vm.calls[i]
+			fn = call.cl.fn
+			if call.status == tailed {
+				ppc = call.pc - 1
+			} else {
+				ppc = call.pc - 2
+			}
+		}
+
+		frame := StackFrame{
+			Function: fn.Name,
+			Path:     fn.File,
+		}
+		if info, ok := fn.InstructionInfo[ppc]; ok {
+			frame.Line = info.Position.Line
+		}
+		frames = append(frames, frame)
 	}
+	return frames
+}
+
+// newPanic returns a new *PanicError with the given error message.
+// Note: vm.pc has already been incremented past the panicked instruction,
+// so we use vm.pc-1 to get the correct position info.
+func (vm *VM) newPanic(msg interface{}) *PanicError {
+	info := vm.fn.InstructionInfo[vm.pc-1]
+	// Capture stack trace (text format)
+	buf := make([]byte, 4096)
+	n := vm.Stack(buf, false)
+	return &PanicError{
+		message:     msg,
+		path:        info.Path,
+		position:    info.Position,
+		stackTrace:  buf[:n],
+		stackFrames: vm.captureStackFrames(),
+	}
+}
+
+// generalSafe is like general() but catches any panic during access.
+func (vm *VM) generalSafe(r int8) (v reflect.Value) {
+	defer func() {
+		if recover() != nil {
+			v = reflect.Value{}
+		}
+	}()
+	return vm.general(r)
+}
+
+// newReflectPanic creates a PanicError for reflect package errors,
+// enriching the message with operand type information when available.
+func (vm *VM) newReflectPanic(msg string, operandReg int8) *PanicError {
+	enhanced := msg
+	if operandReg > 0 {
+		if v := vm.generalSafe(operandReg); v.IsValid() {
+			enhanced = fmt.Sprintf("%s (operand type: %s)", msg, v.Type())
+		}
+	}
+	return vm.newPanic(runtimeError(enhanced))
 }
 
 // convertPanic converts a panic to an error.
@@ -247,20 +315,47 @@ func (vm *VM) convertPanic(msg interface{}) error {
 				return vm.newPanic(runtimeError("runtime error: slice bounds out of range"))
 			}
 		}
+	case OpRange:
+		// Handle reflect panics during range iteration (e.g., ranging over wrong type).
+		in := vm.fn.Body[vm.pc-1]
+		if err, ok := msg.(string); ok && strings.HasPrefix(err, "reflect: ") {
+			return vm.newReflectPanic(err, in.A)
+		}
+	case OpMapIndex, -OpMapIndex, OpMapIndexAny, -OpMapIndexAny:
+		// Handle reflect panics during map access (e.g., accessing Key of non-map type).
+		in := vm.fn.Body[vm.pc-1]
+		if err, ok := msg.(string); ok && strings.HasPrefix(err, "reflect: ") {
+			return vm.newReflectPanic(err, in.A)
+		}
 	}
 	if _, ok := msg.(runtimeError); ok {
 		return vm.newPanic(msg)
 	}
-	return &fatalError{msg: msg}
+	// Capture template context for fatal errors.
+	info := vm.fn.InstructionInfo[vm.pc-1]
+	return &fatalError{
+		env:  vm.env,
+		msg:  msg,
+		pos:  info.Position,
+		path: info.Path,
+	}
+}
+
+// StackFrame represents a single frame in the call stack.
+type StackFrame struct {
+	Function string // Function name (e.g., "content")
+	Path     string // File path (e.g., "partial.html")
+	Line     int    // Line number
 }
 
 type PanicError struct {
-	message    interface{}
-	recovered  bool
-	stackTrace []byte
-	next       *PanicError
-	path       string
-	position   Position
+	message     interface{}
+	recovered   bool
+	stackTrace  []byte
+	stackFrames []StackFrame
+	next        *PanicError
+	path        string
+	position    Position
 }
 
 // Error returns all currently active panics as a string.
@@ -268,6 +363,7 @@ type PanicError struct {
 // To print only the message, use the String method instead.
 func (p *PanicError) Error() string {
 	var s string
+	stackTrace := p.stackTrace // Save stack trace from the first panic
 	for p != nil {
 		s = "\n" + s
 		if p.Recovered() {
@@ -278,6 +374,10 @@ func (p *PanicError) Error() string {
 			s = "\tpanic: " + s
 		}
 		p = p.Next()
+	}
+	// Append stack trace if available
+	if len(stackTrace) > 0 {
+		s += "\n" + string(stackTrace)
 	}
 	return s
 }
@@ -310,6 +410,16 @@ func (p *PanicError) Path() string {
 // Position returns the position.
 func (p *PanicError) Position() Position {
 	return p.position
+}
+
+// StackTrace returns the stack trace at the point of the panic.
+func (p *PanicError) StackTrace() []byte {
+	return p.stackTrace
+}
+
+// StackFrames returns the call stack as structured frames.
+func (p *PanicError) StackFrames() []StackFrame {
+	return p.stackFrames
 }
 
 func panicToString(msg interface{}) string {
