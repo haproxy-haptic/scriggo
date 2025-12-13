@@ -1514,6 +1514,66 @@ mainLoop:
 				vm.ok = vm.pc != endAddress
 				vm.pc = endAddress
 
+			case map[string]float64:
+				for i, v := range s {
+					if b != 0 {
+						vm.setString(b, i)
+					}
+					if c != 0 {
+						vm.setFloat(c, v)
+					}
+					vm.pc = bodyAddress
+					addr, breakOut := vm.run()
+					if addr != rangeAddress {
+						return addr, breakOut
+					}
+					if breakOut {
+						break
+					}
+				}
+				vm.ok = vm.pc != endAddress
+				vm.pc = endAddress
+
+			case map[int]string:
+				for i, v := range s {
+					if b != 0 {
+						vm.setInt(b, int64(i))
+					}
+					if c != 0 {
+						vm.setString(c, v)
+					}
+					vm.pc = bodyAddress
+					addr, breakOut := vm.run()
+					if addr != rangeAddress {
+						return addr, breakOut
+					}
+					if breakOut {
+						break
+					}
+				}
+				vm.ok = vm.pc != endAddress
+				vm.pc = endAddress
+
+			case map[int]interface{}:
+				for i, v := range s {
+					if b != 0 {
+						vm.setInt(b, int64(i))
+					}
+					if c != 0 {
+						vm.setGeneral(c, reflect.ValueOf(v))
+					}
+					vm.pc = bodyAddress
+					addr, breakOut := vm.run()
+					if addr != rangeAddress {
+						return addr, breakOut
+					}
+					if breakOut {
+						break
+					}
+				}
+				vm.ok = vm.pc != endAddress
+				vm.pc = endAddress
+
 			default:
 				switch kind := v.Kind(); kind {
 				case reflect.Map:
