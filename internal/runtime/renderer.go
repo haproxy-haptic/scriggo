@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -22,6 +23,13 @@ import (
 )
 
 var byteSliceType = reflect.TypeOf([]byte(nil))
+
+// stringBuilderPool is a pool of strings.Builder for reuse in rendering operations.
+var stringBuilderPool = sync.Pool{
+	New: func() interface{} {
+		return &strings.Builder{}
+	},
+}
 
 // renderer is used by te Show and Text instructions to render template files.
 type renderer struct {
@@ -149,13 +157,16 @@ func (r *renderer) Text(txt []byte, inURL, isSet bool) error {
 // showInURL shows v in a URL in the given context.
 func (r *renderer) showInURL(env *env, v interface{}, ctx ast.Context) error {
 
-	var b strings.Builder
-	err := showInHTML(env, &b, v)
+	b := stringBuilderPool.Get().(*strings.Builder)
+	b.Reset()
+	err := showInHTML(env, b, v)
 	if err != nil {
+		stringBuilderPool.Put(b)
 		return err
 	}
 
 	s := html.UnescapeString(b.String())
+	stringBuilderPool.Put(b)
 	out := newStringWriter(r.out)
 
 	if r.query {
