@@ -670,6 +670,19 @@ var checkerTemplateStmts = []struct {
 	{src: `{% x := 5 %}{{ x | x }}`, expected: `pipe operator requires a function call on the right side`},
 	{src: `{% f := func(x int) int { return x } %}{{ "hello" | f() }}`, expected: `cannot use "hello" (type untyped string) as type int in argument to f`},
 	{src: `{% f := func(x int) int { return x } %}{{ 5 | f(6) }}`, expected: `too many arguments in call to f`},
+
+	// Pipe operator in var declaration.
+	{src: `{% f := func(s []string, sep string) string { return "" } %}{% arr := []string{"a","b"} %}{% var x = arr | f(" ") %}{{ x }}`, expected: ok},
+	// Pipe operator with map index expression (reproducer for downstream bug).
+	{src: `{% f := func(v interface{}, sep string) string { return "" } %}{% m := map[string]interface{}{"key": []string{"a","b"}} %}{% var x = m["key"] | f(" ") %}{{ x }}`, expected: ok},
+	// Pipe operator in short var declaration with map index.
+	{src: `{% f := func(v interface{}, sep string) string { return "" } %}{% m := map[string]interface{}{"key": []string{"a","b"}} %}{% x := m["key"] | f(" ") %}{{ x }}`, expected: ok},
+	// Pipe operator with whitespace control (reproducer for downstream bug).
+	{src: `{%- f := func(v interface{}, sep string) string { return "" } -%}{%- m := map[string]interface{}{"key": []string{"a","b"}} -%}{%- var x = m["key"] | f(" ") -%}{{ x }}`, expected: ok},
+	// Pipe operator with globally-registered join function (reproducer for downstream bug).
+	{src: `{% m := map[string]interface{}{"key": []string{"a","b"}} %}{% var x = m["key"] | join(" ") %}{{ x }}`, expected: ok},
+	// Pipe operator with global join in short var declaration.
+	{src: `{% m := map[string]interface{}{"key": []string{"a","b"}} %}{%- x := m["key"] | join(" ") -%}{{ x }}`, expected: ok},
 }
 
 func TestCheckerTemplatesStatements(t *testing.T) {
@@ -679,18 +692,21 @@ func TestCheckerTemplatesStatements(t *testing.T) {
 		Name:         "p",
 		Declarations: native.Declarations{},
 	}
+	// Global join function for pipe operator tests
+	join := func(v interface{}, sep string) string { return "" }
 	options := Options{
 		FormatTypes: formatTypes,
 		Globals: native.Declarations{
-			"p":  p,
-			"T":  reflect.TypeOf(int(0)),
-			"I":  &I,
-			"S":  &S,
-			"Ci": 5,
-			"Ui": native.UntypedNumericConst("5"),
-			"Uf": native.UntypedNumericConst("5.0"),
-			"R":  'r',
-			"DS": reflect.TypeOf(definedString("")),
+			"p":    p,
+			"T":    reflect.TypeOf(int(0)),
+			"I":    &I,
+			"S":    &S,
+			"Ci":   5,
+			"Ui":   native.UntypedNumericConst("5"),
+			"Uf":   native.UntypedNumericConst("5.0"),
+			"R":    'r',
+			"DS":   reflect.TypeOf(definedString("")),
+			"join": join,
 		},
 	}
 	for _, cas := range checkerTemplateStmts {
