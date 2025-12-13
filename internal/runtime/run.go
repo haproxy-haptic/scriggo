@@ -281,6 +281,10 @@ func (vm *VM) run() (Addr, bool) {
 		case OpCallFunc:
 			call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1}
 			fn := vm.fn.Functions[uint8(a)]
+			// Profiling: record function call entry.
+			if vm.profiler != nil {
+				vm.profiler.enterCall(fn.Name, fn.Pkg, fn.File, vm.currentLine(), ProfileCallKindScriggoFunc, "")
+			}
 			off := vm.fn.Body[vm.pc]
 			vm.fp[0] += Addr(off.Op)
 			if vm.fp[0]+Addr(fn.NumReg[0]) > vm.st[0] {
@@ -312,6 +316,14 @@ func (vm *VM) run() (Addr, bool) {
 			} else {
 				call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1}
 				fn := f.fn
+				// Profiling: record indirect Scriggo function call entry.
+				if vm.profiler != nil {
+					kind := ProfileCallKindScriggoFunc
+					if fn.Macro {
+						kind = ProfileCallKindMacro
+					}
+					vm.profiler.enterCall(fn.Name, fn.Pkg, fn.File, vm.currentLine(), kind, fn.File)
+				}
 				off := vm.fn.Body[vm.pc]
 				vm.fp[0] += Addr(off.Op)
 				if vm.fp[0]+Addr(fn.NumReg[0]) > vm.st[0] {
@@ -351,6 +363,10 @@ func (vm *VM) run() (Addr, bool) {
 			}
 		case OpCallMacro:
 			fn := vm.fn.Functions[uint8(a)]
+			// Profiling: record macro call entry.
+			if vm.profiler != nil {
+				vm.profiler.enterCall(fn.Name, fn.Pkg, fn.File, vm.currentLine(), ProfileCallKindMacro, fn.File)
+			}
 			vm.executeMacro(fn, b)
 		case OpDynamicInclude:
 			// Dynamic include - looks up macro by path at runtime.
@@ -360,6 +376,10 @@ func (vm *VM) run() (Addr, bool) {
 			fn, ok := vm.env.dynamicMacros[path]
 			if !ok {
 				panic(vm.newPanic(errors.New("template not found: " + path)))
+			}
+			// Profiling: record dynamic include entry.
+			if vm.profiler != nil {
+				vm.profiler.enterCall(fn.Name, fn.Pkg, path, vm.currentLine(), ProfileCallKindDynamicInclude, path)
 			}
 			vm.executeMacro(fn, b)
 		case OpCallNative:
@@ -1724,6 +1744,10 @@ func (vm *VM) run() (Addr, bool) {
 			call := vm.calls[i]
 			fn := call.cl.fn
 			if call.status == started {
+				// Profiling: record function/macro return.
+				if vm.profiler != nil {
+					vm.profiler.exitCall()
+				}
 				if vm.fn.Macro {
 					if call.renderer != vm.renderer {
 						b := fn.Body[call.pc-2].B

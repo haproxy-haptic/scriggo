@@ -96,6 +96,7 @@ type VM struct {
 	cases    []reflect.SelectCase // select cases.
 	panic    *PanicError          // panic.
 	main     bool                 // reports whether this VM is executing the main goroutine.
+	profiler *profiler            // profiler for execution timing (nil when disabled).
 }
 
 // NewVM returns a new virtual machine.
@@ -209,6 +210,36 @@ func (vm *VM) SetDynamicMacros(macros map[string]*Function) {
 	vm.env.dynamicMacros = macros
 }
 
+// SetProfiling enables or disables profiling. When enabled, the VM will
+// collect timing data for function calls, macros, and includes.
+//
+// SetProfiling must not be called after vm has been started.
+func (vm *VM) SetProfiling(enabled bool) {
+	if enabled {
+		vm.profiler = newProfiler()
+	} else {
+		vm.profiler = nil
+	}
+}
+
+// GetProfileData returns the collected profiling data, or nil if profiling
+// was not enabled.
+func (vm *VM) GetProfileData() *ProfileData {
+	if vm.profiler == nil {
+		return nil
+	}
+	return vm.profiler.getData()
+}
+
+// currentLine returns the source line number for the current instruction,
+// or 0 if not available. Used for profiling instrumentation.
+func (vm *VM) currentLine() int {
+	if info, ok := vm.fn.InstructionInfo[vm.pc-1]; ok {
+		return info.Position.Line
+	}
+	return 0
+}
+
 // Stack returns the current stack trace.
 func (vm *VM) Stack(buf []byte, all bool) int {
 	// TODO(marco): implement all == true
@@ -272,6 +303,12 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 		panic(errNilPointer)
 	}
 
+	// Profiling: record native function call entry (skip for goroutines since we don't wait).
+	profileNative := vm.profiler != nil && !asGoroutine
+	if profileNative {
+		vm.profiler.enterCall(fn.name, fn.pkg, "", vm.currentLine(), ProfileCallKindNativeFunc, "")
+	}
+
 	// Make a copy of the frame pointer.
 	fp := vm.fp
 
@@ -315,6 +352,10 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 			}
 		}
 		vm.fp = fp
+		// Profiling: record native function call exit.
+		if profileNative {
+			vm.profiler.exitCall()
+		}
 		return
 	}
 
@@ -445,6 +486,11 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 	}
 
 	vm.fp = fp // Restore the frame pointer.
+
+	// Profiling: record native function call exit.
+	if profileNative {
+		vm.profiler.exitCall()
+	}
 
 	return
 }

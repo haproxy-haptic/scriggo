@@ -47,6 +47,13 @@ type BuildOptions struct {
 	//
 	// Used for templates only.
 	Globals native.Declarations
+
+	// EnableProfiling enables profiling instrumentation in the compiled template.
+	// When true, the runtime will collect timing data for function calls,
+	// macros, and includes during execution.
+	//
+	// Used for templates only.
+	EnableProfiling bool
 }
 
 // PrintFunc represents a function that prints the arguments of the print and
@@ -65,6 +72,16 @@ type RunOptions struct {
 	// If it is nil, the print and println builtins format their arguments as
 	// expected and write the result to standard error.
 	Print PrintFunc
+
+	// Profile receives profiling data after execution completes.
+	// Only populated if the template was built with EnableProfiling=true.
+	// Caller must allocate: &scriggo.Profile{}
+	//
+	// Note: Native function calls executed as goroutines (via go statement)
+	// are not included in the profile since their execution is asynchronous.
+	//
+	// Used for templates only. Ignored for programs.
+	Profile *Profile
 }
 
 // Program is a program compiled with the [Build] function.

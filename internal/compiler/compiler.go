@@ -71,6 +71,11 @@ type Options struct {
 	MDConverter Converter
 
 	TreeTransformer func(*ast.Tree) error
+
+	// EnableProfiling enables profiling instrumentation in the compiled code.
+	// When true, the runtime will collect timing data for function calls,
+	// macros, and includes during execution.
+	EnableProfiling bool
 }
 
 // GoModError represents an error in a go.mod file.
@@ -224,6 +229,7 @@ func BuildTemplate(fsys fs.FS, name string, opts Options) (*Code, error) {
 	// Update code with the unified globals and dynamic macros.
 	code.DynamicMacros = result.Macros
 	code.Globals = result.Globals
+	code.ProfilingEnabled = opts.EnableProfiling
 
 	return code, nil
 }
@@ -361,6 +367,8 @@ type Code struct {
 	// DynamicMacros maps template paths to compiled functions for dynamic includes.
 	// This map is populated at compile time and used at runtime for {% include variable %}.
 	DynamicMacros map[string]*runtime.Function
+	// ProfilingEnabled indicates whether profiling was enabled at build time.
+	ProfilingEnabled bool
 }
 
 // emitProgram emits the code for a program given its ast node, the type info
