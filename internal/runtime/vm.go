@@ -1167,6 +1167,8 @@ const (
 
 	OpRange
 
+	OpRangeInterface
+
 	OpRangeString
 
 	OpRealImag

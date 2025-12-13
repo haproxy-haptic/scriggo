@@ -1473,6 +1473,134 @@ func (vm *VM) run() (Addr, bool) {
 			vm.ok = vm.pc != endAddress
 			vm.pc = endAddress
 
+		// RangeInterface - range over interface{} typed expressions
+		// Uses reflection since concrete type is unknown at compile time.
+		// Loop variable registers are always general registers (interface{} type),
+		// so we use setGeneral directly instead of setFromReflectValue.
+		case OpRangeInterface:
+			endAddress := vm.pc
+			rangeAddress := endAddress - 1
+			bodyAddress := endAddress + 1
+			v := vm.general(a)
+			// Handle nil/invalid interface - iterate zero times
+			if !v.IsValid() {
+				vm.ok = false
+				vm.pc = endAddress
+				continue
+			}
+			switch kind := v.Kind(); kind {
+			case reflect.Map:
+				iter := v.MapRange()
+				for iter.Next() {
+					if b != 0 {
+						vm.setGeneral(b, iter.Key())
+					}
+					if c != 0 {
+						vm.setGeneral(c, iter.Value())
+					}
+					vm.pc = bodyAddress
+					addr, breakOut := vm.run()
+					if addr != rangeAddress {
+						return addr, breakOut
+					}
+					if breakOut {
+						break
+					}
+				}
+			case reflect.Chan:
+				var u reflect.Value
+				var ok bool
+				for {
+					if done == nil {
+						u, ok = v.Recv()
+					} else {
+						var chosen int
+						cas := reflect.SelectCase{Dir: reflect.SelectRecv, Chan: v}
+						vm.cases = append(vm.cases, cas, vm.env.doneCase)
+						chosen, u, ok = reflect.Select(vm.cases)
+						if chosen == 1 {
+							return vm.stop()
+						}
+						vm.cases = vm.cases[:0]
+					}
+					if !ok {
+						break
+					}
+					if b != 0 {
+						vm.setGeneral(b, u)
+					}
+					vm.pc = bodyAddress
+					addr, breakOut := vm.run()
+					if addr != rangeAddress {
+						return addr, breakOut
+					}
+					if breakOut {
+						break
+					}
+				}
+			case reflect.String:
+				for i, r := range v.String() {
+					if b != 0 {
+						vm.setGeneral(b, reflect.ValueOf(i))
+					}
+					if c != 0 {
+						vm.setGeneral(c, reflect.ValueOf(r))
+					}
+					vm.pc = bodyAddress
+					addr, breakOut := vm.run()
+					if addr != rangeAddress {
+						return addr, breakOut
+					}
+					if breakOut {
+						break
+					}
+				}
+			case reflect.Slice, reflect.Array:
+				length := v.Len()
+				for i := 0; i < length; i++ {
+					if b != 0 {
+						vm.setGeneral(b, reflect.ValueOf(i))
+					}
+					if c != 0 {
+						vm.setGeneral(c, v.Index(i))
+					}
+					vm.pc = bodyAddress
+					addr, breakOut := vm.run()
+					if addr != rangeAddress {
+						return addr, breakOut
+					}
+					if breakOut {
+						break
+					}
+				}
+			case reflect.Ptr:
+				elem := v.Elem()
+				if elem.Kind() != reflect.Array {
+					panic(runtimeError("cannot range over " + v.Type().String()))
+				}
+				length := elem.Len()
+				for i := 0; i < length; i++ {
+					if b != 0 {
+						vm.setGeneral(b, reflect.ValueOf(i))
+					}
+					if c != 0 {
+						vm.setGeneral(c, elem.Index(i))
+					}
+					vm.pc = bodyAddress
+					addr, breakOut := vm.run()
+					if addr != rangeAddress {
+						return addr, breakOut
+					}
+					if breakOut {
+						break
+					}
+				}
+			default:
+				panic(runtimeError("cannot range over " + v.Type().String()))
+			}
+			vm.ok = vm.pc != endAddress
+			vm.pc = endAddress
+
 		// RangeString
 		case OpRangeString, -OpRangeString:
 			endAddress := vm.pc
