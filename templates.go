@@ -14,6 +14,7 @@ import (
 
 	"github.com/open2b/scriggo/ast"
 	"github.com/open2b/scriggo/internal/compiler"
+	"github.com/open2b/scriggo/internal/compiler/types"
 	"github.com/open2b/scriggo/internal/runtime"
 	"github.com/open2b/scriggo/native"
 )
@@ -211,19 +212,19 @@ func initGlobalVariables(variables []compiler.Global, init map[string]interface{
 					panic(fmt.Sprintf("variable initializer %q cannot be nil", variable.Name))
 				}
 				val := reflect.ValueOf(value)
-				if typ := val.Type(); typ == variable.Type {
-					v := reflect.New(typ).Elem()
+				typ := val.Type()
+				if types.AssignableTo(typ, variable.Type) {
+					v := reflect.New(variable.Type).Elem()
 					v.Set(val)
 					values[i] = v
-				} else {
-					if typ.Kind() != reflect.Ptr || typ.Elem() != variable.Type {
-						panic(fmt.Sprintf("variable initializer %q must have type %s or %s, but have %s",
-							variable.Name, variable.Type, reflect.PointerTo(variable.Type), typ))
-					}
+				} else if typ.Kind() == reflect.Ptr && types.AssignableTo(typ.Elem(), variable.Type) {
 					if val.IsNil() {
 						panic(fmt.Sprintf("variable initializer %q cannot be a nil pointer", variable.Name))
 					}
-					values[i] = reflect.ValueOf(value).Elem()
+					values[i] = val.Elem()
+				} else {
+					panic(fmt.Sprintf("variable initializer %q must have type assignable to %s, but have %s",
+						variable.Name, variable.Type, typ))
 				}
 				continue
 			}
