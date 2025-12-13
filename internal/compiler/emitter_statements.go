@@ -235,9 +235,13 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 
 		case *ast.Raw:
 			if text := node.Text; text != nil {
-				txt := text.Text[node.Text.Cut.Left : len(text.Text)-text.Cut.Right]
-				if len(txt) != 0 {
-					em.fb.emitText(txt, em.inURL, em.isURLSet)
+				start := text.Cut.Left
+				end := len(text.Text) - text.Cut.Right
+				if start < end {
+					txt := text.Text[start:end]
+					if len(txt) != 0 {
+						em.fb.emitText(txt, em.inURL, em.isURLSet)
+					}
 				}
 			}
 
@@ -345,9 +349,13 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 			em.breakLabel = currentBreakLabel
 
 		case *ast.Text:
-			txt := node.Text[node.Cut.Left : len(node.Text)-node.Cut.Right]
-			if len(txt) != 0 {
-				em.fb.emitText(txt, em.inURL, em.isURLSet)
+			start := node.Cut.Left
+			end := len(node.Text) - node.Cut.Right
+			if start < end {
+				txt := node.Text[start:end]
+				if len(txt) != 0 {
+					em.fb.emitText(txt, em.inURL, em.isURLSet)
+				}
 			}
 
 		case *ast.TypeDeclaration:
