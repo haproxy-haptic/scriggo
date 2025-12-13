@@ -31,17 +31,37 @@ type varStore struct {
 	scriggoPackageVarRefs map[*ast.Package]map[string]int16
 
 	closureVars map[*runtime.Function]map[string]int16
+
+	// canonicalGlobals maps (pkg.name) to index for consistent global indexing
+	// across main and dynamic templates. When set, predefined variables must
+	// look up existing entries before creating new ones.
+	canonicalGlobals map[string]int16
 }
 
 // newVarStore returns a new *varStore.
-func newVarStore(emitter *emitter, indirectVars map[*ast.Identifier]bool) *varStore {
-	return &varStore{
+// If canonicalGlobals is provided (non-nil), the varStore will use those globals
+// and their indices for consistent global indexing across templates.
+func newVarStore(emitter *emitter, indirectVars map[*ast.Identifier]bool, canonicalGlobals []Global) *varStore {
+	vs := &varStore{
 		emitter:               emitter,
 		predefVarRef:          map[*runtime.Function]map[*reflect.Value]int16{},
 		indirectVars:          indirectVars,
 		scriggoPackageVarRefs: map[*ast.Package]map[string]int16{},
 		closureVars:           map[*runtime.Function]map[string]int16{},
 	}
+
+	// Build lookup index from canonical globals for dynamic template compilation.
+	// This ensures dynamic templates use the same global indices as the main template.
+	if len(canonicalGlobals) > 0 {
+		vs.canonicalGlobals = make(map[string]int16, len(canonicalGlobals))
+		vs.globals = make([]Global, len(canonicalGlobals))
+		copy(vs.globals, canonicalGlobals)
+		for i, g := range canonicalGlobals {
+			vs.canonicalGlobals[globalKey(g.Pkg, g.Name)] = int16(i)
+		}
+	}
+
+	return vs
 }
 
 // setClosureVar the index of the closure variable name for the given function.
@@ -83,6 +103,20 @@ func (vs *varStore) predefVarIndex(v *reflect.Value, typ reflect.Type, pkg, name
 	if index, ok := vs.predefVarRef[currFn][v]; ok {
 		return index
 	}
+
+	// Check canonical globals first (for dynamic templates).
+	// This ensures dynamic templates use the same indices as the main template.
+	if vs.canonicalGlobals != nil {
+		if index, ok := vs.canonicalGlobals[globalKey(pkg, name)]; ok {
+			if vs.predefVarRef[currFn] == nil {
+				vs.predefVarRef[currFn] = map[*reflect.Value]int16{}
+			}
+			vs.predefVarRef[currFn][v] = index
+			return index
+		}
+	}
+
+	// Original behavior: assign new index
 	index := int16(len(vs.globals))
 	g := newGlobal(pkg, name, typ, reflect.Value{})
 	if v.IsValid() {
