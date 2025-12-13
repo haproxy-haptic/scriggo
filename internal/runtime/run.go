@@ -126,6 +126,7 @@ func (vm *VM) run() (Addr, bool) {
 
 	done := vm.env.doneChan
 
+mainLoop:
 	for {
 
 		if done != nil && atomic.LoadInt32(&vm.env.done) == 1 {
@@ -275,7 +276,20 @@ func (vm *VM) run() (Addr, bool) {
 
 		// Break
 		case OpBreak:
-			return Addr(decodeUint24(a, b, c)), true
+			targetAddr := Addr(decodeUint24(a, b, c))
+			// Check if we're breaking from an inline range loop
+			// Find the range that this break targets (by matching end address)
+			for i := len(vm.ranges) - 1; i >= 0; i-- {
+				if vm.ranges[i].endAddr == targetAddr {
+					// Found the target range - pop all ranges up to and including it
+					vm.ranges = vm.ranges[:i]
+					vm.ok = false
+					vm.pc = targetAddr
+					continue mainLoop
+				}
+			}
+			// Not breaking from an inline range, return as before
+			return targetAddr, true
 
 		// Call
 		case OpCallFunc:
@@ -448,7 +462,26 @@ func (vm *VM) run() (Addr, bool) {
 
 		// Continue
 		case OpContinue:
-			return Addr(decodeUint24(a, b, c)), false
+			targetAddr := Addr(decodeUint24(a, b, c))
+			// Check if we're in an inline range loop targeting this address
+			if len(vm.ranges) > 0 {
+				rs := &vm.ranges[len(vm.ranges)-1]
+				if rs.rangeAddr == targetAddr {
+					// Advance to next iteration
+					if vm.advanceRangeInline(rs) {
+						// More elements - continue the loop
+						vm.pc = rs.bodyAddr
+						continue mainLoop
+					}
+					// No more elements - exit the loop
+					vm.ranges = vm.ranges[:len(vm.ranges)-1]
+					vm.ok = true
+					vm.pc = rs.endAddr
+					continue mainLoop
+				}
+			}
+			// Not in an inline range, return as before
+			return targetAddr, false
 
 		// Convert
 		case OpConvert:
@@ -1239,7 +1272,9 @@ func (vm *VM) run() (Addr, bool) {
 				vm.env.doPrint(nil)
 			}
 
-		// Range
+		// Range - inline execution version
+		// Instead of recursive vm.run() calls, we push state onto vm.ranges
+		// and execute the loop body inline within the same run() call.
 		case OpRange:
 			endAddress := vm.pc
 			rangeAddress := endAddress - 1
@@ -1247,108 +1282,159 @@ func (vm *VM) run() (Addr, bool) {
 			v := vm.general(a)
 			switch s := v.Interface().(type) {
 			case []int:
-				for i, v := range s {
-					if b != 0 {
-						vm.setInt(b, int64(i))
-					}
-					if c != 0 {
-						vm.setInt(c, int64(v))
-					}
-					vm.pc = bodyAddress
-					addr, breakOut := vm.run()
-					if addr != rangeAddress {
-						return addr, breakOut
-					}
-					if breakOut {
-						break
-					}
+				if len(s) == 0 {
+					vm.ok = false
+					vm.pc = endAddress
+					continue mainLoop
 				}
+				// Set up first iteration
+				if b != 0 {
+					vm.setInt(b, 0)
+				}
+				if c != 0 {
+					vm.setInt(c, int64(s[0]))
+				}
+				// Push range state for subsequent iterations
+				vm.ranges = append(vm.ranges, rangeState{
+					sliceInt:  s,
+					index:     0,
+					rangeAddr: rangeAddress,
+					bodyAddr:  bodyAddress,
+					endAddr:   endAddress,
+					indexReg:  b,
+					elemReg:   c,
+					rangeType: rangeSliceInt,
+				})
+				vm.pc = bodyAddress
+				continue mainLoop
+
 			case []byte:
-				for i, v := range s {
-					if b != 0 {
-						vm.setInt(b, int64(i))
-					}
-					if c != 0 {
-						vm.setInt(c, int64(v))
-					}
-					vm.pc = bodyAddress
-					addr, breakOut := vm.run()
-					if addr != rangeAddress {
-						return addr, breakOut
-					}
-					if breakOut {
-						break
-					}
+				if len(s) == 0 {
+					vm.ok = false
+					vm.pc = endAddress
+					continue mainLoop
 				}
+				if b != 0 {
+					vm.setInt(b, 0)
+				}
+				if c != 0 {
+					vm.setInt(c, int64(s[0]))
+				}
+				vm.ranges = append(vm.ranges, rangeState{
+					sliceByte: s,
+					index:     0,
+					rangeAddr: rangeAddress,
+					bodyAddr:  bodyAddress,
+					endAddr:   endAddress,
+					indexReg:  b,
+					elemReg:   c,
+					rangeType: rangeSliceByte,
+				})
+				vm.pc = bodyAddress
+				continue mainLoop
+
 			case []rune:
-				for i, v := range s {
-					if b != 0 {
-						vm.setInt(b, int64(i))
-					}
-					if c != 0 {
-						vm.setInt(c, int64(v))
-					}
-					vm.pc = bodyAddress
-					addr, breakOut := vm.run()
-					if addr != rangeAddress {
-						return addr, breakOut
-					}
-					if breakOut {
-						break
-					}
+				if len(s) == 0 {
+					vm.ok = false
+					vm.pc = endAddress
+					continue mainLoop
 				}
+				if b != 0 {
+					vm.setInt(b, 0)
+				}
+				if c != 0 {
+					vm.setInt(c, int64(s[0]))
+				}
+				vm.ranges = append(vm.ranges, rangeState{
+					sliceRune: s,
+					index:     0,
+					rangeAddr: rangeAddress,
+					bodyAddr:  bodyAddress,
+					endAddr:   endAddress,
+					indexReg:  b,
+					elemReg:   c,
+					rangeType: rangeSliceRune,
+				})
+				vm.pc = bodyAddress
+				continue mainLoop
+
 			case []float64:
-				for i, v := range s {
-					if b != 0 {
-						vm.setInt(b, int64(i))
-					}
-					if c != 0 {
-						vm.setFloat(c, v)
-					}
-					vm.pc = bodyAddress
-					addr, breakOut := vm.run()
-					if addr != rangeAddress {
-						return addr, breakOut
-					}
-					if breakOut {
-						break
-					}
+				if len(s) == 0 {
+					vm.ok = false
+					vm.pc = endAddress
+					continue mainLoop
 				}
+				if b != 0 {
+					vm.setInt(b, 0)
+				}
+				if c != 0 {
+					vm.setFloat(c, s[0])
+				}
+				vm.ranges = append(vm.ranges, rangeState{
+					sliceFloat: s,
+					index:      0,
+					rangeAddr:  rangeAddress,
+					bodyAddr:   bodyAddress,
+					endAddr:    endAddress,
+					indexReg:   b,
+					elemReg:    c,
+					rangeType:  rangeSliceFloat64,
+				})
+				vm.pc = bodyAddress
+				continue mainLoop
+
 			case []string:
-				for i, v := range s {
-					if b != 0 {
-						vm.setInt(b, int64(i))
-					}
-					if c != 0 {
-						vm.setString(c, v)
-					}
-					vm.pc = bodyAddress
-					addr, breakOut := vm.run()
-					if addr != rangeAddress {
-						return addr, breakOut
-					}
-					if breakOut {
-						break
-					}
+				if len(s) == 0 {
+					vm.ok = false
+					vm.pc = endAddress
+					continue mainLoop
 				}
+				if b != 0 {
+					vm.setInt(b, 0)
+				}
+				if c != 0 {
+					vm.setString(c, s[0])
+				}
+				vm.ranges = append(vm.ranges, rangeState{
+					sliceString: s,
+					index:       0,
+					rangeAddr:   rangeAddress,
+					bodyAddr:    bodyAddress,
+					endAddr:     endAddress,
+					indexReg:    b,
+					elemReg:     c,
+					rangeType:   rangeSliceString,
+				})
+				vm.pc = bodyAddress
+				continue mainLoop
+
 			case []interface{}:
-				for i, v := range s {
-					if b != 0 {
-						vm.setInt(b, int64(i))
-					}
-					if c != 0 {
-						vm.setGeneral(c, reflect.ValueOf(v))
-					}
-					vm.pc = bodyAddress
-					addr, breakOut := vm.run()
-					if addr != rangeAddress {
-						return addr, breakOut
-					}
-					if breakOut {
-						break
-					}
+				if len(s) == 0 {
+					vm.ok = false
+					vm.pc = endAddress
+					continue mainLoop
 				}
+				if b != 0 {
+					vm.setInt(b, 0)
+				}
+				if c != 0 {
+					vm.setGeneral(c, reflect.ValueOf(s[0]))
+				}
+				vm.ranges = append(vm.ranges, rangeState{
+					sliceIface: s,
+					index:      0,
+					rangeAddr:  rangeAddress,
+					bodyAddr:   bodyAddress,
+					endAddr:    endAddress,
+					indexReg:   b,
+					elemReg:    c,
+					rangeType:  rangeSliceInterface,
+				})
+				vm.pc = bodyAddress
+				continue mainLoop
+
 			case map[string]int:
+				// Use native Go map iteration - faster than reflection
 				for i, v := range s {
 					if b != 0 {
 						vm.setString(b, i)
@@ -1365,6 +1451,9 @@ func (vm *VM) run() (Addr, bool) {
 						break
 					}
 				}
+				vm.ok = vm.pc != endAddress
+				vm.pc = endAddress
+
 			case map[string]bool:
 				for i, v := range s {
 					if b != 0 {
@@ -1382,6 +1471,9 @@ func (vm *VM) run() (Addr, bool) {
 						break
 					}
 				}
+				vm.ok = vm.pc != endAddress
+				vm.pc = endAddress
+
 			case map[string]string:
 				for i, v := range s {
 					if b != 0 {
@@ -1399,6 +1491,9 @@ func (vm *VM) run() (Addr, bool) {
 						break
 					}
 				}
+				vm.ok = vm.pc != endAddress
+				vm.pc = endAddress
+
 			case map[string]interface{}:
 				for i, v := range s {
 					if b != 0 {
@@ -1416,9 +1511,13 @@ func (vm *VM) run() (Addr, bool) {
 						break
 					}
 				}
+				vm.ok = vm.pc != endAddress
+				vm.pc = endAddress
+
 			default:
 				switch kind := v.Kind(); kind {
 				case reflect.Map:
+					// Use recursive approach for generic maps
 					iter := v.MapRange()
 					for iter.Next() {
 						if b != 0 {
@@ -1436,7 +1535,11 @@ func (vm *VM) run() (Addr, bool) {
 							break
 						}
 					}
+					vm.ok = vm.pc != endAddress
+					vm.pc = endAddress
+
 				case reflect.Chan:
+					// Channels still use recursive approach due to blocking semantics
 					var u reflect.Value
 					var ok bool
 					for {
@@ -1467,31 +1570,68 @@ func (vm *VM) run() (Addr, bool) {
 							break
 						}
 					}
+					vm.ok = vm.pc != endAddress
+					vm.pc = endAddress
+
+				case reflect.String:
+					str := v.String()
+					if len(str) == 0 {
+						vm.ok = false
+						vm.pc = endAddress
+						continue mainLoop
+					}
+					// Decode first rune
+					r, size := decodeRuneInString(str)
+					if b != 0 {
+						vm.setInt(b, 0)
+					}
+					if c != 0 {
+						vm.setInt(c, int64(r))
+					}
+					vm.ranges = append(vm.ranges, rangeState{
+						strVal:    str,
+						bytePos:   size,
+						rangeAddr: rangeAddress,
+						bodyAddr:  bodyAddress,
+						endAddr:   endAddress,
+						indexReg:  b,
+						elemReg:   c,
+						rangeType: rangeString,
+					})
+					vm.pc = bodyAddress
+					continue mainLoop
+
 				default:
 					if kind == reflect.Ptr {
 						v = v.Elem()
 					}
 					length := v.Len()
-					for i := 0; i < length; i++ {
-						if b != 0 {
-							vm.setInt(b, int64(i))
-						}
-						if c != 0 {
-							vm.setFromReflectValue(c, v.Index(i))
-						}
-						vm.pc = bodyAddress
-						addr, breakOut := vm.run()
-						if addr != rangeAddress {
-							return addr, breakOut
-						}
-						if breakOut {
-							break
-						}
+					if length == 0 {
+						vm.ok = false
+						vm.pc = endAddress
+						continue mainLoop
 					}
+					if b != 0 {
+						vm.setInt(b, 0)
+					}
+					if c != 0 {
+						vm.setFromReflectValue(c, v.Index(0))
+					}
+					vm.ranges = append(vm.ranges, rangeState{
+						reflectVal: v,
+						index:      0,
+						length:     length,
+						rangeAddr:  rangeAddress,
+						bodyAddr:   bodyAddress,
+						endAddr:    endAddress,
+						indexReg:   b,
+						elemReg:    c,
+						rangeType:  rangeSliceReflect,
+					})
+					vm.pc = bodyAddress
+					continue mainLoop
 				}
 			}
-			vm.ok = vm.pc != endAddress
-			vm.pc = endAddress
 
 		// RangeInterface - range over interface{} typed expressions
 		// Uses reflection since concrete type is unknown at compile time.
@@ -1963,6 +2103,58 @@ func (vm *VM) run() (Addr, bool) {
 			if ok {
 				t = st.GoType()
 			}
+			// Fast paths for basic types - avoid reflect.New allocation
+			// Only use fast path for unnamed types (e.g., plain int, string)
+			// Named types like native.HTML need to go through reflection to preserve type info
+			if st == nil && t.Name() == t.Kind().String() {
+				var err error
+				ctx := Context(c)
+				switch t.Kind() {
+				case reflect.Int:
+					err = vm.renderer.Show(vm.env, int(vm.intk(b, op < 0)), ctx)
+					if err != nil {
+						panic(outError{err})
+					}
+					continue mainLoop
+				case reflect.Int64:
+					err = vm.renderer.Show(vm.env, vm.intk(b, op < 0), ctx)
+					if err != nil {
+						panic(outError{err})
+					}
+					continue mainLoop
+				case reflect.Int32:
+					err = vm.renderer.Show(vm.env, int32(vm.intk(b, op < 0)), ctx)
+					if err != nil {
+						panic(outError{err})
+					}
+					continue mainLoop
+				case reflect.String:
+					err = vm.renderer.Show(vm.env, vm.stringk(b, op < 0), ctx)
+					if err != nil {
+						panic(outError{err})
+					}
+					continue mainLoop
+				case reflect.Bool:
+					err = vm.renderer.Show(vm.env, vm.boolk(b, op < 0), ctx)
+					if err != nil {
+						panic(outError{err})
+					}
+					continue mainLoop
+				case reflect.Float64:
+					err = vm.renderer.Show(vm.env, vm.floatk(b, op < 0), ctx)
+					if err != nil {
+						panic(outError{err})
+					}
+					continue mainLoop
+				case reflect.Float32:
+					err = vm.renderer.Show(vm.env, float32(vm.floatk(b, op < 0)), ctx)
+					if err != nil {
+						panic(outError{err})
+					}
+					continue mainLoop
+				}
+			}
+			// Fallback: use reflection for complex types
 			rv := reflect.New(t).Elem()
 			vm.getIntoReflectValue(b, rv, op < 0)
 			if st != nil {
