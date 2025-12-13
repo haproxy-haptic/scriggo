@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/open2b/scriggo/ast"
+	"github.com/open2b/scriggo/internal/fstest"
 )
 
 // TestJinja2WhitespaceControl tests the Jinja2-style whitespace control markers.
@@ -274,6 +275,38 @@ func TestLexerTrimMarkers(t *testing.T) {
 				if endToken == nil || !endToken.trimRight {
 					t.Errorf("trimRight = false, want true")
 				}
+			}
+		})
+	}
+}
+
+// TestWhitespaceControlEmitter tests that whitespace control doesn't cause
+// slice bounds panics in the emitter.
+func TestWhitespaceControlEmitter(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+	}{
+		{
+			name:     "trim between macro and for",
+			template: "{% macro X() string %}\n  {%- for i in []int{} -%}{%- end -%}\n{% end %}",
+		},
+		{
+			name:     "trim left after newline",
+			template: "{% if true %}\n{%- end %}",
+		},
+		{
+			name:     "consecutive trim markers",
+			template: "{%- if true -%}\n\n{%- end -%}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fsys := fstest.Files{"test.txt": tt.template}
+			_, err := BuildTemplate(fsys, "test.txt", Options{})
+			if err != nil {
+				t.Fatalf("BuildTemplate failed: %v", err)
 			}
 		})
 	}
