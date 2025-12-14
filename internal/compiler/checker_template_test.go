@@ -1206,6 +1206,17 @@ func TestRenderGlob(t *testing.T) {
 			mainFile: "index.html",
 			wantErr:  "",
 		},
+		{
+			name: "render_glob in rendered template triggers dependency analysis",
+			files: fstest.Files{
+				"index.html":      `{{ render "wrapper.html" }}`,
+				"wrapper.html":    `{{ render_glob "parts/*.html" }}`,
+				"parts/a.html":    "part A",
+				"parts/b.html":    "part B",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
 	}
 
 	for _, tt := range tests {
