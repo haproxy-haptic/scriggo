@@ -182,7 +182,11 @@ func (em *emitter) emitPackage(pkg *ast.Package, extendingFile bool, path string
 					continue
 				}
 				em.fnStore.makeAvailableScriggoFn(em.pkg, fun.Ident.Name, fn)
-				isDummyMacroForRender := strings.HasPrefix(fun.Ident.Name, `M"`) && strings.HasSuffix(fun.Ident.Name, `"`)
+				// Check if this is a synthetic macro created for render or render with inherit_context
+				// Regular render macros: M"/path" (ends with ")
+				// Inherit context macros: M"/path"_IC0 (contains "_IC" after the closing quote)
+				isDummyMacroForRender := strings.HasPrefix(fun.Ident.Name, `M"`) &&
+					(strings.HasSuffix(fun.Ident.Name, `"`) || strings.Contains(fun.Ident.Name, `"_IC`))
 				if isExported(fun.Ident.Name) || isDummyMacroForRender {
 					functions[fun.Ident.Name] = fn
 				}
