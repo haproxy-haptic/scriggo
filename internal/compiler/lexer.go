@@ -1560,8 +1560,10 @@ func (l *lexer) lexIdentifierOrKeyword(s int) (tokenTyp, string) {
 			typ = tokenRaw
 		case "render":
 			typ = tokenRender
-		case "include":
-			typ = tokenInclude
+		case "render_glob":
+			typ = tokenRenderGlob
+		case "inherit_context":
+			typ = tokenInheritContext
 		case "show":
 			typ = tokenShow
 		case "using":

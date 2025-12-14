@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/open2b/scriggo/ast"
@@ -119,8 +120,6 @@ func (pp *templateExpansion) parseNodeFile(node ast.Node) (*ast.Tree, error) {
 		imported = true
 	case *ast.Render:
 		name = n.Path
-	case *ast.Include:
-		name = n.Path
 	}
 	parent := pp.paths[len(pp.paths)-1]
 	name, err = rooted(parent, name)
@@ -145,23 +144,15 @@ func (pp *templateExpansion) parseNodeFile(node ast.Node) (*ast.Tree, error) {
 				return nil, syntaxError(node.Pos(), "import of file extended at %s:%s", parsed.parent.path, n.Pos())
 			case *ast.Render:
 				return nil, syntaxError(node.Pos(), "render of file extended at %s:%s", parsed.parent.path, n.Pos())
-			case *ast.Include:
-				return nil, syntaxError(node.Pos(), "include of file extended at %s:%s", parsed.parent.path, n.Pos())
 			}
 		case *ast.Import:
 			switch node.(type) {
 			case *ast.Render:
 				return nil, syntaxError(node.Pos(), "render of file imported at %s:%s", parsed.parent.path, n.Pos())
-			case *ast.Include:
-				return nil, syntaxError(node.Pos(), "include of file imported at %s:%s", parsed.parent.path, n.Pos())
 			}
 		case *ast.Render:
 			if _, ok := node.(*ast.Import); ok {
 				return nil, syntaxError(node.Pos(), "import of file rendered at %s:%s", parsed.parent.path, n.Pos())
-			}
-		case *ast.Include:
-			if _, ok := node.(*ast.Import); ok {
-				return nil, syntaxError(node.Pos(), "import of file included at %s:%s", parsed.parent.path, n.Pos())
 			}
 		}
 		tree = parsed.tree
@@ -269,24 +260,58 @@ func (pp *templateExpansion) expand(nodes []ast.Node) error {
 				return err
 			}
 
-		case *ast.Include:
-			// include "path"
+		case *ast.RenderGlob:
+			// render_glob "pattern"
 
-			var err error
 			pp.canExtend = false
-			n.Tree, err = pp.parseNodeFile(n)
-			if err != nil {
-				parent := pp.paths[len(pp.paths)-1]
-				rootedPath, _ := rooted(parent, n.Path)
-				if errors.Is(err, os.ErrNotExist) {
-					err = syntaxError(n.Pos(), "include path %q does not exist", rootedPath)
-				} else if e, ok := err.(*CycleError); ok {
-					e.msg = "\n\tincludes " + rootedPath + e.msg
-					if e.path == pp.paths[len(pp.paths)-1] {
-						e.pos = *(n.Pos())
-					}
+
+			// Find all files matching the glob pattern.
+			// Pattern is relative to filesystem root.
+			var matches []string
+			err := fs.WalkDir(pp.fsys, ".", func(filePath string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return nil // Skip directories we can't access
 				}
-				return err
+				if d.IsDir() {
+					return nil
+				}
+				// Match against the full path from root
+				matched, matchErr := path.Match(n.Pattern, filePath)
+				if matchErr != nil {
+					return matchErr // Invalid pattern
+				}
+				if matched {
+					matches = append(matches, filePath)
+				}
+				return nil
+			})
+			if err != nil {
+				return syntaxError(n.Pos(), "render_glob pattern error: %v", err)
+			}
+
+			// Sort matches alphabetically for deterministic order.
+			sort.Strings(matches)
+
+			// Create and expand a Render node for each matched file.
+			n.Renders = make([]*ast.Render, 0, len(matches))
+			for _, matchedPath := range matches {
+				render := ast.NewRender(n.Position, "/"+matchedPath)
+				render.InheritContext = n.InheritContext
+				render.Tree, err = pp.parseNodeFile(render)
+				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						// Should not happen since we just found it, but handle gracefully
+						continue
+					}
+					if e, ok := err.(*CycleError); ok {
+						e.msg = "\n\trenders " + matchedPath + e.msg
+						if e.path == pp.paths[len(pp.paths)-1] {
+							e.pos = *(n.Pos())
+						}
+					}
+					return err
+				}
+				n.Renders = append(n.Renders, render)
 			}
 
 		default:

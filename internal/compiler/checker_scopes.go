@@ -6,6 +6,7 @@ package compiler
 
 import (
 	"reflect"
+	"sort"
 
 	"github.com/open2b/scriggo/ast"
 )
@@ -466,6 +467,36 @@ func (scopes *scopes) Exit() {
 	scopes.s = scopes.s[:last]
 
 	return
+}
+
+// LocalVar represents a local variable for inherit_context.
+type LocalVar struct {
+	Name string
+	TI   *typeInfo
+}
+
+// LocalVariables returns all variables declared in function scopes (4+).
+// Variables are sorted alphabetically by name for deterministic ordering.
+func (scopes *scopes) LocalVariables() []LocalVar {
+	var vars []LocalVar
+	seen := make(map[string]bool)
+	// Iterate scopes 4+ (function/template scopes)
+	for i := 4; i < len(scopes.s); i++ {
+		for name, sn := range scopes.s[i].names {
+			if seen[name] || name == "_" || (len(name) > 0 && name[0] == '$') {
+				continue
+			}
+			// Skip constants and types, only include addressable variables
+			if sn.decl == nil || !sn.ti.Addressable() {
+				continue
+			}
+			seen[name] = true
+			vars = append(vars, LocalVar{Name: name, TI: sn.ti})
+		}
+	}
+	// Sort by name for deterministic parameter order
+	sort.Slice(vars, func(i, j int) bool { return vars[i].Name < vars[j].Name })
+	return vars
 }
 
 var boolType = reflect.TypeOf(false)

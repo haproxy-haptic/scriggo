@@ -23,11 +23,6 @@ type env struct {
 	typeof  TypeOfFunc      // typeof function.
 	conv    Converter       // Markdown converter
 
-	// dynamicMacros maps template paths to compiled macro functions for
-	// dynamic include support ({% include variable %}).
-	// This map is populated at compile time and read-only at runtime.
-	dynamicMacros map[string]*Function
-
 	done     int32
 	doneChan <-chan struct{}
 	doneCase reflect.SelectCase

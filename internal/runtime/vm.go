@@ -474,14 +474,6 @@ func (vm *VM) SetPrint(p PrintFunc) {
 	vm.env.print = p
 }
 
-// SetDynamicMacros sets the map of dynamically-includable templates.
-// This map is used by OpDynamicInclude to look up template functions by path.
-//
-// SetDynamicMacros must not be called after vm has been started.
-func (vm *VM) SetDynamicMacros(macros map[string]*Function) {
-	vm.env.dynamicMacros = macros
-}
-
 // SetProfiling enables or disables profiling. When enabled, the VM will
 // collect timing data for function calls, macros, and includes.
 //
@@ -1394,7 +1386,6 @@ const (
 	OpCallFunc
 	OpCallIndirect
 	OpCallMacro
-	OpDynamicInclude // Dynamic include - looks up macro by path at runtime
 	OpCallNative
 
 	OpCap

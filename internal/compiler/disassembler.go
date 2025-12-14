@@ -276,7 +276,7 @@ func disassembleFunction(b *bytes.Buffer, globals []Global, fn *runtime.Function
 		}
 		switch in.Op {
 		case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpCallIndirect, runtime.OpCallNative,
-			runtime.OpTailCall, runtime.OpSlice, runtime.OpStringSlice, runtime.OpDynamicInclude:
+			runtime.OpTailCall, runtime.OpSlice, runtime.OpStringSlice:
 			addr += 1
 		case runtime.OpDefer:
 			addr += 2
@@ -999,11 +999,10 @@ var operationName = [...]string{
 
 	runtime.OpBreak: "Break",
 
-	runtime.OpCallFunc:       "Call",
-	runtime.OpCallIndirect:   "Call",
-	runtime.OpCallMacro:      "Call",
-	runtime.OpCallNative:     "Call",
-	runtime.OpDynamicInclude: "DynamicInclude",
+	runtime.OpCallFunc:     "Call",
+	runtime.OpCallIndirect: "Call",
+	runtime.OpCallMacro:    "Call",
+	runtime.OpCallNative:   "Call",
 
 	runtime.OpCap: "Cap",
 

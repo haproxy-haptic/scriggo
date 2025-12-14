@@ -242,9 +242,35 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 				panic(syntaxError(tok.pos, "invalid file path: %q", path))
 			}
 			pos.End = tok.pos.End
-			operand = ast.NewRender(pos, path)
-			p.unexpanded = append(p.unexpanded, operand)
+			render := ast.NewRender(pos, path)
 			tok = p.next()
+			if tok.typ == tokenInheritContext {
+				render.InheritContext = true
+				pos.End = tok.pos.End
+				tok = p.next()
+			}
+			operand = render
+			p.unexpanded = append(p.unexpanded, operand)
+		case tokenRenderGlob:
+			pos := tok.pos
+			tok = p.next()
+			if tok.typ != tokenInterpretedString && tok.typ != tokenRawString {
+				panic(syntaxError(tok.pos, "unexpected %s, expecting string", tok))
+			}
+			var pattern = unquoteString(tok.txt)
+			if !ValidGlobPattern(pattern) {
+				panic(syntaxError(tok.pos, "invalid glob pattern: %q", pattern))
+			}
+			pos.End = tok.pos.End
+			renderGlob := ast.NewRenderGlob(pos, pattern)
+			tok = p.next()
+			if tok.typ == tokenInheritContext {
+				renderGlob.InheritContext = true
+				pos.End = tok.pos.End
+				tok = p.next()
+			}
+			operand = renderGlob
+			p.unexpanded = append(p.unexpanded, operand)
 		default:
 			if tok.typ == tokenLeftBrace && canElideType { // {
 				break

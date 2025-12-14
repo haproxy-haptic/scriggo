@@ -1149,9 +1149,10 @@ func NewRaw(pos *Position, marker, tag string, text *Text) *Raw {
 // Render node represents a "render <path>" expression.
 type Render struct {
 	expression
-	*Position        // position in the source.
-	Path      string // path of the file to render.
-	Tree      *Tree  // expanded tree of <path>.
+	*Position              // position in the source.
+	Path           string  // path of the file to render.
+	Tree           *Tree   // expanded tree of <path>.
+	InheritContext bool    // if true, inherit local variables from call site.
 
 	// IR holds the internal representation. The type checker transforms the
 	// 'render' expression into a macro call, where the macro body is the
@@ -1172,53 +1173,36 @@ func NewRender(pos *Position, path string) *Render {
 
 // String returns the string representation of n.
 func (n *Render) String() string {
-	return "render " + strconv.Quote(n.Path)
-}
-
-// Include node represents an "include <path>" statement.
-// It's similar to Render but uses statement syntax instead of expression syntax.
-// Include supports both static paths (string literals, resolved at compile time)
-// and dynamic paths (expressions, resolved at runtime).
-type Include struct {
-	*Position         // position in the source.
-	Path      string  // path of the file to include (for static includes).
-	PathExpr  Expression // path expression (for dynamic includes, nil if static).
-	Format    Format  // format of the included content.
-	Tree      *Tree   // expanded tree of <path> (only for static includes).
-
-	// IR holds the internal representation. The type checker transforms the
-	// 'include' statement into a macro call, where the macro body is the
-	// included file.
-	IR struct {
-		// Import is the 'import' declaration that imports the dummy file
-		// declaring the dummy macro.
-		Import *Import
-		// Call is the call to the dummy macro.
-		Call *Call
+	s := "render " + strconv.Quote(n.Path)
+	if n.InheritContext {
+		s += " inherit_context"
 	}
+	return s
 }
 
-// NewInclude returns a new static [Include] node with a string path.
-func NewInclude(pos *Position, path string, format Format) *Include {
-	return &Include{Position: pos, Path: path, Format: format}
+// RenderGlob node represents a "render_glob <pattern>" expression.
+// It expands at compile time to zero or more Render nodes based on
+// files matching the glob pattern.
+type RenderGlob struct {
+	expression
+	*Position              // position in the source.
+	Pattern        string  // glob pattern for files to render.
+	InheritContext bool    // if true, inherit local variables from call site.
+	Renders        []*Render // expanded render nodes (filled during parsing).
 }
 
-// NewDynamicInclude returns a new dynamic [Include] node with an expression path.
-func NewDynamicInclude(pos *Position, pathExpr Expression, format Format) *Include {
-	return &Include{Position: pos, PathExpr: pathExpr, Format: format}
-}
-
-// IsDynamic returns true if this is a dynamic include (path computed at runtime).
-func (n *Include) IsDynamic() bool {
-	return n.PathExpr != nil
+// NewRenderGlob returns a new [RenderGlob] node.
+func NewRenderGlob(pos *Position, pattern string) *RenderGlob {
+	return &RenderGlob{Position: pos, Pattern: pattern}
 }
 
 // String returns the string representation of n.
-func (n *Include) String() string {
-	if n.PathExpr != nil {
-		return "include <dynamic>"
+func (n *RenderGlob) String() string {
+	s := "render_glob " + strconv.Quote(n.Pattern)
+	if n.InheritContext {
+		s += " inherit_context"
 	}
-	return "include " + strconv.Quote(n.Path)
+	return s
 }
 
 // Return node represents a "return" statement.

@@ -46,7 +46,6 @@ type Template struct {
 	typeof           runtime.TypeOfFunc
 	globals          []compiler.Global
 	conv             runtime.Converter
-	dynamicMacros    map[string]*runtime.Function
 	profilingEnabled bool
 }
 
@@ -124,7 +123,6 @@ func BuildTemplate(fsys fs.FS, name string, options *BuildOptions) (*Template, e
 		typeof:           code.TypeOf,
 		globals:          code.Globals,
 		conv:             runtime.Converter(conv),
-		dynamicMacros:    code.DynamicMacros,
 		profilingEnabled: code.ProfilingEnabled,
 	}, nil
 }
@@ -162,9 +160,6 @@ func (t *Template) Run(out io.Writer, vars map[string]interface{}, options *RunO
 		}
 	}
 	vm.SetRenderer(out, t.conv)
-	if t.dynamicMacros != nil {
-		vm.SetDynamicMacros(t.dynamicMacros)
-	}
 	// Enable profiling if it was enabled at build time.
 	if t.profilingEnabled {
 		vm.SetProfiling(true)

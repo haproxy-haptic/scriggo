@@ -61,7 +61,8 @@ const (
 	tokenImport                            // import
 	tokenShow                              // show
 	tokenRender                            // render
-	tokenInclude                           // include
+	tokenRenderGlob                        // render_glob
+	tokenInheritContext                    // inherit_context
 	tokenMacro                             // macro
 	tokenFunc                              // func
 	tokenReturn                            // return
@@ -168,7 +169,8 @@ var tokenString = map[tokenTyp]string{
 	tokenImport:                   "import",
 	tokenShow:                     "show",
 	tokenRender:                   "render",
-	tokenInclude:                  "include",
+	tokenRenderGlob:               "render_glob",
+	tokenInheritContext:           "inherit_context",
 	tokenFunc:                     "func",
 	tokenReturn:                   "return",
 	tokenMacro:                    "macro",

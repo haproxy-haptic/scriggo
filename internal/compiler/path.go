@@ -7,6 +7,7 @@ package compiler
 import (
 	"bytes"
 	"io/fs"
+	pathpkg "path"
 	"strings"
 	"unicode"
 
@@ -138,4 +139,21 @@ func cleanPath(path string) string {
 		}
 	}
 	return string(b)
+}
+
+// ValidGlobPattern validates a glob pattern for use with render_glob.
+// It checks that the pattern has valid glob syntax using path.Match.
+// The pattern must be relative to the filesystem root (no leading /).
+func ValidGlobPattern(pattern string) bool {
+	if len(pattern) == 0 {
+		return false
+	}
+	// Pattern should not start with / (relative to filesystem root)
+	if pattern[0] == '/' {
+		return false
+	}
+	// Validate glob syntax by doing a dry run of path.Match.
+	// path.Match returns an error only for malformed patterns.
+	_, err := pathpkg.Match(pattern, "")
+	return err == nil
 }

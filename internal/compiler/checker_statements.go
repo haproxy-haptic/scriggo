@@ -184,9 +184,6 @@ nodesLoop:
 				panic(err)
 			}
 
-		case *ast.Include:
-			tc.checkInclude(node)
-
 		case *ast.Text:
 
 		case *ast.Block:
@@ -1597,51 +1594,4 @@ func checkShowJSON(t reflect.Type, types []reflect.Type) error {
 		return fmt.Errorf("cannot show type %s as JSON", t)
 	}
 	return nil
-}
-
-// checkInclude checks the 'include' statement and transforms its internal
-// representation to a macro call, similar to how render expressions work.
-// For dynamic includes, it type checks the path expression but does not
-// transform it (dynamic includes are handled at runtime).
-func (tc *typechecker) checkInclude(include *ast.Include) {
-	// Handle dynamic includes (path computed at runtime)
-	if include.IsDynamic() {
-		// Type check the path expression and verify it evaluates to string
-		ti := tc.checkExpr(include.PathExpr)
-		if ti != nil && ti.Type != nil && ti.Type.Kind() != reflect.String {
-			panic(tc.errorf(include.PathExpr, "include path must be string, got %s", ti.Type))
-		}
-		// Dynamic includes are handled at runtime, no compile-time transformation
-		return
-	}
-
-	// Handle static includes (path known at compile time)
-	tree := include.Tree
-	if tree == nil {
-		return
-	}
-
-	stored, ok := tc.compilation.renderImportMacro[tree]
-	if !ok {
-		macroDecl := ast.NewFunc(
-			nil,
-			ast.NewIdentifier(nil, "M"+strconv.Quote(tree.Path)),
-			ast.NewFuncType(nil, true, nil, nil, false), // func()
-			ast.NewBlock(nil, tree.Nodes),
-			false,
-			tree.Format,
-		)
-		importt := ast.NewImport(nil, ast.NewIdentifier(nil, "."), "/"+include.Path, nil)
-		importt.Tree = tree
-		importt.Tree.Nodes = []ast.Node{macroDecl}
-		stored.Macro = macroDecl
-		stored.Import = importt
-		tc.compilation.renderImportMacro[tree] = stored
-	}
-
-	include.IR.Call = ast.NewCall(include.Pos(), stored.Macro.Ident, nil, false)
-	include.IR.Import = stored.Import
-
-	tc.checkNodes([]ast.Node{stored.Import})
-	tc.checkExpr(include.IR.Call)
 }

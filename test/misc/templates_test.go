@@ -1197,12 +1197,12 @@ func TestPanicErrorContextRender(t *testing.T) {
 	}
 }
 
-// TestPanicErrorContextInclude tests that PanicError includes correct
-// path when panic occurs in an included template.
-func TestPanicErrorContextInclude(t *testing.T) {
+// TestPanicErrorContextRenderedFile tests that PanicError includes correct
+// path when panic occurs in a rendered template.
+func TestPanicErrorContextRenderedFile(t *testing.T) {
 	fsys := fstest.Files{
-		"index.txt":   `before {% include "partial.txt" %} after`,
-		"partial.txt": `{% panic("include panic") %}`,
+		"index.txt":   `before {{ render "partial.txt" }} after`,
+		"partial.txt": `{% panic("render panic") %}`,
 	}
 	template, err := scriggo.BuildTemplate(fsys, "index.txt", nil)
 	if err != nil {
@@ -1217,7 +1217,7 @@ func TestPanicErrorContextInclude(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *scriggo.PanicError, got %T: %v", err, err)
 	}
-	// Check that path points to the included file where the panic occurred
+	// Check that path points to the rendered file where the panic occurred
 	if panicErr.Path() != "partial.txt" {
 		t.Errorf("expected path 'partial.txt', got %q", panicErr.Path())
 	}
@@ -1259,11 +1259,11 @@ func TestPanicErrorStackTrace(t *testing.T) {
 }
 
 // TestPanicErrorStackTraceDeepNesting tests stack trace with multiple levels
-// of includes to verify the full call chain is captured.
+// of renders to verify the full call chain is captured.
 func TestPanicErrorStackTraceDeepNesting(t *testing.T) {
 	fsys := fstest.Files{
-		"index.txt":  `{% include "level1.txt" %}`,
-		"level1.txt": `{% include "level2.txt" %}`,
+		"index.txt":  `{{ render "level1.txt" }}`,
+		"level1.txt": `{{ render "level2.txt" }}`,
 		"level2.txt": `{% panic("deep panic") %}`,
 	}
 	template, err := scriggo.BuildTemplate(fsys, "index.txt", nil)

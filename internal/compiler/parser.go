@@ -522,7 +522,7 @@ LABEL:
 	case *ast.Tree:
 		if p.imported || p.hasExtend {
 			switch tok.typ {
-			case tokenExtends, tokenImport, tokenInclude, tokenMacro, tokenVar, tokenConst, tokenType:
+			case tokenExtends, tokenImport, tokenMacro, tokenVar, tokenConst, tokenType:
 			default:
 				return p.parseDistFreeMacro(tok, end)
 			}
@@ -536,7 +536,7 @@ LABEL:
 	case *ast.Statements:
 		if (p.imported || p.hasExtend) && len(p.ancestors) == 2 {
 			switch tok.typ {
-			case tokenExtends, tokenImport, tokenInclude, tokenMacro, tokenVar, tokenConst, tokenType:
+			case tokenExtends, tokenImport, tokenMacro, tokenVar, tokenConst, tokenType:
 			default:
 				panic(syntaxError(tok.pos, "unexpected %s, expecting declaration statement", tok))
 			}
@@ -1074,41 +1074,6 @@ LABEL:
 		p.addNode(node)
 		p.hasExtend = true
 		tok = p.next()
-		tok = p.parseEnd(tok, tokenSemicolon, end)
-		return tok
-
-	// include <path>  (path can be string literal or expression)
-	case tokenInclude:
-		pos := tok.pos
-		if tok.ctx != ast.Context(p.format) {
-			panic(syntaxError(tok.pos, "include not in %s content", ast.Context(p.format)))
-		}
-		tok = p.next()
-
-		// Parse expression (not just string literal)
-		expr, tok := p.parseExpr(tok, false, false, false, false)
-		if expr == nil {
-			panic(syntaxError(tok.pos, "unexpected %s, expecting expression", tok))
-		}
-		pos.End = expr.Pos().End
-
-		// Check if it's a static string literal
-		var node *ast.Include
-		if str, ok := expr.(*ast.BasicLiteral); ok && str.Type == ast.StringLiteral {
-			// Static include - path known at compile time
-			path := unquoteString([]byte(str.Value))
-			if !ValidTemplatePath(path) {
-				panic(syntaxError(str.Pos(), "invalid include path %q", path))
-			}
-			node = ast.NewInclude(pos, path, p.format)
-			p.unexpanded = append(p.unexpanded, node) // Only static includes expand at compile time
-		} else {
-			// Dynamic include - path computed at runtime
-			node = ast.NewDynamicInclude(pos, expr, p.format)
-			// Dynamic includes don't go to unexpanded (no compile-time expansion)
-		}
-
-		p.addNode(node)
 		tok = p.parseEnd(tok, tokenSemicolon, end)
 		return tok
 

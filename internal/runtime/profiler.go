@@ -22,8 +22,6 @@ const (
 	ProfileCallKindScriggoFunc ProfileCallKind = iota
 	ProfileCallKindNativeFunc
 	ProfileCallKindMacro
-	ProfileCallKindInclude
-	ProfileCallKindDynamicInclude
 )
 
 // ProfileCallRecord represents a single function or macro invocation during profiling.
