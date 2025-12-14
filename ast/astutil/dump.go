@@ -53,6 +53,13 @@ func (d *dumper) Visit(node ast.Node) Visitor {
 		tree = n.Tree
 	case *ast.Render:
 		tree = n.Tree
+	case *ast.RenderGlob:
+		// RenderGlob expands to multiple Render nodes, add each tree.
+		for _, r := range n.Renders {
+			if r.Tree != nil {
+				d.externalReferences = append(d.externalReferences, r.Tree)
+			}
+		}
 	default:
 		// No reference to add, it continues without doing anything.
 	}

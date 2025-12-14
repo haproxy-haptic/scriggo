@@ -228,8 +228,6 @@ func TestProfiler_AllCallKinds(t *testing.T) {
 		{ProfileCallKindScriggoFunc, "scriggo_func"},
 		{ProfileCallKindNativeFunc, "native_func"},
 		{ProfileCallKindMacro, "macro"},
-		{ProfileCallKindInclude, "include"},
-		{ProfileCallKindDynamicInclude, "dynamic_include"},
 	}
 
 	for _, tc := range tests {

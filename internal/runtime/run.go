@@ -77,7 +77,6 @@ func (vm *VM) runRecoverable() (err error) {
 }
 
 // executeMacro sets up and executes a macro function.
-// This is shared by OpCallMacro and OpDynamicInclude to avoid code duplication.
 // The format parameter specifies the expected output format (or ReturnString for string return).
 func (vm *VM) executeMacro(fn *Function, format int8) {
 	call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc + 1}
@@ -380,20 +379,6 @@ mainLoop:
 			// Profiling: record macro call entry.
 			if vm.profiler != nil {
 				vm.profiler.enterCall(fn.Name, fn.Pkg, fn.File, vm.currentLine(), ProfileCallKindMacro, fn.File)
-			}
-			vm.executeMacro(fn, b)
-		case OpDynamicInclude:
-			// Dynamic include - looks up macro by path at runtime.
-			// a: string register containing the template path
-			// b: format (same as OpCallMacro)
-			path := vm.string(a)
-			fn, ok := vm.env.dynamicMacros[path]
-			if !ok {
-				panic(vm.newPanic(errors.New("template not found: " + path)))
-			}
-			// Profiling: record dynamic include entry.
-			if vm.profiler != nil {
-				vm.profiler.enterCall(fn.Name, fn.Pkg, path, vm.currentLine(), ProfileCallKindDynamicInclude, path)
 			}
 			vm.executeMacro(fn, b)
 		case OpCallNative:

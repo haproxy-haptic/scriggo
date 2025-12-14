@@ -118,10 +118,8 @@ func isHiddenPath(path string) bool {
 }
 
 // compileTemplateFile compiles a single template file and returns the compiled code.
-// This is a helper that contains the common compilation logic used by BuildTemplate
-// and buildDynamicMacros to avoid code duplication.
 // If canonicalGlobals is provided (non-nil), it will be used to ensure consistent
-// global variable indexing for dynamic template compilation.
+// global variable indexing.
 func compileTemplateFile(fsys fs.FS, path string, opts Options, canonicalGlobals []Global) (*Code, error) {
 	// Parse the source code.
 	tree, err := ParseTemplate(fsys, path, opts.NoParseShortShowStmt)
@@ -218,88 +216,9 @@ func BuildTemplate(fsys fs.FS, name string, opts Options) (*Code, error) {
 		return nil, err
 	}
 
-	// Compile all other templates in the filesystem for dynamic includes.
-	// This allows {% include variable %} to work at runtime.
-	// Pass main template's globals so dynamic templates use the same indices.
-	result, err := buildDynamicMacros(fsys, name, opts, code.Globals)
-	if err != nil {
-		return nil, err
-	}
-
-	// Update code with the unified globals and dynamic macros.
-	code.DynamicMacros = result.Macros
-	code.Globals = result.Globals
 	code.ProfilingEnabled = opts.EnableProfiling
 
 	return code, nil
-}
-
-// buildDynamicMacros compiles all templates in the filesystem (except the main template)
-// and returns a result containing compiled functions and unified globals for dynamic includes.
-// canonicalGlobals contains the globals from the main template compilation which ensures
-// dynamic templates use consistent global variable indices.
-func buildDynamicMacros(fsys fs.FS, mainName string, opts Options, canonicalGlobals []Global) (dynamicMacrosResult, error) {
-	macros := make(map[string]*runtime.Function)
-
-	// Initialize with main template's globals
-	allGlobals := make([]Global, len(canonicalGlobals))
-	copy(allGlobals, canonicalGlobals)
-
-	// Track known globals by name for fast lookup
-	globalIndex := make(map[string]int16, len(canonicalGlobals))
-	for i, g := range canonicalGlobals {
-		globalIndex[globalKey(g.Pkg, g.Name)] = int16(i)
-	}
-
-	// Walk the filesystem to find all template files
-	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		// Skip the main template (already compiled)
-		if path == mainName {
-			return nil
-		}
-
-		// Skip hidden files and files in hidden directories
-		if isHiddenPath(path) {
-			return nil
-		}
-
-		// Try to compile this file as a template.
-		// If it fails (not a valid template), silently skip it.
-		// Pass current allGlobals as canonical so this template uses consistent indices.
-		code, compileErr := compileTemplateFile(fsys, path, opts, allGlobals)
-		if compileErr != nil {
-			// Skip files that fail to compile (not valid templates)
-			return nil
-		}
-
-		// Check for any new globals this template added.
-		// New globals are those with indices >= len(allGlobals) at compile time.
-		for i := len(allGlobals); i < len(code.Globals); i++ {
-			g := code.Globals[i]
-			key := globalKey(g.Pkg, g.Name)
-			if _, exists := globalIndex[key]; !exists {
-				globalIndex[key] = int16(len(allGlobals))
-				allGlobals = append(allGlobals, g)
-			}
-		}
-
-		// Store the compiled function
-		macros[path] = code.Main
-		return nil
-	})
-
-	if err != nil {
-		return dynamicMacrosResult{}, err
-	}
-
-	return dynamicMacrosResult{Macros: macros, Globals: allGlobals}, nil
 }
 
 // CheckingError records a type checking error with the path and the position
@@ -346,14 +265,6 @@ func globalKey(pkg, name string) string {
 	return pkg + "." + name
 }
 
-// dynamicMacrosResult holds the result of building dynamic macros.
-type dynamicMacrosResult struct {
-	// Macros maps template paths to compiled functions for dynamic includes.
-	Macros map[string]*runtime.Function
-	// Globals is the unified list of globals from main and all dynamic templates.
-	Globals []Global
-}
-
 // Code is the result of a package emitting process.
 type Code struct {
 	// Globals is a slice of all globals used in Code.
@@ -364,9 +275,6 @@ type Code struct {
 	Main *runtime.Function
 	// TypeOf returns the type of a value, including new types defined in code.
 	TypeOf runtime.TypeOfFunc
-	// DynamicMacros maps template paths to compiled functions for dynamic includes.
-	// This map is populated at compile time and used at runtime for {% include variable %}.
-	DynamicMacros map[string]*runtime.Function
 	// ProfilingEnabled indicates whether profiling was enabled at build time.
 	ProfilingEnabled bool
 }

@@ -781,3 +781,533 @@ func TestJSONCycles(t *testing.T) {
 		}
 	}
 }
+
+// Store is a test interface for TestMapInterfaceValueType
+// Matches the structure in the bug report
+type Store interface {
+	List() []interface{}
+	Fetch(keys ...interface{}) []interface{}
+	GetSingle(keys ...interface{}) interface{}
+}
+
+// ConcreteStore implements Store
+type ConcreteStore struct{}
+
+func (s *ConcreteStore) List() []interface{} {
+	return []interface{}{"a", "b", "c"}
+}
+
+func (s *ConcreteStore) Fetch(keys ...interface{}) []interface{} {
+	return []interface{}{"fetched"}
+}
+
+func (s *ConcreteStore) GetSingle(keys ...interface{}) interface{} {
+	return "single"
+}
+
+// checkBuildErr is a helper function for checking build errors in tests.
+func checkBuildErr(t *testing.T, err error, wantErr string) {
+	t.Helper()
+	if wantErr == "" && err != nil {
+		t.Errorf("unexpected error: %v", err)
+	} else if wantErr != "" && err == nil {
+		t.Errorf("expected error containing %q, got nil", wantErr)
+	} else if wantErr != "" && err != nil && !strings.Contains(err.Error(), wantErr) {
+		t.Errorf("expected error containing %q, got %q", wantErr, err.Error())
+	}
+}
+
+// TestMapInterfaceValueType tests that map indexing preserves named interface types.
+// This is a regression test for a bug where accessing a map with an interface value type
+// would return interface{} instead of the named interface type, preventing method calls.
+func TestMapInterfaceValueType(t *testing.T) {
+	// Test with nil pointer to map - this is how native types are typically declared
+	// as per bug report: decl["stores"] = (*map[string]Store)(nil)
+	options := Options{
+		FormatTypes: formatTypes,
+		Globals: native.Declarations{
+			"stores": (*map[string]Store)(nil),
+		},
+	}
+
+	tests := []struct {
+		name     string
+		src      string
+		wantErr  string
+	}{
+		{
+			name:    "method call on map-indexed interface via key selector",
+			src:     `{% for _, item := range stores.mystore.List() %}{{ item }}{% end %}`,
+			wantErr: "", // should compile without error
+		},
+		{
+			name:    "method call on map-indexed interface via index expression",
+			src:     `{% for _, item := range stores["mystore"].List() %}{{ item }}{% end %}`,
+			wantErr: "", // should compile without error
+		},
+		{
+			name:    "assign map-indexed interface to variable then call method",
+			src:     `{% s := stores.mystore %}{% for _, item := range s.List() %}{{ item }}{% end %}`,
+			wantErr: "", // should compile without error
+		},
+		{
+			name:    "variadic method call on map-indexed interface",
+			src:     `{% for _, item := range stores.mystore.Fetch("key1", "key2") %}{{ item }}{% end %}`,
+			wantErr: "", // should compile without error
+		},
+		{
+			name:    "variadic method with single result on map-indexed interface",
+			src:     `{{ stores.mystore.GetSingle("key") }}`,
+			wantErr: "", // should compile without error
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fsys := fstest.Files{"index.html": tt.src}
+			_, err := BuildTemplate(fsys, "index.html", options)
+			checkBuildErr(t, err, tt.wantErr)
+		})
+	}
+}
+
+// TestMapInterfaceValueTypeWithNativeInterface tests with an interface from the native package
+func TestMapInterfaceValueTypeWithNativeInterface(t *testing.T) {
+	// Try with native.Env interface which is defined in the native package
+	options := Options{
+		FormatTypes: formatTypes,
+		Globals: native.Declarations{
+			"envs": (*map[string]native.Env)(nil),
+		},
+	}
+
+	tests := []struct {
+		name     string
+		src      string
+		wantErr  string
+	}{
+		{
+			name:    "method call on map-indexed native.Env interface",
+			src:     `{% path := envs.myenv.CallPath() %}{{ path }}`,
+			wantErr: "", // should compile without error
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fsys := fstest.Files{"index.html": tt.src}
+			_, err := BuildTemplate(fsys, "index.html", options)
+			checkBuildErr(t, err, tt.wantErr)
+		})
+	}
+}
+
+// TestMapInterfaceValueTypeMinimal is a minimal reproduction attempt
+func TestMapInterfaceValueTypeMinimal(t *testing.T) {
+	// This is the exact pattern from the bug report
+	options := Options{
+		Globals: native.Declarations{
+			"stores": (*map[string]Store)(nil),
+		},
+	}
+
+	// Minimal test case without FormatTypes
+	fsys := fstest.Files{"test.txt": `{% for _, item := range stores.mystore.List() %}{{ item }}{% end %}`}
+	_, err := BuildTemplate(fsys, "test.txt", options)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// FileRegistry is a test interface for TestManyIncludes
+// Used to test multiple return value assignment bug
+type FileRegistry interface {
+	Register(kind, name, content string) (string, error)
+}
+
+// TestManyIncludes tests type inference with many template includes.
+// This is a regression test for a bug where type inference returns interface{}
+// instead of concrete types in complex templates with many includes.
+func TestManyIncludes(t *testing.T) {
+	options := Options{
+		FormatTypes: formatTypes,
+		Globals: native.Declarations{
+			"fileRegistry": (*FileRegistry)(nil),
+			"stores":       (*map[string]Store)(nil),
+		},
+	}
+
+	// Create 60 template files
+	files := fstest.Files{}
+
+	// Main index that includes all partials
+	var mainContent strings.Builder
+	for i := 0; i < 60; i++ {
+		mainContent.WriteString(fmt.Sprintf(`{%% show render "partial%d.html" %%}`, i))
+	}
+	// Bug 1: Multiple return value assignment - first var should be string, not interface{}
+	mainContent.WriteString(`{% var path, _ = fileRegistry.Register("file", "ca.pem", "content") %}`)
+	mainContent.WriteString(`{{ "prefix " + path }}`) // Should work, but gets error if bug present
+
+	// Bug 2: Map index on interface value type - should return Store, not interface{}
+	mainContent.WriteString(`{% for _, item := range stores["mystore"].List() %}{{ item }}{% end %}`)
+
+	files["index.html"] = mainContent.String()
+
+	// Create 60 partial files
+	for i := 0; i < 60; i++ {
+		files[fmt.Sprintf("partial%d.html", i)] = fmt.Sprintf("partial %d content", i)
+	}
+
+	_, err := BuildTemplate(files, "index.html", options)
+	if err != nil {
+		t.Errorf("unexpected error (bug reproduced): %v", err)
+	}
+}
+
+// TestSameFileIncludedMultipleTimes tests that including the same file multiple times
+// doesn't corrupt type information due to AST node reuse.
+func TestSameFileIncludedMultipleTimes(t *testing.T) {
+	options := Options{
+		FormatTypes: formatTypes,
+		Globals: native.Declarations{
+			"fileRegistry": (*FileRegistry)(nil),
+			"stores":       (*map[string]Store)(nil),
+		},
+	}
+
+	files := fstest.Files{}
+
+	// Include the SAME partial file many times - this triggers cache reuse
+	var mainContent strings.Builder
+	for i := 0; i < 60; i++ {
+		mainContent.WriteString(`{% show render "shared.html" %}`)
+	}
+	// Bug 1: Multiple return value assignment
+	mainContent.WriteString(`{% var path, _ = fileRegistry.Register("file", "ca.pem", "content") %}`)
+	mainContent.WriteString(`{{ "prefix " + path }}`)
+
+	// Bug 2: Map index on interface value type
+	mainContent.WriteString(`{% for _, item := range stores["mystore"].List() %}{{ item }}{% end %}`)
+
+	files["index.html"] = mainContent.String()
+	files["shared.html"] = "shared content"
+
+	_, err := BuildTemplate(files, "index.html", options)
+	if err != nil {
+		t.Errorf("unexpected error (bug reproduced): %v", err)
+	}
+}
+
+// TestBugsInsideIncludedFiles tests that the bugs occur when the problematic
+// operations are INSIDE the included files, not in the main file.
+func TestBugsInsideIncludedFiles(t *testing.T) {
+	options := Options{
+		FormatTypes: formatTypes,
+		Globals: native.Declarations{
+			"fileRegistry": (*FileRegistry)(nil),
+			"stores":       (*map[string]Store)(nil),
+		},
+	}
+
+	files := fstest.Files{}
+
+	// Main file includes multiple partials that each use the problematic operations
+	var mainContent strings.Builder
+	for i := 0; i < 60; i++ {
+		mainContent.WriteString(fmt.Sprintf(`{%% show render "partial%d.html" %%}`, i))
+	}
+	files["index.html"] = mainContent.String()
+
+	// Each partial uses the problematic operations
+	for i := 0; i < 60; i++ {
+		partial := fmt.Sprintf(`{%% var path%d, _ = fileRegistry.Register("file", "ca%d.pem", "content") %%}`, i, i)
+		partial += fmt.Sprintf(`{{ "prefix " + path%d }}`, i)
+		partial += `{% for _, item := range stores["mystore"].List() %}{{ item }}{% end %}`
+		files[fmt.Sprintf("partial%d.html", i)] = partial
+	}
+
+	_, err := BuildTemplate(files, "index.html", options)
+	if err != nil {
+		t.Errorf("unexpected error (bug reproduced): %v", err)
+	}
+}
+
+// TestNestedIncludes tests deeply nested includes to see if the bug manifests
+func TestNestedIncludes(t *testing.T) {
+	options := Options{
+		FormatTypes: formatTypes,
+		Globals: native.Declarations{
+			"fileRegistry": (*FileRegistry)(nil),
+			"stores":       (*map[string]Store)(nil),
+		},
+	}
+
+	files := fstest.Files{}
+
+	// Create a chain of nested includes: index -> level1 -> level2 -> ... -> level60
+	files["index.html"] = `{% show render "level1.html" %}`
+	for i := 1; i < 60; i++ {
+		files[fmt.Sprintf("level%d.html", i)] = fmt.Sprintf(`{%% show render "level%d.html" %%}`, i+1)
+	}
+	// Final level uses the problematic operations
+	files["level60.html"] = `{% var path, _ = fileRegistry.Register("file", "ca.pem", "content") %}{{ "prefix " + path }}{% for _, item := range stores["mystore"].List() %}{{ item }}{% end %}`
+
+	_, err := BuildTemplate(files, "index.html", options)
+	if err != nil {
+		t.Errorf("unexpected error (bug reproduced): %v", err)
+	}
+}
+
+// TestMacrosWithImports tests macros imported from multiple files
+func TestMacrosWithImports(t *testing.T) {
+	options := Options{
+		FormatTypes: formatTypes,
+		Globals: native.Declarations{
+			"fileRegistry": (*FileRegistry)(nil),
+			"stores":       (*map[string]Store)(nil),
+		},
+	}
+
+	files := fstest.Files{}
+
+	// Main file imports macros from many files
+	var mainContent strings.Builder
+	for i := 0; i < 60; i++ {
+		mainContent.WriteString(fmt.Sprintf(`{%% import "macros%d.html" %%}`, i))
+	}
+	// Use macros
+	for i := 0; i < 60; i++ {
+		mainContent.WriteString(fmt.Sprintf(`{%% show M%d() %%}`, i))
+	}
+	// Then use the problematic operations
+	mainContent.WriteString(`{% var path, _ = fileRegistry.Register("file", "ca.pem", "content") %}`)
+	mainContent.WriteString(`{{ "prefix " + path }}`)
+	mainContent.WriteString(`{% for _, item := range stores["mystore"].List() %}{{ item }}{% end %}`)
+
+	files["index.html"] = mainContent.String()
+
+	// Create macro files
+	for i := 0; i < 60; i++ {
+		files[fmt.Sprintf("macros%d.html", i)] = fmt.Sprintf(`{%% macro M%d() %%}macro %d{%% end %%}`, i, i)
+	}
+
+	_, err := BuildTemplate(files, "index.html", options)
+	if err != nil {
+		t.Errorf("unexpected error (bug reproduced): %v", err)
+	}
+}
+
+// TestSameMacroImportedMultipleTimes tests importing the same macro file multiple times
+func TestSameMacroImportedMultipleTimes(t *testing.T) {
+	options := Options{
+		FormatTypes: formatTypes,
+		Globals: native.Declarations{
+			"fileRegistry": (*FileRegistry)(nil),
+			"stores":       (*map[string]Store)(nil),
+		},
+	}
+
+	files := fstest.Files{}
+
+	// Multiple templates import the same macro file
+	var mainContent strings.Builder
+	for i := 0; i < 60; i++ {
+		mainContent.WriteString(fmt.Sprintf(`{%% show render "partial%d.html" %%}`, i))
+	}
+	// Use the problematic operations in main
+	mainContent.WriteString(`{% var path, _ = fileRegistry.Register("file", "ca.pem", "content") %}`)
+	mainContent.WriteString(`{{ "prefix " + path }}`)
+	mainContent.WriteString(`{% for _, item := range stores["mystore"].List() %}{{ item }}{% end %}`)
+
+	files["index.html"] = mainContent.String()
+
+	// Each partial imports the same macro file
+	for i := 0; i < 60; i++ {
+		files[fmt.Sprintf("partial%d.html", i)] = `{% import "common_macros.html" %}{% show CommonMacro() %}`
+	}
+
+	// Common macro file
+	files["common_macros.html"] = `{% macro CommonMacro() %}common{% end %}`
+
+	_, err := BuildTemplate(files, "index.html", options)
+	if err != nil {
+		t.Errorf("unexpected error (bug reproduced): %v", err)
+	}
+}
+
+// TestRenderGlob tests the render_glob statement
+func TestRenderGlob(t *testing.T) {
+	options := Options{
+		FormatTypes: formatTypes,
+	}
+
+	tests := []struct {
+		name     string
+		files    fstest.Files
+		mainFile string
+		wantErr  string
+	}{
+		{
+			name: "render_glob with matching files",
+			files: fstest.Files{
+				"index.html":         `{% show render_glob "widgets/*.html" %}`,
+				"widgets/a.html":     "content A",
+				"widgets/b.html":     "content B",
+				"widgets/c.html":     "content C",
+				"other/ignored.html": "ignored",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render_glob with no matches",
+			files: fstest.Files{
+				"index.html": `{% show render_glob "nonexistent/*.html" %}`,
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render_glob in show statement",
+			files: fstest.Files{
+				"index.html":      `{{ render_glob "plugins/*.html" }}`,
+				"plugins/p1.html": "plugin 1",
+				"plugins/p2.html": "plugin 2",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render_glob with single file match",
+			files: fstest.Files{
+				"index.html":  `{% show render_glob "single.html" %}`,
+				"single.html": "single content",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render_glob invalid pattern",
+			files: fstest.Files{
+				"index.html": `{% show render_glob "[" %}`,
+			},
+			mainFile: "index.html",
+			wantErr:  "invalid glob pattern",
+		},
+		{
+			name: "render_glob with question mark",
+			files: fstest.Files{
+				"index.html":   `{% show render_glob "part?.html" %}`,
+				"part1.html":   "part 1",
+				"part2.html":   "part 2",
+				"partial.html": "ignored - too long",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildTemplate(tt.files, tt.mainFile, options)
+			checkBuildErr(t, err, tt.wantErr)
+		})
+	}
+}
+
+// TestRenderInheritContext tests the render with inherit_context option
+func TestRenderInheritContext(t *testing.T) {
+	options := Options{
+		FormatTypes: formatTypes,
+	}
+
+	tests := []struct {
+		name     string
+		files    fstest.Files
+		mainFile string
+		wantErr  string
+	}{
+		{
+			name: "render with inherit_context basic",
+			files: fstest.Files{
+				"index.html":    `{% name := "World" %}{{ render "greeting.html" inherit_context }}`,
+				"greeting.html": "Hello, {{ name }}!",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render with inherit_context multiple vars",
+			files: fstest.Files{
+				"index.html": `{% x := 1 %}{% y := 2 %}{{ render "calc.html" inherit_context }}`,
+				"calc.html":  "{{ x + y }}",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render with inherit_context no local vars",
+			files: fstest.Files{
+				"index.html":   `{{ render "partial.html" inherit_context }}`,
+				"partial.html": "no vars needed",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render_glob with inherit_context",
+			files: fstest.Files{
+				"index.html":   `{% name := "test" %}{{ render_glob "parts/*.html" inherit_context }}`,
+				"parts/a.html": "A: {{ name }}",
+				"parts/b.html": "B: {{ name }}",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render with inherit_context variable shadowing in new scope",
+			files: fstest.Files{
+				"index.html":  `{% x := 1 %}{{ render "shadow.html" inherit_context }}`,
+				"shadow.html": `{% if true %}{% x := 2 %}{{ x }}{% end %}`,
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render without inherit_context cannot access local vars",
+			files: fstest.Files{
+				"index.html":    `{% name := "World" %}{% render "greeting.html" %}`,
+				"greeting.html": "Hello, {{ name }}!",
+			},
+			mainFile: "index.html",
+			wantErr:  "undefined: name",
+		},
+		{
+			name: "render with inherit_context in show statement",
+			files: fstest.Files{
+				"index.html": `{% x := 42 %}{{ render "num.html" inherit_context }}`,
+				"num.html":   "{{ x }}",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "nested render with inherit_context",
+			files: fstest.Files{
+				"index.html":  `{% a := 1 %}{{ render "level1.html" inherit_context }}`,
+				"level1.html": `{% b := 2 %}{{ a }}{{ render "level2.html" inherit_context }}`,
+				"level2.html": "{{ a + b }}",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildTemplate(tt.files, tt.mainFile, options)
+			checkBuildErr(t, err, tt.wantErr)
+		})
+	}
+}

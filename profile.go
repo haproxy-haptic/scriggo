@@ -19,10 +19,6 @@ const (
 	CallKindNativeFunc
 	// CallKindMacro is a macro invocation.
 	CallKindMacro
-	// CallKindInclude is a static include/render operation.
-	CallKindInclude
-	// CallKindDynamicInclude is a dynamic include operation.
-	CallKindDynamicInclude
 )
 
 // String returns a string representation of the CallKind.
@@ -34,10 +30,6 @@ func (k CallKind) String() string {
 		return "native_func"
 	case CallKindMacro:
 		return "macro"
-	case CallKindInclude:
-		return "include"
-	case CallKindDynamicInclude:
-		return "dynamic_include"
 	default:
 		return "unknown"
 	}
@@ -110,8 +102,6 @@ type ProfileStats struct {
 	ScriggoCalls int
 	// MacroCalls is the count of macro invocations.
 	MacroCalls int
-	// IncludeCalls is the count of include/render operations.
-	IncludeCalls int
 	// ByFunction maps function key (pkg.name or name for macros) to stats.
 	ByFunction map[string]*FunctionStats
 }
@@ -192,8 +182,6 @@ func (p *Profile) Stats() *ProfileStats {
 			stats.ScriggoCalls++
 		case CallKindMacro:
 			stats.MacroCalls++
-		case CallKindInclude, CallKindDynamicInclude:
-			stats.IncludeCalls++
 		}
 
 		// Build function key.

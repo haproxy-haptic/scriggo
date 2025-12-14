@@ -124,17 +124,6 @@ func (fb *functionBuilder) emitCallMacro(f int8, shift runtime.StackShift, pos *
 	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.Operation(shift[0]), A: shift[1], B: shift[2], C: shift[3]})
 }
 
-// emitDynamicInclude appends a new "DynamicInclude" instruction to the function body.
-// pathReg is the string register containing the template path to include at runtime.
-//
-//	{% include pathVariable %}
-func (fb *functionBuilder) emitDynamicInclude(pathReg int8, shift runtime.StackShift, pos *ast.Position, toFormat ast.Format) {
-	fb.addPosAndPath(pos)
-	fn := fb.fn
-	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.OpDynamicInclude, A: pathReg, B: int8(toFormat)})
-	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.Operation(shift[0]), A: shift[1], B: shift[2], C: shift[3]})
-}
-
 // emitCallIndirect appends a new "CallIndirect" instruction to the function body.
 //
 //	f()

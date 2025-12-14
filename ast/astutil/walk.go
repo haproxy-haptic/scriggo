@@ -284,6 +284,7 @@ func Walk(v Visitor, node ast.Node) {
 	case *ast.Extends:
 	case *ast.Import:
 	case *ast.Render:
+	case *ast.RenderGlob:
 	// Nothing to do, visiting the expanded tree is done
 	// by the Visit function if necessary.
 

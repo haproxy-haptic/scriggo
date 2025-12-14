@@ -17,8 +17,6 @@ func TestCallKind_String(t *testing.T) {
 		{CallKindScriggoFunc, "scriggo_func"},
 		{CallKindNativeFunc, "native_func"},
 		{CallKindMacro, "macro"},
-		{CallKindInclude, "include"},
-		{CallKindDynamicInclude, "dynamic_include"},
 		{CallKind(99), "unknown"},
 	}
 	for _, tc := range tests {
@@ -182,14 +180,12 @@ func TestProfile_Stats_DifferentCallKinds(t *testing.T) {
 			{ID: 1, Name: "native1", Kind: CallKindNativeFunc},
 			{ID: 2, Name: "scriggo1", Kind: CallKindScriggoFunc},
 			{ID: 3, Name: "macro1", Kind: CallKindMacro},
-			{ID: 4, Name: "inc1", Kind: CallKindInclude},
-			{ID: 5, Name: "dynInc1", Kind: CallKindDynamicInclude},
-			{ID: 6, Name: "native2", Kind: CallKindNativeFunc},
+			{ID: 4, Name: "native2", Kind: CallKindNativeFunc},
 		},
 	}
 	stats := p.Stats()
-	if stats.TotalCalls != 6 {
-		t.Errorf("expected 6 total calls, got %d", stats.TotalCalls)
+	if stats.TotalCalls != 4 {
+		t.Errorf("expected 4 total calls, got %d", stats.TotalCalls)
 	}
 	if stats.NativeCalls != 2 {
 		t.Errorf("expected 2 native calls, got %d", stats.NativeCalls)
@@ -199,9 +195,6 @@ func TestProfile_Stats_DifferentCallKinds(t *testing.T) {
 	}
 	if stats.MacroCalls != 1 {
 		t.Errorf("expected 1 macro call, got %d", stats.MacroCalls)
-	}
-	if stats.IncludeCalls != 2 { // Include + DynamicInclude
-		t.Errorf("expected 2 include calls, got %d", stats.IncludeCalls)
 	}
 }
 

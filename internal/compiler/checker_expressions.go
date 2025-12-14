@@ -663,6 +663,9 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 	case *ast.Render:
 		return tc.checkRender(expr)
 
+	case *ast.RenderGlob:
+		return tc.checkRenderGlob(expr)
+
 	case *ast.Slicing:
 		t := tc.checkExpr(expr.Expr)
 		if t.Nil() {
@@ -2301,6 +2304,13 @@ func (tc *typechecker) checkDefault(expr *ast.Default, show bool) typeInfoPair {
 			tis[0] = tc.checkRender(n)
 		}
 
+	case *ast.RenderGlob:
+		// For default expression, only use the render_glob result if there are renders.
+		// With no matches, the default value will be used.
+		if len(n.Renders) > 0 {
+			tis[0] = tc.checkRenderGlob(n)
+		}
+
 	default:
 		panic("unexpected default")
 	}
@@ -2357,6 +2367,11 @@ func (tc *typechecker) checkPipeExpression(expr *ast.BinaryOperator) *typeInfo {
 // representation.
 func (tc *typechecker) checkRender(render *ast.Render) *typeInfo {
 
+	// Handle inherit_context separately
+	if render.InheritContext {
+		return tc.checkRenderWithInheritContext(render)
+	}
+
 	// Transform the render expression to a call to a macro that has the
 	// rendered file as body.
 
@@ -2391,6 +2406,146 @@ func (tc *typechecker) checkRender(render *ast.Render) *typeInfo {
 	tc.checkNodes([]ast.Node{stored.Import})
 
 	return tc.checkExpr(render.IR.Call)
+}
+
+// checkRenderWithInheritContext checks a 'render' expression with inherit_context.
+// It creates a macro with parameters for all local variables in scope and passes
+// them as arguments.
+func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeInfo {
+	tree := render.Tree
+
+	// Check if already processed this specific render node
+	if stored, ok := tc.compilation.renderInheritContextMacro[render]; ok {
+		render.IR.Call = ast.NewCall(render.Pos(), stored.Macro.Ident, stored.Args, false)
+		render.IR.Import = stored.Import
+		tc.checkNodes([]ast.Node{stored.Import})
+		return tc.checkExpr(render.IR.Call)
+	}
+
+	// Collect local variables in scope
+	localVars := tc.scopes.LocalVariables()
+
+	// Build macro parameters and call arguments
+	var params []*ast.Parameter
+	var args []ast.Expression
+	for _, lv := range localVars {
+		// Create type expression from reflect.Type
+		typeExpr := tc.reflectTypeToASTType(lv.TI.Type)
+		param := ast.NewParameter(ast.NewIdentifier(nil, lv.Name), typeExpr)
+		params = append(params, param)
+
+		// Create argument - identifier referring to the variable
+		arg := ast.NewIdentifier(render.Pos(), lv.Name)
+		args = append(args, arg)
+	}
+
+	// Create unique macro with parameters
+	macroName := "M" + strconv.Quote(tree.Path) + "_IC" + strconv.Itoa(len(tc.compilation.renderInheritContextMacro))
+	macroDecl := ast.NewFunc(
+		nil,
+		ast.NewIdentifier(nil, macroName),
+		ast.NewFuncType(nil, true, params, nil, false),
+		ast.NewBlock(nil, tree.Nodes),
+		false,
+		tree.Format,
+	)
+
+	importt := ast.NewImport(nil, ast.NewIdentifier(nil, "."), "/"+render.Path, nil)
+	importt.Tree = tree
+	importt.Tree.Nodes = []ast.Node{macroDecl}
+
+	stored := renderIR{Import: importt, Macro: macroDecl, Args: args}
+	tc.compilation.renderInheritContextMacro[render] = stored
+
+	render.IR.Call = ast.NewCall(render.Pos(), macroDecl.Ident, args, false)
+	render.IR.Import = importt
+
+	tc.checkNodes([]ast.Node{importt})
+	return tc.checkExpr(render.IR.Call)
+}
+
+// reflectTypeToASTType converts a reflect.Type to an AST type expression.
+func (tc *typechecker) reflectTypeToASTType(t reflect.Type) ast.Expression {
+	if t == nil {
+		return ast.NewIdentifier(nil, "interface{}")
+	}
+
+	switch t.Kind() {
+	case reflect.Bool:
+		return ast.NewIdentifier(nil, "bool")
+	case reflect.Int:
+		return ast.NewIdentifier(nil, "int")
+	case reflect.Int8:
+		return ast.NewIdentifier(nil, "int8")
+	case reflect.Int16:
+		return ast.NewIdentifier(nil, "int16")
+	case reflect.Int32:
+		return ast.NewIdentifier(nil, "int32")
+	case reflect.Int64:
+		return ast.NewIdentifier(nil, "int64")
+	case reflect.Uint:
+		return ast.NewIdentifier(nil, "uint")
+	case reflect.Uint8:
+		return ast.NewIdentifier(nil, "uint8")
+	case reflect.Uint16:
+		return ast.NewIdentifier(nil, "uint16")
+	case reflect.Uint32:
+		return ast.NewIdentifier(nil, "uint32")
+	case reflect.Uint64:
+		return ast.NewIdentifier(nil, "uint64")
+	case reflect.Uintptr:
+		return ast.NewIdentifier(nil, "uintptr")
+	case reflect.Float32:
+		return ast.NewIdentifier(nil, "float32")
+	case reflect.Float64:
+		return ast.NewIdentifier(nil, "float64")
+	case reflect.Complex64:
+		return ast.NewIdentifier(nil, "complex64")
+	case reflect.Complex128:
+		return ast.NewIdentifier(nil, "complex128")
+	case reflect.String:
+		return ast.NewIdentifier(nil, "string")
+	case reflect.Ptr:
+		return ast.NewUnaryOperator(nil, ast.OperatorMultiplication, tc.reflectTypeToASTType(t.Elem()))
+	case reflect.Slice:
+		return ast.NewSliceType(nil, tc.reflectTypeToASTType(t.Elem()))
+	case reflect.Array:
+		return ast.NewArrayType(nil, ast.NewBasicLiteral(nil, ast.IntLiteral, strconv.Itoa(t.Len())), tc.reflectTypeToASTType(t.Elem()))
+	case reflect.Map:
+		return ast.NewMapType(nil, tc.reflectTypeToASTType(t.Key()), tc.reflectTypeToASTType(t.Elem()))
+	case reflect.Interface:
+		if t.NumMethod() == 0 {
+			return ast.NewIdentifier(nil, "interface{}")
+		}
+		// For named interfaces, fall through to default
+		fallthrough
+	default:
+		// For complex types (named types, structs, funcs, chans),
+		// use interface{} as a fallback. The type checker will
+		// handle the conversion at the call site.
+		return ast.NewIdentifier(nil, "interface{}")
+	}
+}
+
+// checkRenderGlob checks the 'render_glob' expression by type checking
+// each expanded Render node.
+func (tc *typechecker) checkRenderGlob(renderGlob *ast.RenderGlob) *typeInfo {
+	// Type check each expanded Render node.
+	// The deduplication via renderImportMacro handles files rendered multiple times.
+	var lastTi *typeInfo
+	for _, render := range renderGlob.Renders {
+		lastTi = tc.checkRender(render)
+	}
+
+	// If there are renders, return the type of the last render.
+	// If there are no renders, return string type (since render_glob
+	// with no matches produces no output, which is equivalent to an empty string).
+	if lastTi != nil {
+		return lastTi
+	}
+
+	// For empty render_glob, return string type.
+	return &typeInfo{Type: stringType}
 }
 
 // checkImplicitField checks an implicit (embedded) field.

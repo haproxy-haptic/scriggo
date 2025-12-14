@@ -48,6 +48,12 @@ type compilation struct {
 	// inconsistent type checks and invalid behaviors.
 	renderImportMacro map[*ast.Tree]renderIR
 
+	// renderInheritContextMacro stores the dummy 'import' nodes and macro
+	// declarations for 'render' expressions with inherit_context.
+	// Unlike renderImportMacro, this is keyed by *ast.Render since each
+	// call site may have different local variables to pass.
+	renderInheritContextMacro map[*ast.Render]renderIR
+
 	// iteaToUsingCheck maps 'itea' identifiers ($itea0, $itea1... ) to their
 	// corresponding usingCheck.
 	iteaToUsingCheck map[string]usingCheck
@@ -81,21 +87,23 @@ type compilation struct {
 type renderIR struct {
 	Import *ast.Import
 	Macro  *ast.Func
+	Args   []ast.Expression // arguments for inherit_context calls
 }
 
 // newCompilation returns a new compilation.
 func newCompilation(globalScope map[string]scopeName) *compilation {
 	return &compilation{
-		pkgInfos:          map[string]*packageInfo{},
-		pkgPathToIndex:    map[string]int{},
-		typeInfos:         map[ast.Node]*typeInfo{},
-		alreadySortedPkgs: map[*ast.Package]bool{},
-		indirectVars:      map[*ast.Identifier]bool{},
-		renderImportMacro: map[*ast.Tree]renderIR{},
-		currentIteaIndex:  -1,
-		globalScope:       globalScope,
-		extendingTrees:    map[string]bool{},
-		extendedTrees:     map[string]bool{},
+		pkgInfos:                  map[string]*packageInfo{},
+		pkgPathToIndex:            map[string]int{},
+		typeInfos:                 map[ast.Node]*typeInfo{},
+		alreadySortedPkgs:         map[*ast.Package]bool{},
+		indirectVars:              map[*ast.Identifier]bool{},
+		renderImportMacro:         map[*ast.Tree]renderIR{},
+		renderInheritContextMacro: map[*ast.Render]renderIR{},
+		currentIteaIndex:          -1,
+		globalScope:               globalScope,
+		extendingTrees:            map[string]bool{},
+		extendedTrees:             map[string]bool{},
 	}
 }
 

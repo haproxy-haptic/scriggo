@@ -441,8 +441,20 @@ func CloneExpression(expr ast.Expression) ast.Expression {
 
 	case *ast.Render:
 		n := ast.NewRender(ClonePosition(e.Position), e.Path)
+		n.InheritContext = e.InheritContext
 		if e.Tree != nil {
 			n.Tree = CloneTree(e.Tree)
+		}
+		expr2 = n
+
+	case *ast.RenderGlob:
+		n := ast.NewRenderGlob(ClonePosition(e.Position), e.Pattern)
+		n.InheritContext = e.InheritContext
+		if e.Renders != nil {
+			n.Renders = make([]*ast.Render, len(e.Renders))
+			for i, r := range e.Renders {
+				n.Renders[i] = CloneExpression(r).(*ast.Render)
+			}
 		}
 		expr2 = n
 

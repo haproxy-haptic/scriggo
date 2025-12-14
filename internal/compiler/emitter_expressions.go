@@ -275,6 +275,16 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 		em.emitNodes([]ast.Node{expr.IR.Import})
 		return em._emitExpr(expr.IR.Call, dstType, reg, useGivenReg, allowK)
 
+	case *ast.RenderGlob:
+
+		// Emit the code for each expanded Render node in sequence.
+		for _, render := range expr.Renders {
+			em.emitNodes([]ast.Node{render.IR.Import})
+			em._emitExpr(render.IR.Call, dstType, reg, useGivenReg, allowK)
+		}
+		// RenderGlob emits each render in sequence; result is in reg after the last render.
+		return reg, false
+
 	case *ast.Slicing:
 
 		exprType := em.typ(expr.Expr)
