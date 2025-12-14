@@ -2411,6 +2411,11 @@ func (tc *typechecker) checkRender(render *ast.Render) *typeInfo {
 // checkRenderWithInheritContext checks a 'render' expression with inherit_context.
 // It creates a macro with parameters for all local variables in scope and passes
 // them as arguments.
+//
+// Unlike regular render, this function type-checks the child template directly
+// in the current typechecker's context, preserving the actual types of local
+// variables. This is necessary because checkPackage creates a new typechecker
+// that doesn't have access to the parent's local variable types.
 func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeInfo {
 	tree := render.Tree
 
@@ -2418,18 +2423,21 @@ func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeIn
 	if stored, ok := tc.compilation.renderInheritContextMacro[render]; ok {
 		render.IR.Call = ast.NewCall(render.Pos(), stored.Macro.Ident, stored.Args, false)
 		render.IR.Import = stored.Import
-		tc.checkNodes([]ast.Node{stored.Import})
 		return tc.checkExpr(render.IR.Call)
 	}
+
+	// Save the original child template nodes BEFORE we modify tree.Nodes
+	childNodes := tree.Nodes
 
 	// Collect local variables in scope
 	localVars := tc.scopes.LocalVariables()
 
-	// Build macro parameters and call arguments
+	// Build macro parameters, call arguments, and reflect types
 	var params []*ast.Parameter
 	var args []ast.Expression
+	var inTypes []reflect.Type
 	for _, lv := range localVars {
-		// Create type expression from reflect.Type
+		// Create type expression from reflect.Type (used for AST structure)
 		typeExpr := tc.reflectTypeToASTType(lv.TI.Type)
 		param := ast.NewParameter(ast.NewIdentifier(nil, lv.Name), typeExpr)
 		params = append(params, param)
@@ -2437,6 +2445,9 @@ func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeIn
 		// Create argument - identifier referring to the variable
 		arg := ast.NewIdentifier(render.Pos(), lv.Name)
 		args = append(args, arg)
+
+		// Collect actual reflect.Type for direct type checking
+		inTypes = append(inTypes, lv.TI.Type)
 	}
 
 	// Create unique macro with parameters
@@ -2445,22 +2456,69 @@ func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeIn
 		nil,
 		ast.NewIdentifier(nil, macroName),
 		ast.NewFuncType(nil, true, params, nil, false),
-		ast.NewBlock(nil, tree.Nodes),
+		ast.NewBlock(nil, childNodes), // Use saved childNodes
 		false,
 		tree.Format,
 	)
 
+	// Set the macro result type to the tree's format type (required for macros)
+	formatType := tc.opts.formatTypes[tree.Format]
+	var outTypes []reflect.Type
+	if formatType != nil {
+		outTypes = []reflect.Type{formatType}
+	}
+
+	// Build and set the reflect type for the macro directly
+	// This is normally done by checkType on FuncType, but we need the actual
+	// parameter types, not the interface{} fallback types from reflectTypeToASTType
+	macroDecl.Type.Reflect = tc.types.FuncOf(inTypes, outTypes, false)
+
+	// Register type info for parameter type expressions (needed by the emitter)
+	for i, param := range params {
+		tc.compilation.typeInfos[param.Type] = &typeInfo{Type: inTypes[i], Properties: propertyIsType}
+	}
+
+	// Register the macro's type info so checkExpr can find it when checking the call
+	macroTI := &typeInfo{Type: macroDecl.Type.Reflect, Properties: propertyIsMacroDeclaration}
+	tc.compilation.typeInfos[macroDecl.Ident] = macroTI
+
+	// Type-check the child template directly in the current typechecker's context
+	// This preserves the actual types of local variables instead of losing them
+	// when checkPackage creates a new typechecker with empty scopes.
+	tc.scopes.Enter(macroDecl)
+	tc.addToAncestors(macroDecl)
+
+	// Add parameters to scope with their actual types (not interface{})
+	for i, lv := range localVars {
+		paramIdent := params[i].Ident
+		tc.scopes.Declare(paramIdent.Name, &typeInfo{Type: lv.TI.Type, Properties: propertyAddressable}, paramIdent, nil)
+		tc.scopes.Use(paramIdent.Name)
+	}
+
+	// Type-check the child template body (use the saved childNodes)
+	macroDecl.Body.Nodes = tc.checkNodes(childNodes)
+
+	tc.ancestors = tc.ancestors[:len(tc.ancestors)-1]
+	tc.scopes.Exit()
+
+	// Now create the import structure for the emitter
+	// Note: This modifies tree.Nodes to contain only the macro wrapped in a package,
+	// which is intentional for the emitter but must happen AFTER we've saved and
+	// type-checked childNodes
 	importt := ast.NewImport(nil, ast.NewIdentifier(nil, "."), "/"+render.Path, nil)
 	importt.Tree = tree
-	importt.Tree.Nodes = []ast.Node{macroDecl}
+	// Wrap the macro in a package structure (required by the emitter)
+	pkg := ast.NewPackage(nil, "main", []ast.Node{macroDecl})
+	importt.Tree.Nodes = []ast.Node{pkg}
 
+	// Store for the emitter (and for caching if the same render is checked again)
 	stored := renderIR{Import: importt, Macro: macroDecl, Args: args}
 	tc.compilation.renderInheritContextMacro[render] = stored
 
 	render.IR.Call = ast.NewCall(render.Pos(), macroDecl.Ident, args, false)
 	render.IR.Import = importt
 
-	tc.checkNodes([]ast.Node{importt})
+	// Type-check the call expression (validates arguments against parameters)
 	return tc.checkExpr(render.IR.Call)
 }
 

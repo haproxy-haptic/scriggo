@@ -1217,9 +1217,35 @@ func TestRenderGlob(t *testing.T) {
 }
 
 // TestRenderInheritContext tests the render with inherit_context option
+// Person is a test struct for inherit_context tests
+type Person struct {
+	Name string
+	Age  int
+}
+
+// Config is a test struct for inherit_context tests
+type Config struct {
+	Host string
+	Port int
+}
+
 func TestRenderInheritContext(t *testing.T) {
+	// Provide native functions that return structs and maps for testing
+	globals := native.Declarations{
+		"getPerson":  func() Person { return Person{Name: "Alice", Age: 30} },
+		"getConfig":  func() Config { return Config{Host: "localhost", Port: 8080} },
+		"getIngress": func() map[string]interface{} {
+			return map[string]interface{}{
+				"Name":      "my-ingress",
+				"Namespace": "default",
+				"Host":      "example.com",
+			}
+		},
+	}
+
 	options := Options{
 		FormatTypes: formatTypes,
+		Globals:     globals,
 	}
 
 	tests := []struct {
@@ -1298,6 +1324,44 @@ func TestRenderInheritContext(t *testing.T) {
 				"index.html":  `{% a := 1 %}{{ render "level1.html" inherit_context }}`,
 				"level1.html": `{% b := 2 %}{{ a }}{{ render "level2.html" inherit_context }}`,
 				"level2.html": "{{ a + b }}",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render with inherit_context struct field access",
+			files: fstest.Files{
+				"index.html":    `{% person := getPerson() %}{{ render "greeting.html" inherit_context }}`,
+				"greeting.html": "Hello, {{ person.Name }}!",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render_glob with inherit_context struct field access",
+			files: fstest.Files{
+				"index.html":      `{% config := getConfig() %}{{ render_glob "partials/*.html" inherit_context }}`,
+				"partials/a.html": "Host: {{ config.Host }}",
+				"partials/b.html": "Port: {{ config.Port }}",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render with inherit_context map access",
+			files: fstest.Files{
+				"index.html":    `{% ingress := getIngress() %}{{ render "details.html" inherit_context }}`,
+				"details.html": "Ingress: {{ ingress.Name }} in {{ ingress.Namespace }}",
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render_glob with inherit_context map access",
+			files: fstest.Files{
+				"index.html":      `{% ingress := getIngress() %}{{ render_glob "partials/*.html" inherit_context }}`,
+				"partials/a.html": "Name: {{ ingress.Name }}",
+				"partials/b.html": "Host: {{ ingress.Host }}",
 			},
 			mainFile: "index.html",
 			wantErr:  "",
