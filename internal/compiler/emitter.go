@@ -714,6 +714,29 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 		}
 	}
 
+	// Type conversion (e.g., float64(x) or via pipe: x | float64()).
+	// Allocates a new register for the conversion result. The caller is
+	// responsible for moving it to the final destination register if needed.
+	// This is consistent with how function call results are handled.
+	if funTi.IsType() {
+		convertType := em.typ(call.Func)
+		// A conversion cannot have side-effects in go/defer context.
+		if goStmt || deferStmt {
+			return nil, nil
+		}
+		// Type conversions should have exactly one argument (already validated by type checker).
+		if len(call.Args) != 1 {
+			panic(internalError("type conversion with %d arguments", len(call.Args)))
+		}
+		argType := em.typ(call.Args[0])
+		argReg := em.emitExpr(call.Args[0], argType)
+		markdownToHTML := funTi.IsFormatType() && funTi.Type != stringType
+
+		// Use the shared helper to emit the conversion.
+		reg := em.emitTypeConversionToRegister(argReg, argType, convertType, markdownToHTML)
+		return []int8{reg}, []reflect.Type{convertType}
+	}
+
 	// Indirect function.
 	reg := em.emitExpr(call.Func, em.typ(call.Func))
 	stackShift := em.fb.currentStackShift()
@@ -735,6 +758,27 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 	em.fb.emitCallIndirect(reg, int8(runtime.NoVariadicArgs), stackShift, call.Pos(), funTi.Type, toFormat)
 
 	return regs, types
+}
+
+// emitTypeConversionToRegister emits a type conversion into a new register.
+// It handles both regular type conversions and markdown-to-HTML format conversions.
+// Returns the register containing the converted value.
+//
+// This helper is used by both emitCallNode (for pipe operations) and _emitExpr
+// (for regular call expressions) to avoid code duplication.
+func (em *emitter) emitTypeConversionToRegister(
+	argReg int8,
+	argType reflect.Type,
+	convertType reflect.Type,
+	markdownToHTML bool,
+) int8 {
+	reg := em.fb.newRegister(convertType.Kind())
+	if markdownToHTML {
+		em.changeRegisterConvertFormat(false, argReg, reg, argType, convertType)
+	} else {
+		em.changeRegister(false, argReg, reg, argType, convertType)
+	}
+	return reg
 }
 
 // emitBuiltin emits instructions for a builtin call, writing the result, if
