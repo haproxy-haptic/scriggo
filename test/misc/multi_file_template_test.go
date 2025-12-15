@@ -3346,6 +3346,65 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 			expectedOut: `<div>A</div><div>B</div>`,
 		},
+
+		// render_glob with pipe operator: regression test for variable leakage issue
+		// Tests that render_glob used with pipe operator doesn't output variable values
+		"render_glob with pipe operator does not leak caller variables": {
+			sources: fstest.Files{
+				"index.txt":      `{%- var pathPrefixMap, _ = pathResolver.GetPath("path-prefix.map", "map") -%}{%- _ = pathPrefixMap -%}{{ render_glob "snippets/*.txt" | strip() }}`,
+				"snippets/a.txt": `snippet content`,
+			},
+			main: native.Package{
+				Name: "main",
+				Declarations: native.Declarations{
+					"strip": func(s string) string {
+						return strings.TrimSpace(s)
+					},
+					"pathResolver": native.Package{
+						Name: "pathResolver",
+						Declarations: native.Declarations{
+							"GetPath": func(name, typ string) (string, error) {
+								return "/tmp/leaked/path/" + name, nil
+							},
+						},
+					},
+				},
+			},
+			expectedOut: `snippet content`,
+		},
+
+		// render_glob with pipe operator and NO MATCHING FILES: critical regression test
+		// This reproduces the actual bug from downstream (haproxy-template-ic base.yaml)
+		// Multiple variables are assigned and used, then render_glob matches nothing
+		"render_glob with pipe operator and no matches does not leak caller variables": {
+			sources: fstest.Files{
+				"index.txt": `{%- var hostMap, _ = pathResolver.GetPath("host.map", "map") -%}
+{%- var pathExactMap, _ = pathResolver.GetPath("path-exact.map", "map") -%}
+{%- var pathRegexMap, _ = pathResolver.GetPath("path-regex.map", "map") -%}
+{%- var pathPrefixExactMap, _ = pathResolver.GetPath("path-prefix-exact.map", "map") -%}
+{%- var pathPrefixMap, _ = pathResolver.GetPath("path-prefix.map", "map") -%}
+USE:{{ hostMap }}:{{ pathExactMap }}:{{ pathRegexMap }}:{{ pathPrefixExactMap }}:{{ pathPrefixMap }}
+{{ render_glob "nonexistent-pattern-*" | strip() }}END`,
+			},
+			main: native.Package{
+				Name: "main",
+				Declarations: native.Declarations{
+					"strip": func(s string) string {
+						return strings.TrimSpace(s)
+					},
+					"pathResolver": native.Package{
+						Name: "pathResolver",
+						Declarations: native.Declarations{
+							"GetPath": func(name, typ string) (string, error) {
+								return "/tmp/maps/" + name, nil
+							},
+						},
+					},
+				},
+			},
+			expectedOut: `USE:/tmp/maps/host.map:/tmp/maps/path-exact.map:/tmp/maps/path-regex.map:/tmp/maps/path-prefix-exact.map:/tmp/maps/path-prefix.map
+END`,
+		},
 	}
 
 	for name, cas := range templateMultiFileCases {

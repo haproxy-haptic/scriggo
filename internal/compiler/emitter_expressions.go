@@ -279,7 +279,12 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 
 		// Emit the code for each expanded Render node in sequence, concatenating results.
 		if len(expr.Renders) == 0 {
-			// No renders - empty glob produces no output (zero value string)
+			// No renders - initialize register with empty string to prevent
+			// stale data from being passed to piped functions.
+			if useGivenReg {
+				s := em.fb.makeStringValue("")
+				em.changeRegister(true, s, reg, stringType, dstType)
+			}
 			return reg, false
 		}
 
