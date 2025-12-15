@@ -229,7 +229,7 @@ mainLoop:
 							method = missingMethod(concrete, t)
 						}
 					}
-					panic(errTypeAssertion(vm.fn.Types[uint8(in.C)], concrete, t, method))
+					panic(errTypeAssertion(vm.fn.Types[uint8(in.C)], concrete, t, method, v))
 				}
 			}
 			if c != 0 {

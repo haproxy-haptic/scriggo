@@ -90,7 +90,8 @@ func (fb *functionBuilder) emitAppendSlice(t, s int8, pos *ast.Position) {
 // emitAssert appends a new "assert" instruction to the function body.
 //
 //	z = e.(t)
-func (fb *functionBuilder) emitAssert(e int8, typ reflect.Type, z int8) {
+func (fb *functionBuilder) emitAssert(e int8, typ reflect.Type, z int8, pos *ast.Position) {
+	fb.addPosAndPath(pos)
 	t := fb.addType(typ, true)
 	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpAssert, A: e, B: int8(t), C: z})
 }

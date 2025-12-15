@@ -163,13 +163,13 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 		assertType := em.typ(expr.Type)
 		pos := expr.Pos()
 		if canEmitDirectly(assertType.Kind(), dstType.Kind()) {
-			em.fb.emitAssert(exprReg, assertType, reg)
+			em.fb.emitAssert(exprReg, assertType, reg, pos)
 			em.fb.emitPanic(0, exprType, pos)
 			return reg, false
 		}
 		em.fb.enterScope()
 		tmp := em.fb.newRegister(assertType.Kind())
-		em.fb.emitAssert(exprReg, assertType, tmp)
+		em.fb.emitAssert(exprReg, assertType, tmp, pos)
 		em.fb.emitPanic(0, exprType, pos)
 		em.changeRegister(false, tmp, reg, assertType, dstType)
 		em.fb.exitScope()
