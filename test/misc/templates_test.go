@@ -860,6 +860,42 @@ func TestPipeOperator(t *testing.T) {
 			},
 			expected: "hello world!",
 		},
+		{
+			name:     "pipe with int conversion",
+			src:      `{% var f = 5.7 %}{{ f | int() }}`,
+			globals:  nil,
+			expected: "5",
+		},
+		{
+			name:     "pipe with float64 conversion",
+			src:      `{{ 42 | float64() }}`,
+			globals:  nil,
+			expected: "42",
+		},
+		{
+			name:     "pipe with string conversion",
+			src:      `{{ 65 | string() }}`,
+			globals:  nil,
+			expected: "A",
+		},
+		{
+			name:     "pipe with bool conversion",
+			src:      `{% var i = 1 %}{{ i != 0 | bool() }}`,
+			globals:  nil,
+			expected: "true",
+		},
+		{
+			name:     "regular type conversion (not pipe)",
+			src:      `{{ float64(42) }}`,
+			globals:  nil,
+			expected: "42",
+		},
+		{
+			name:     "regular type conversion with variable",
+			src:      `{% var x = 5 %}{{ int(x) }}`,
+			globals:  nil,
+			expected: "5",
+		},
 	}
 
 	for _, tc := range cases {

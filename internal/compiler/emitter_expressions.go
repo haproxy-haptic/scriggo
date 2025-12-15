@@ -114,24 +114,24 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 			if reg == 0 {
 				return reg, false
 			}
-			typ := em.typ(expr.Args[0])
-			arg := em.emitExpr(expr.Args[0], typ)
+			argType := em.typ(expr.Args[0])
+			argReg := em.emitExpr(expr.Args[0], argType)
 			markdownToHTML := ti.IsFormatType() && ti.Type != stringType
+
+			// Optimization: if we can emit directly to the destination register, do so.
 			if canEmitDirectly(convertType.Kind(), dstType.Kind()) {
 				if markdownToHTML {
-					em.changeRegisterConvertFormat(false, arg, reg, typ, convertType)
+					em.changeRegisterConvertFormat(false, argReg, reg, argType, convertType)
 				} else {
-					em.changeRegister(false, arg, reg, typ, convertType)
+					em.changeRegister(false, argReg, reg, argType, convertType)
 				}
 				return reg, false
 			}
+
+			// Otherwise, use the shared helper to emit to a temporary register,
+			// then convert to the destination register.
 			em.fb.enterStack()
-			tmp := em.fb.newRegister(convertType.Kind())
-			if markdownToHTML {
-				em.changeRegisterConvertFormat(false, arg, tmp, typ, convertType)
-			} else {
-				em.changeRegister(false, arg, tmp, typ, convertType)
-			}
+			tmp := em.emitTypeConversionToRegister(argReg, argType, convertType, markdownToHTML)
 			em.changeRegister(false, tmp, reg, convertType, dstType)
 			em.fb.exitStack()
 			return reg, false
