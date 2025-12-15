@@ -2516,8 +2516,15 @@ func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeIn
 		tc.scopes.Use(paramIdent.Name)
 	}
 
+	// Switch to child template's path for accurate error reporting
+	backupPath := tc.path
+	tc.path = tree.Path
+
 	// Type-check the child template body (use the saved childNodes)
 	macroDecl.Body.Nodes = tc.checkNodes(childNodes)
+
+	// Restore original path
+	tc.path = backupPath
 
 	tc.ancestors = tc.ancestors[:len(tc.ancestors)-1]
 	tc.scopes.Exit()

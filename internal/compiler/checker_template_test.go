@@ -1227,6 +1227,105 @@ func TestRenderGlob(t *testing.T) {
 	}
 }
 
+// TestRenderGlobErrorLocations verifies that errors in templates rendered via
+// render_glob report the correct file path, line, and column numbers.
+func TestRenderGlobErrorLocations(t *testing.T) {
+	options := Options{
+		FormatTypes: formatTypes,
+	}
+
+	tests := []struct {
+		name        string
+		files       fstest.Files
+		mainFile    string
+		wantErrPath string // Expected path in error
+		wantErrMsg  string // Expected error message substring
+		wantLine    int    // Expected line number
+	}{
+		{
+			name: "undefined variable in render_glob with inherit_context",
+			files: fstest.Files{
+				"index.html": `{% show render_glob "widgets/*.html" inherit_context %}`,
+				"widgets/header.html": `<header>
+{{ undefinedVar }}
+</header>`,
+			},
+			mainFile:    "index.html",
+			wantErrPath: "widgets/header.html",
+			wantErrMsg:  "undefined",
+			wantLine:    2,
+		},
+		{
+			name: "type error in render_glob with inherit_context",
+			files: fstest.Files{
+				"index.html":   `{% show render_glob "parts/*.html" inherit_context %}`,
+				"parts/a.html": `{{ 1 + "string" }}`, // Line 1, type error
+			},
+			mainFile:    "index.html",
+			wantErrPath: "parts/a.html",
+			wantErrMsg:  "invalid operation",
+			wantLine:    1,
+		},
+		{
+			name: "multiple children with inherit_context, error in second",
+			files: fstest.Files{
+				"index.html":   `{% show render_glob "parts/*.html" inherit_context %}`,
+				"parts/a.html": `<div>Part A</div>`,
+				"parts/b.html": `<div>{{ missingVar }}</div>`,
+			},
+			mainFile:    "index.html",
+			wantErrPath: "parts/b.html",
+			wantErrMsg:  "undefined",
+			wantLine:    1,
+		},
+		{
+			name: "nested render_glob with inherit_context error location",
+			files: fstest.Files{
+				"index.html":   `{{ render "wrapper.html" }}`,
+				"wrapper.html": `{{ render_glob "parts/*.html" inherit_context }}`,
+				"parts/item.html": `Line 1
+Line 2
+{{ badVariable }}`,
+			},
+			mainFile:    "index.html",
+			wantErrPath: "parts/item.html",
+			wantErrMsg:  "undefined",
+			wantLine:    3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildTemplate(tt.files, tt.mainFile, options)
+			if err == nil {
+				t.Fatal("expected error but got nil")
+			}
+
+			// Extract CheckingError
+			checkErr, ok := err.(*CheckingError)
+			if !ok {
+				t.Fatalf("expected *CheckingError, got %T: %v", err, err)
+			}
+
+			// Verify path
+			if checkErr.Path() != tt.wantErrPath {
+				t.Errorf("error path: got %q, want %q", checkErr.Path(), tt.wantErrPath)
+			}
+
+			// Verify line number
+			pos := checkErr.Position()
+			if pos.Line != tt.wantLine {
+				t.Errorf("error line: got %d, want %d", pos.Line, tt.wantLine)
+			}
+
+			// Verify error message contains expected substring
+			if !strings.Contains(checkErr.Message(), tt.wantErrMsg) {
+				t.Errorf("error message: got %q, want substring %q", checkErr.Message(), tt.wantErrMsg)
+			}
+		})
+	}
+}
+
 // TestRenderInheritContext tests the render with inherit_context option
 // Person is a test struct for inherit_context tests
 type Person struct {
