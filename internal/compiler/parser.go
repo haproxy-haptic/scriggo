@@ -360,7 +360,6 @@ func ParseTemplateSource(src []byte, format ast.Format, imported, noParseShow bo
 				p.pendingTrimRight = false
 			}
 			p.addNode(text)
-			p.lastText = text // Track for trimLeft handling
 			tok = p.next()
 
 		// {%
@@ -1972,6 +1971,19 @@ func (p *parsing) addNode(node ast.Node) {
 		*ast.URL,
 		*ast.Raw:
 		p.addToAncestors(n)
+	}
+
+	// Manage lastText state for Jinja2-style whitespace trimming.
+	// This ensures {%- only trims from immediately adjacent text nodes.
+	switch n := node.(type) {
+	case *ast.Text:
+		// Text nodes become the new lastText for trimLeft handling
+		p.lastText = n
+	case *ast.Show, *ast.Comment, *ast.URL, *ast.Statements, *ast.Raw:
+		// Output nodes that aren't text break adjacency, preventing
+		// {%- from incorrectly trimming non-adjacent text nodes
+		p.lastText = nil
+	// All other nodes (control structures, declarations) don't affect lastText
 	}
 }
 

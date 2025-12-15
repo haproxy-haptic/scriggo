@@ -113,6 +113,132 @@ func TestJinja2WhitespaceControl(t *testing.T) {
 			template: "{{ \"hello\" -}}",
 			want:     "hello",
 		},
+
+		// ===== Show Statement Tests ({{ }}) =====
+		// Bug report case - show between text and {%-
+		{
+			name:     "trim left after show should not affect previous text",
+			template: `check{%- if true %} proto {{ "h2" }}{%- end %}`,
+			want:     `check proto h2`,
+		},
+		// Multiple shows in sequence
+		{
+			name:     "trim left after multiple shows",
+			template: `a{%- if true %}{{ "x" }}{{ "y" }}{{ "z" }}{%- end %}`,
+			want:     `axyz`,
+		},
+		// Show with its own trim markers
+		{
+			name:     "trim left after show with trim markers",
+			template: `a   {%- if true %}b   {{- "c" -}}   d{%- end %}`,
+			want:     `abcd`,
+		},
+		// Show at start of block
+		{
+			name:     "trim left at start of block with show",
+			template: `prefix   {%- if true %}{{ "value" }}{%- end %}`,
+			want:     `prefixvalue`,
+		},
+		// Only show in block
+		{
+			name:     "trim left with only show in block",
+			template: `a   {%- if true %}{{ "b" }}{%- end %}   c`,
+			want:     `ab   c`,
+		},
+
+		// ===== Comment Tests ({# #}) =====
+		// Comment between text and {%-
+		{
+			name:     "trim left after comment preserves previous text",
+			template: `a   {%- if true %}b   {# comment #}{%- end %}`,
+			want:     `ab   `,
+		},
+		// Comment with trim markers
+		{
+			name:     "comment with trim followed by trim left",
+			template: `a   {%- if true %}b   {#- comment -#}   {%- end %}`,
+			want:     `ab`,
+		},
+		// Multiple comments
+		{
+			name:     "trim left after multiple comments",
+			template: `a{%- if true %}{# c1 #}{# c2 #}{# c3 #}{%- end %}`,
+			want:     `a`,
+		},
+
+		// ===== Nested Control Flow Tests =====
+		// Nested if with show
+		{
+			name:     "trim left with nested if and show",
+			template: `outer{%- if true %} inner {{ "value" }}{%- if true %} more{%- end %}{%- end %}`,
+			want:     `outer inner value more`,
+		},
+
+		// ===== Mixed Node Type Tests =====
+		// Show, comment, show sequence
+		{
+			name:     "show comment show sequence with trim",
+			template: `a{%- if true %}{{ "b" }}{# c #}{{ "d" }}{%- end %}`,
+			want:     `abd`,
+		},
+		// Text, show, text, trim pattern
+		{
+			name:     "text show text trim preserves all spacing",
+			template: `{%- if true %}a {{ "b" }} c{%- end %}`,
+			want:     `a b c`,
+		},
+		// Complex real-world pattern
+		{
+			name:     "haproxy-style config generation",
+			template: `server s1 127.0.0.1:8080{%- if true %} check{%- end %}{%- if true %} proto {{ "h2" }}{%- end %}`,
+			want:     `server s1 127.0.0.1:8080 check proto h2`,
+		},
+
+		// ===== Edge Cases - Verify Existing Behavior Still Works =====
+		// Text-only (original behavior)
+		{
+			name:     "trim left with only text (baseline)",
+			template: `a   {%- if true %}b   {%- end %}`,
+			want:     `ab`,
+		},
+		// Empty block
+		{
+			name:     "trim left with empty block",
+			template: `a   {%- if true %}{%- end %}   b`,
+			want:     `a   b`,
+		},
+		// No trim markers (control)
+		{
+			name:     "no trim markers preserves all spacing",
+			template: `a   {% if true %}b {{ "c" }} d{% end %}   e`,
+			want:     `a   b c d   e`,
+		},
+		// Only trim right
+		{
+			name:     "trim right only should not affect shows",
+			template: `{% if true %}a {{ "b" }} c   {%- end %}   d`,
+			want:     `a b c   d`,
+		},
+
+		// ===== Trim Marker Position Tests =====
+		// Trim on opening tag only
+		{
+			name:     "trim left on opening tag with show",
+			template: `a   {%- if true %} b {{ "c" }}{% end %}`,
+			want:     `a b c`,
+		},
+		// Trim on closing tag only
+		{
+			name:     "trim left on closing tag with show",
+			template: `{% if true %}a {{ "b" }} c{%- end %}`,
+			want:     `a b c`,
+		},
+		// Both opening and closing
+		{
+			name:     "trim on both tags with show",
+			template: `a   {%- if true %}b {{ "c" }}{% end -%}   d`,
+			want:     `ab cd`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -150,7 +276,7 @@ func renderTree(buf *bytes.Buffer, nodes []ast.Node) {
 			}
 		case *ast.Show:
 			// For shows, we need to evaluate the expression
-			// For test purposes, just handle string literals
+			// For test purposes, just handle string literals and identifiers
 			if lit, ok := n.Expressions[0].(*ast.BasicLiteral); ok {
 				switch lit.Type {
 				case ast.StringLiteral:
@@ -171,12 +297,42 @@ func renderTree(buf *bytes.Buffer, nodes []ast.Node) {
 						buf.WriteString(lit.Value)
 					}
 				}
+			} else if ident, ok := n.Expressions[0].(*ast.Identifier); ok {
+				// Handle identifiers - for test purposes, use simple values
+				switch ident.Name {
+				case "i", "j":
+					// For loop indices - the actual value would come from runtime
+					// For testing, we'll just use the index value from context
+					buf.WriteString(ident.Name)
+				case "x":
+					buf.WriteString("val")
+				default:
+					buf.WriteString("value")
+				}
 			}
 		case *ast.If:
 			// Just render the then block for testing
 			if n.Then != nil {
 				renderTree(buf, n.Then.Nodes)
 			}
+		case *ast.For:
+			// For testing, just render the body once (C-style for loop)
+			renderTree(buf, n.Body)
+		case *ast.ForRange:
+			// For testing, try to determine iteration count from the range expression
+			times := 2 // Default
+			if n.Assignment != nil && len(n.Assignment.Rhs) > 0 {
+				// Check for composite literal in the range expression
+				if comp, ok := n.Assignment.Rhs[0].(*ast.CompositeLiteral); ok {
+					times = len(comp.KeyValues)
+				}
+			}
+			for i := 0; i < times; i++ {
+				renderTree(buf, n.Body)
+			}
+		case *ast.Comment:
+			// Comments are not rendered
+			continue
 		}
 	}
 }
