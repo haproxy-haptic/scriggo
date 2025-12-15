@@ -1377,6 +1377,34 @@ func TestRenderInheritContext(t *testing.T) {
 			mainFile: "index.html",
 			wantErr:  "",
 		},
+		{
+			name: "render_glob with inherit_context - macro called in expression within rendered template",
+			files: fstest.Files{
+				"index.html":                    `{% name := "test" %}{{ render_glob "macros/*.html" inherit_context }}`,
+				"macros/backend-directive.html": `{% macro BackendDirective %}Directive for {{ name }}{% end %}{{ BackendDirective() }}`,
+			},
+			mainFile: "index.html",
+			wantErr:  "",
+		},
+		{
+			name: "render_glob with inherit_context in expression context - captures many variables",
+			files: fstest.Files{
+				"haproxy.cfg":                      `{{ render_glob "backends-*.html" inherit_context }}`,
+				"backends-ingress.html":            `{% httpPaths := []any{} %}{% ingress := getIngress() %}{% isFirst := true %}{% nsServerOpts := map[string]any{} %}{% path := "/" %}{% port := 8080 %}{% port_identifier := "http" %}{% rule := map[string]any{} %}{% rules := []any{} %}{% service := "my-svc" %}{% service_name := "my-service" %}{{- render_glob "backend-directives-*.html" inherit_context -}}`,
+				"backend-directives-advanced.html": `{%- service = "override" -%}`,
+			},
+			mainFile: "haproxy.cfg",
+			wantErr:  "",
+		},
+		{
+			name: "render_glob with inherit_context - FormatText template without return type",
+			files: fstest.Files{
+				"main.html":             `{% name := "test" %}{{ render_glob "config-*.txt" inherit_context }}`,
+				"config-directive.txt":  `{%- name = "modified" -%}`,
+			},
+			mainFile: "main.html",
+			wantErr:  "",
+		},
 	}
 
 	for _, tt := range tests {

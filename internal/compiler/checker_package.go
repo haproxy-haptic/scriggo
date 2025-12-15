@@ -611,12 +611,15 @@ func checkPackage(compilation *compilation, pkg *ast.Package, path string, impor
 			if _, ok := tc.scopes.FilePackage(f.Ident.Name); ok {
 				return tc.errorf(f.Ident, "%s redeclared in this block", f.Ident.Name)
 			}
-			ti := &typeInfo{Type: funcType}
+			var ti *typeInfo
 			if f.Type.Macro {
-				ti.Properties |= propertyIsMacroDeclaration
+				additionalProps := properties(0)
 				if extendingFile {
-					ti.Properties |= propertyMacroDeclaredInFileWithExtends
+					additionalProps |= propertyMacroDeclaredInFileWithExtends
 				}
+				ti = newMacroTypeInfo(funcType, f.Format, additionalProps)
+			} else {
+				ti = &typeInfo{Type: funcType}
 			}
 			tc.scopes.Declare(f.Ident.Name, ti, f.Ident, nil)
 		}

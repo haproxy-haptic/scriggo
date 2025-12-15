@@ -593,11 +593,10 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 		}
 		t := tc.checkType(expr.Type)
 		tc.checkFunc(expr)
-		ti := &typeInfo{Type: t.Type}
 		if expr.Type.Macro {
-			ti.Properties |= propertyIsMacroDeclaration
+			return newMacroTypeInfo(t.Type, expr.Format, 0)
 		}
-		return ti
+		return &typeInfo{Type: t.Type}
 
 	case *ast.Call:
 		tis := tc.checkCallExpression(expr)
@@ -1714,6 +1713,28 @@ func (tc *typechecker) checkCallExpression(expr *ast.Call) []*typeInfo {
 	}
 
 	numOut := t.Type.NumOut()
+
+	// Allow macros without return types to be used in expression contexts
+	// by implicitly returning the zero value of their format type
+	if numOut == 0 && t.IsMacroDeclaration() {
+		// Validate MacroFormat is in valid range
+		if t.MacroFormat < 0 || int(t.MacroFormat) >= len(formatTypeName) {
+			panic(tc.errorf(expr, "internal error: invalid macro format %d", t.MacroFormat))
+		}
+
+		// Get the format type name
+		formatTypeNameStr := formatTypeName[t.MacroFormat]
+		formatTi, ok := tc.scopes.Universe(formatTypeNameStr)
+		if !ok {
+			// Fallback to string if format type not found
+			formatTi, ok = tc.scopes.Universe("string")
+			if !ok {
+				panic(tc.errorf(expr, "internal error: string type not found in universe"))
+			}
+		}
+		return []*typeInfo{{Type: formatTi.Type}}
+	}
+
 	resultTypes := make([]*typeInfo, numOut)
 	for i := 0; i < numOut; i++ {
 		resultTypes[i] = &typeInfo{Type: t.Type.Out(i)}
@@ -2479,7 +2500,7 @@ func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeIn
 	}
 
 	// Register the macro's type info so checkExpr can find it when checking the call
-	macroTI := &typeInfo{Type: macroDecl.Type.Reflect, Properties: propertyIsMacroDeclaration}
+	macroTI := newMacroTypeInfo(macroDecl.Type.Reflect, tree.Format, 0)
 	tc.compilation.typeInfos[macroDecl.Ident] = macroTI
 
 	// Type-check the child template directly in the current typechecker's context

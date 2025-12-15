@@ -915,7 +915,9 @@ nodesLoop:
 				// identifier.
 				identTi := tc.checkIdentifier(ident, true)
 				if fun.Type.Macro {
-					identTi.Properties |= propertyIsMacroDeclaration
+					// Update the existing typeInfo with macro properties
+					macroTi := newMacroTypeInfo(identTi.Type, fun.Format, identTi.Properties)
+					*identTi = *macroTi
 				}
 				i += 2
 
