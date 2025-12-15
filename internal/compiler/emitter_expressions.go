@@ -281,10 +281,11 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 		if len(expr.Renders) == 0 {
 			// No renders - initialize register with empty string to prevent
 			// stale data from being passed to piped functions.
-			if useGivenReg {
-				s := em.fb.makeStringValue("")
-				em.changeRegister(true, s, reg, stringType, dstType)
+			if !useGivenReg {
+				reg = em.fb.newRegister(reflect.String)
 			}
+			s := em.fb.makeStringValue("")
+			em.changeRegister(true, s, reg, stringType, dstType)
 			return reg, false
 		}
 
