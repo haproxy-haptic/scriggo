@@ -371,3 +371,14 @@ func checkError(path string, nodeOrPos interface{}, format string, args ...inter
 	}
 	return err
 }
+
+// newMacroTypeInfo creates a typeInfo for a macro declaration with the specified
+// type, format, and optional additional properties. This helper reduces duplication
+// across the 4 locations where macro typeInfos are created.
+func newMacroTypeInfo(funcType reflect.Type, format ast.Format, additionalProps properties) *typeInfo {
+	return &typeInfo{
+		Type:        funcType,
+		Properties:  propertyIsMacroDeclaration | additionalProps,
+		MacroFormat: format,
+	}
+}
