@@ -469,7 +469,7 @@ func (em *emitter) assignValuesToAddresses(addresses []address, values []ast.Exp
 		ok := em.fb.newRegister(reflect.Bool)
 		em.fb.emitMove(true, 1, ok, reflect.Bool)
 		result := em.fb.newRegister(typ.Kind())
-		em.fb.emitAssert(expr, typ, result)
+		em.fb.emitAssert(expr, typ, result, valueExpr.Pos())
 		em.fb.emitMove(true, 0, ok, reflect.Bool)
 		addresses[0].assign(false, result, typ)
 		addresses[1].assign(false, ok, okType)

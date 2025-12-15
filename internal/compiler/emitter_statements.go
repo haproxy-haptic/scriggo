@@ -1021,7 +1021,7 @@ func (em *emitter) emitTypeSwitch(node *ast.TypeSwitch) {
 				case generalRegister:
 					reg = generalReg
 				}
-				em.fb.emitAssert(expr, typ, reg)
+				em.fb.emitAssert(expr, typ, reg, clause.Expressions[0].Pos())
 			}
 			next := em.fb.newLabel()
 			em.fb.emitGoto(next)          // assert failed
@@ -1033,7 +1033,7 @@ func (em *emitter) emitTypeSwitch(node *ast.TypeSwitch) {
 					em.fb.emitIf(false, expr, runtime.ConditionInterfaceNil, 0, reflect.Interface, typExpr.Pos())
 				} else {
 					typ := em.ti(typExpr).Type
-					em.fb.emitAssert(expr, typ, 0)
+					em.fb.emitAssert(expr, typ, 0, typExpr.Pos())
 				}
 				nextClause := em.fb.newLabel()
 				em.fb.emitGoto(nextClause)    // assert failed

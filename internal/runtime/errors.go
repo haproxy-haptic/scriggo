@@ -50,13 +50,37 @@ func (err outError) Error() string {
 // errTypeAssertion returns a runtime error for a failed type assertion x.(T).
 // interfaceType is the type of x, dynamicType is dynamic type of x or nil if
 // x is nil and assertedType is the type T. If T is an interface type,
-// missingMethod is the missing method name.
+// missingMethod is the missing method name. actualValue is the runtime value
+// that failed the assertion.
 //
 // The Go runtime returns a runtime.TypeAssertionError, Scriggo cannot return
 // an error with this type because it has unexported fields. See also:
 // https://github.com/golang/go/issues/14443
-func errTypeAssertion(interfaceType, dynamicType, assertedType reflect.Type, missingMethod string) runtimeError {
+func errTypeAssertion(interfaceType, dynamicType, assertedType reflect.Type, missingMethod string, actualValue reflect.Value) runtimeError {
 	s := "interface conversion: "
+
+	// Show actual value if it's safe to print
+	valueStr := ""
+	if actualValue.IsValid() && actualValue.CanInterface() {
+		// Defensive: recover from any potential panic in Interface() or Sprintf.
+		// While CanInterface() should prevent panics, this ensures robustness
+		// in error handling code where we cannot afford to lose the error message.
+		defer func() {
+			if recover() != nil {
+				valueStr = ""
+			}
+		}()
+		val := actualValue.Interface()
+		formatted := fmt.Sprintf("%#v", val)
+
+		// Truncate overly long values to keep error messages readable
+		const maxValueLen = 200
+		if len(formatted) > maxValueLen {
+			formatted = formatted[:maxValueLen] + "... (truncated)"
+		}
+		valueStr = fmt.Sprintf(" (value: %s)", formatted)
+	}
+
 	if dynamicType == nil {
 		if assertedType.Kind() == reflect.Interface {
 			return runtimeError(s + "interface is nil, not " + assertedType.String())
@@ -65,9 +89,9 @@ func errTypeAssertion(interfaceType, dynamicType, assertedType reflect.Type, mis
 	}
 	if missingMethod != "" {
 		return runtimeError(s + dynamicType.String() + " is not " + assertedType.String() +
-			": missing method " + missingMethod)
+			": missing method " + missingMethod + valueStr)
 	}
-	s += interfaceType.String() + " is " + dynamicType.String() + ", not " + assertedType.String()
+	s += interfaceType.String() + " is " + dynamicType.String() + ", not " + assertedType.String() + valueStr
 	if dynamicType.String() != assertedType.String() {
 		return runtimeError(s)
 	}
