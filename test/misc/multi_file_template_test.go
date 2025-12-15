@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/open2b/scriggo"
 	"github.com/open2b/scriggo/ast"
@@ -3354,22 +3356,7 @@ func TestMultiFileTemplate(t *testing.T) {
 				"index.txt":      `{%- var pathPrefixMap, _ = pathResolver.GetPath("path-prefix.map", "map") -%}{%- _ = pathPrefixMap -%}{{ render_glob "snippets/*.txt" | strip() }}`,
 				"snippets/a.txt": `snippet content`,
 			},
-			main: native.Package{
-				Name: "main",
-				Declarations: native.Declarations{
-					"strip": func(s string) string {
-						return strings.TrimSpace(s)
-					},
-					"pathResolver": native.Package{
-						Name: "pathResolver",
-						Declarations: native.Declarations{
-							"GetPath": func(name, typ string) (string, error) {
-								return "/tmp/leaked/path/" + name, nil
-							},
-						},
-					},
-				},
-			},
+			main:        leakTestPackage("/tmp/leaked/path/"),
 			expectedOut: `snippet content`,
 		},
 
@@ -3386,24 +3373,43 @@ func TestMultiFileTemplate(t *testing.T) {
 USE:{{ hostMap }}:{{ pathExactMap }}:{{ pathRegexMap }}:{{ pathPrefixExactMap }}:{{ pathPrefixMap }}
 {{ render_glob "nonexistent-pattern-*" | strip() }}END`,
 			},
-			main: native.Package{
-				Name: "main",
-				Declarations: native.Declarations{
-					"strip": func(s string) string {
-						return strings.TrimSpace(s)
-					},
-					"pathResolver": native.Package{
-						Name: "pathResolver",
-						Declarations: native.Declarations{
-							"GetPath": func(name, typ string) (string, error) {
-								return "/tmp/maps/" + name, nil
-							},
-						},
-					},
-				},
-			},
+			main: leakTestPackage("/tmp/maps/"),
 			expectedOut: `USE:/tmp/maps/host.map:/tmp/maps/path-exact.map:/tmp/maps/path-regex.map:/tmp/maps/path-prefix-exact.map:/tmp/maps/path-prefix.map
 END`,
+		},
+
+		// render_glob piped through filter - additional regression tests
+		"render_glob piped through capitalize filter": {
+			sources: fstest.Files{
+				"index.txt":      `{{ render_glob "snippets/*.txt" | capitalize() }}`,
+				"snippets/a.txt": `hello world`,
+			},
+			expectedOut: `Hello world`,
+		},
+
+		"render_glob piped through toUpper filter": {
+			sources: fstest.Files{
+				"index.txt":      `{{ render_glob "snippets/*.txt" | toUpper() }}`,
+				"snippets/a.txt": `hello`,
+			},
+			expectedOut: `HELLO`,
+		},
+
+		"render_glob with multiple files piped through filter": {
+			sources: fstest.Files{
+				"index.txt":      `{{ render_glob "snippets/*.txt" | toUpper() }}`,
+				"snippets/a.txt": `aaa`,
+				"snippets/b.txt": `bbb`,
+			},
+			expectedOut: `AAABBB`,
+		},
+
+		"render piped through filter": {
+			sources: fstest.Files{
+				"index.txt":   `{{ render "snippet.txt" | capitalize() }}`,
+				"snippet.txt": `hello world`,
+			},
+			expectedOut: `Hello world`,
 		},
 	}
 
@@ -3565,8 +3571,38 @@ func multiFileTemplateTestGlobals() native.Declarations {
 		"title": func(env native.Env, s string) string {
 			return strings.Title(s)
 		},
-		"I": &I,
-		"C": 8,
+		"capitalize": func(s string) string {
+			if s == "" {
+				return s
+			}
+			r, size := utf8.DecodeRuneInString(s)
+			return string(unicode.ToUpper(r)) + s[size:]
+		},
+		"toUpper": strings.ToUpper,
+		"I":       &I,
+		"C":       8,
+	}
+}
+
+// leakTestPackage returns a native.Package for testing register leakage in
+// render_glob with pipe operators. The pathPrefix is prepended to paths
+// returned by pathResolver.GetPath.
+func leakTestPackage(pathPrefix string) native.Package {
+	return native.Package{
+		Name: "main",
+		Declarations: native.Declarations{
+			"strip": func(s string) string {
+				return strings.TrimSpace(s)
+			},
+			"pathResolver": native.Package{
+				Name: "pathResolver",
+				Declarations: native.Declarations{
+					"GetPath": func(name, typ string) (string, error) {
+						return pathPrefix + name, nil
+					},
+				},
+			},
+		},
 	}
 }
 
