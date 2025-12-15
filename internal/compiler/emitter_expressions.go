@@ -277,13 +277,29 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 
 	case *ast.RenderGlob:
 
-		// Emit the code for each expanded Render node in sequence.
-		for _, render := range expr.Renders {
-			em.emitNodes([]ast.Node{render.IR.Import})
-			em._emitExpr(render.IR.Call, dstType, reg, useGivenReg, allowK)
+		// Emit the code for each expanded Render node in sequence, concatenating results.
+		if len(expr.Renders) == 0 {
+			// No renders - empty glob produces no output (zero value string)
+			return reg, false
 		}
-		// RenderGlob emits each render in sequence; result is in reg after the last render.
-		return reg, false
+
+		// Emit first render
+		em.emitNodes([]ast.Node{expr.Renders[0].IR.Import})
+		var k bool
+		reg, k = em._emitExpr(expr.Renders[0].IR.Call, dstType, reg, useGivenReg, allowK)
+
+		// Emit remaining renders and concatenate
+		for i := 1; i < len(expr.Renders); i++ {
+			render := expr.Renders[i]
+			em.emitNodes([]ast.Node{render.IR.Import})
+			em.fb.enterStack()
+			renderType := em.typ(render.IR.Call)
+			tmp := em.fb.newRegister(renderType.Kind())
+			tmp, _ = em._emitExpr(render.IR.Call, dstType, tmp, true, allowK)
+			em.fb.emitConcat(reg, tmp, reg)
+			em.fb.exitStack()
+		}
+		return reg, k
 
 	case *ast.Slicing:
 

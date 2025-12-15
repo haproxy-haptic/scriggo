@@ -3311,6 +3311,41 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 			expectedOut: "Hello",
 		},
+
+		// render_glob bug regression tests: ensure local variables don't leak into output
+		// These tests use assignment to force the expression path (not the Show optimization)
+		"render_glob in expression context does not leak caller variables": {
+			sources: fstest.Files{
+				"index.txt":      `{%- var testVar = "SHOULD_NOT_APPEAR" -%}{% result := render_glob "snippets/*.txt" %}{{ result }}`,
+				"snippets/a.txt": `snippet A`,
+				"snippets/b.txt": `snippet B`,
+			},
+			expectedOut: `snippet Asnippet B`,
+		},
+
+		"render_glob in expression context with single file": {
+			sources: fstest.Files{
+				"index.txt":      `{%- var testVar = "SHOULD_NOT_APPEAR" -%}{% result := render_glob "snippets/*.txt" %}{{ result }}`,
+				"snippets/a.txt": `single snippet`,
+			},
+			expectedOut: `single snippet`,
+		},
+
+		"render_glob in expression context with no matches": {
+			sources: fstest.Files{
+				"index.txt": `{%- var testVar = "SHOULD_NOT_APPEAR" -%}{% result := render_glob "nonexistent/*.txt" %}[{{ result }}]`,
+			},
+			expectedOut: `[]`,
+		},
+
+		"render_glob in expression context with HTML format": {
+			sources: fstest.Files{
+				"index.html":      `{%- var testVar = "SHOULD_NOT_APPEAR" -%}{% result := render_glob "partials/*.html" %}{{ result }}`,
+				"partials/a.html": `<div>A</div>`,
+				"partials/b.html": `<div>B</div>`,
+			},
+			expectedOut: `<div>A</div><div>B</div>`,
+		},
 	}
 
 	for name, cas := range templateMultiFileCases {
