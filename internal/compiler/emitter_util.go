@@ -57,6 +57,27 @@ func (em *emitter) _changeRegister(k bool, src, dst int8, srcType reflect.Type, 
 		return
 	}
 
+	// Handle implicit conversion from empty interface to concrete type
+	if srcKind == reflect.Interface && srcType.NumMethod() == 0 && dstKind != reflect.Interface {
+		// Emit OpConvertFromInterface for runtime type assertion and conversion
+		em.fb.emitInterfaceConvert(k, srcType, dstType, src, dst)
+		return
+	}
+
+	// Handle concrete type to string conversion for template string concatenation.
+	// This uses OpConvertFromInterface which has fmt.Sprint-style string conversion.
+	// (e.g., "count: " + n where n is int should give "count: 42", not "count: *")
+	// We must first typify the source value (box it into a general register as reflect.Value)
+	// because OpConvertFromInterface expects its source to be in a general register.
+	if dstKind == reflect.String && srcKind != reflect.String && srcKind != reflect.Interface {
+		em.fb.enterScope()
+		tmp := em.fb.newRegister(reflect.Interface)
+		em.fb.emitTypify(k, srcType, src, tmp)
+		em.fb.emitInterfaceConvert(false, srcType, dstType, tmp, dst)
+		em.fb.exitScope()
+		return
+	}
+
 	// When moving a value from int, float or string to general, value's type
 	// must be "typed" to its true (original) type.
 	if dstKind == reflect.Interface {

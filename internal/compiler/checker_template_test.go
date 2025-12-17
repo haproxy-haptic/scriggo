@@ -658,8 +658,9 @@ var checkerTemplateStmts = []struct {
 	{src: `{% m := map[interface{}]int{} %}{% m.x = "a" %}`, expected: `cannot use "a" (type untyped string) as type int in assignment`},
 	{src: `{% m := map[string]int{} %}{% m.x := "a" %}`, expected: `non-name m.x on left side of :=`},
 	{src: `{% m := map[interface{}]int{} %}{% m.x := "a" %}`, expected: `non-name m.x on left side of :=`},
-	{src: `{% m := map[string]int{} %}{{ m.x + "a" }}`, expected: `invalid operation: m.x + "a" (cannot convert "a" (type untyped string) to type int)`},
-	{src: `{% m := map[interface{}]int{} %}{{ m.x + "a" }}`, expected: `invalid operation: m.x + "a" (cannot convert "a" (type untyped string) to type int)`},
+	// Template-friendly string concatenation: int + string → string conversion
+	{src: `{% m := map[string]int{} %}{% m.x = 5 %}{{ m.x + "a" }}`, expected: ok},
+	{src: `{% m := map[interface{}]int{} %}{% m.x = 5 %}{{ m.x + "a" }}`, expected: ok},
 
 	// Pipe operator (filter syntax).
 	{src: `{% f := func(s string) string { return s } %}{{ "hello" | f() }}`, expected: ok},
@@ -1259,7 +1260,7 @@ func TestRenderGlobErrorLocations(t *testing.T) {
 			name: "type error in render_glob with inherit_context",
 			files: fstest.Files{
 				"index.html":   `{% show render_glob "parts/*.html" inherit_context %}`,
-				"parts/a.html": `{{ 1 + "string" }}`, // Line 1, type error
+				"parts/a.html": `{{ 1 + true }}`, // Line 1, type error (int + bool)
 			},
 			mainFile:    "index.html",
 			wantErrPath: "parts/a.html",

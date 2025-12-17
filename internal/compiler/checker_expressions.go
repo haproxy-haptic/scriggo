@@ -655,6 +655,26 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 				key.setValue(t.Type.Key())
 			}
 			return &typeInfo{Type: t.Type.Elem()}
+		case reflect.Interface:
+			// Allow indexing on empty interface{} - defer type check to runtime.
+			// Only support string keys (for map[string]any patterns from JSON).
+			if t.Type.NumMethod() != 0 {
+				panic(tc.errorf(expr, "invalid operation: %s (type %s does not support indexing)", expr, t.ShortString()))
+			}
+			key := tc.checkExpr(expr.Index)
+			// Key must be assignable to string (runtime expects string keys for OpMapIndexAny)
+			if err := tc.isAssignableTo(key, expr.Index, stringType); err != nil {
+				panic(tc.errorf(expr, "invalid operation: %s (type %s does not support indexing with %s key)",
+					expr, t.ShortString(), key.ShortString()))
+			}
+			if key.Nil() {
+				key = tc.nilOf(stringType)
+				tc.compilation.typeInfos[expr.Index] = key
+			} else {
+				key.setValue(stringType)
+			}
+			// Result is interface{} since we don't know the element type at compile time
+			return &typeInfo{Type: emptyInterfaceType}
 		default:
 			panic(tc.errorf(expr, "invalid operation: %s (type %s does not support indexing)", expr, t.ShortString()))
 		}
@@ -830,6 +850,206 @@ func (tc *typechecker) checkIndex(expr ast.Expression, t *typeInfo, isSlice bool
 	return nil
 }
 
+// stringConcatConversionResult holds the result of maybeConvertForStringConcat.
+type stringConcatConversionResult struct {
+	t1, t2    *typeInfo
+	converted bool
+}
+
+// maybeConvertForStringConcat checks if one operand is string and the other is not,
+// and if so, marks the non-string operand for conversion to string at runtime.
+// This is a template-friendly extension that allows: "count: " + 42 → "count: 42"
+//
+// Parameters:
+//   - op: the binary operator (only OperatorAddition triggers conversion)
+//   - t1, t2: type info for the two operands
+//   - expr1, expr2: the AST expressions for the operands
+//   - preserveProperties: if true, preserve existing properties (like propertyMapSelector)
+//
+// Returns the (possibly modified) type infos and whether a conversion was applied.
+func (tc *typechecker) maybeConvertForStringConcat(
+	op ast.OperatorType,
+	t1, t2 *typeInfo,
+	expr1, expr2 ast.Expression,
+	preserveProperties bool,
+) stringConcatConversionResult {
+	if op != ast.OperatorAddition {
+		return stringConcatConversionResult{t1: t1, t2: t2, converted: false}
+	}
+
+	if t1.Type == nil || t2.Type == nil {
+		return stringConcatConversionResult{t1: t1, t2: t2, converted: false}
+	}
+
+	k1, k2 := t1.Type.Kind(), t2.Type.Kind()
+	t1IsString := k1 == reflect.String
+	t2IsString := k2 == reflect.String
+
+	if t1IsString && !t2IsString {
+		// string + non-string → convert t2 to string
+		// If t2 is a constant, convert at compile time; otherwise at runtime.
+		if t2.IsConstant() {
+			str := t2.Constant.String()
+			newT2 := &typeInfo{
+				Type:        stringType,
+				Constant:    stringConst(str),
+				Properties:  propertyHasValue,
+				value:       str,
+				valueType:   stringType,
+				replacement: t2.replacement,
+			}
+			tc.compilation.typeInfos[expr2] = newT2
+			return stringConcatConversionResult{t1: t1, t2: newT2, converted: true}
+		}
+		props := propertyNeedsInterfaceConversion
+		if preserveProperties {
+			props = t2.Properties | propertyNeedsInterfaceConversion
+		}
+		newT2 := &typeInfo{
+			Type:            stringType,
+			Properties:      props,
+			ConvertFromType: t2.Type,
+			replacement:     t2.replacement,
+		}
+		tc.compilation.typeInfos[expr2] = newT2
+		return stringConcatConversionResult{t1: t1, t2: newT2, converted: true}
+	} else if t2IsString && !t1IsString {
+		// non-string + string → convert t1 to string
+		// If t1 is a constant, convert at compile time; otherwise at runtime.
+		if t1.IsConstant() {
+			str := t1.Constant.String()
+			newT1 := &typeInfo{
+				Type:        stringType,
+				Constant:    stringConst(str),
+				Properties:  propertyHasValue,
+				value:       str,
+				valueType:   stringType,
+				replacement: t1.replacement,
+			}
+			tc.compilation.typeInfos[expr1] = newT1
+			return stringConcatConversionResult{t1: newT1, t2: t2, converted: true}
+		}
+		props := propertyNeedsInterfaceConversion
+		if preserveProperties {
+			props = t1.Properties | propertyNeedsInterfaceConversion
+		}
+		newT1 := &typeInfo{
+			Type:            stringType,
+			Properties:      props,
+			ConvertFromType: t1.Type,
+			replacement:     t1.replacement,
+		}
+		tc.compilation.typeInfos[expr1] = newT1
+		return stringConcatConversionResult{t1: newT1, t2: t2, converted: true}
+	}
+
+	return stringConcatConversionResult{t1: t1, t2: t2, converted: false}
+}
+
+// maybeConvertConstantForStringConcat handles constant string concatenation by
+// converting non-string constants to string constants at compile time.
+// Returns the (possibly modified) type infos and whether a conversion was applied.
+func (tc *typechecker) maybeConvertConstantForStringConcat(
+	op ast.OperatorType,
+	t1, t2 *typeInfo,
+	expr1, expr2 ast.Expression,
+) stringConcatConversionResult {
+	if op != ast.OperatorAddition || t1.Type == t2.Type {
+		return stringConcatConversionResult{t1: t1, t2: t2, converted: false}
+	}
+
+	k1, k2 := t1.Type.Kind(), t2.Type.Kind()
+
+	if k1 == reflect.String && k2 != reflect.String {
+		// string + non-string → convert t2 constant to string
+		str := t2.Constant.String()
+		newT2 := &typeInfo{
+			Type:     stringType,
+			Constant: stringConst(str),
+		}
+		tc.compilation.typeInfos[expr2] = newT2
+		return stringConcatConversionResult{t1: t1, t2: newT2, converted: true}
+	} else if k2 == reflect.String && k1 != reflect.String {
+		// non-string + string → convert t1 constant to string
+		str := t1.Constant.String()
+		newT1 := &typeInfo{
+			Type:     stringType,
+			Constant: stringConst(str),
+		}
+		tc.compilation.typeInfos[expr1] = newT1
+		return stringConcatConversionResult{t1: newT1, t2: t2, converted: true}
+	}
+
+	return stringConcatConversionResult{t1: t1, t2: t2, converted: false}
+}
+
+// maybeConvertInterfaceOperand checks if one operand is interface{} and the other
+// is a concrete type, and if so, marks the interface operand for conversion to
+// the concrete type at runtime. This enables operations like: interfaceVar + 5
+//
+// Returns the (possibly modified) type infos and an error if the operator is
+// not defined for the types.
+func (tc *typechecker) maybeConvertInterfaceOperand(
+	op ast.OperatorType,
+	t1, t2 *typeInfo,
+	expr1, expr2 ast.Expression,
+) (*typeInfo, *typeInfo, error) {
+	t1IsIface := t1.IsEmptyInterface()
+	t2IsIface := t2.IsEmptyInterface()
+
+	if t1IsIface && t2IsIface {
+		// Both interface{} - ambiguous, only == and != are allowed
+		if op != ast.OperatorEqual && op != ast.OperatorNotEqual {
+			return nil, nil, fmt.Errorf("operator %s not defined on interface", op)
+		}
+		return t1, t2, nil
+	}
+
+	if t1IsIface && !t2IsIface && t2.Type != nil {
+		// interface{} OP concrete/untyped → convert interface to t2's type
+		targetType := t2.Type
+		targetKind := targetType.Kind()
+		// Only apply interface conversion for primitive types that support binary operations.
+		// operatorsOfKind is indexed by reflect.Kind and covers Bool, Int*, Uint*, Float*,
+		// Complex*, and String. Other kinds (Array, Chan, Func, Map, etc.) are not covered.
+		if int(targetKind) < len(operatorsOfKind) {
+			if !operatorsOfKind[targetKind][op] {
+				return nil, nil, fmt.Errorf("operator %s not defined on %s", op, targetKind)
+			}
+			// Create a NEW typeInfo for this expression context only.
+			newT1 := &typeInfo{
+				Type:            targetType,
+				Properties:      propertyNeedsInterfaceConversion,
+				ConvertFromType: tc.compilation.typeInfos[expr1].Type,
+			}
+			tc.compilation.typeInfos[expr1] = newT1
+			return newT1, t2, nil
+		}
+	} else if t2IsIface && !t1IsIface && t1.Type != nil {
+		// concrete/untyped OP interface{} → convert interface to t1's type
+		targetType := t1.Type
+		targetKind := targetType.Kind()
+		// Only apply interface conversion for primitive types that support binary operations.
+		// operatorsOfKind is indexed by reflect.Kind and covers Bool, Int*, Uint*, Float*,
+		// Complex*, and String. Other kinds (Array, Chan, Func, Map, etc.) are not covered.
+		if int(targetKind) < len(operatorsOfKind) {
+			if !operatorsOfKind[targetKind][op] {
+				return nil, nil, fmt.Errorf("operator %s not defined on %s", op, targetKind)
+			}
+			// Create a NEW typeInfo for this expression context only.
+			newT2 := &typeInfo{
+				Type:            targetType,
+				Properties:      propertyNeedsInterfaceConversion,
+				ConvertFromType: tc.compilation.typeInfos[expr2].Type,
+			}
+			tc.compilation.typeInfos[expr2] = newT2
+			return t1, newT2, nil
+		}
+	}
+
+	return t1, t2, nil
+}
+
 // binaryOp type checks the binary expression t1 op t2 and returns its type
 // info. Returns an error if the operation can not be executed.
 func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2 ast.Expression) (*typeInfo, error) {
@@ -890,42 +1110,64 @@ func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2
 				return nil, fmt.Errorf("operator %s not defined on %s", op, t2)
 			}
 		}
+
+		// Handle interface{} with typed or untyped operand.
+		// When one operand is interface{}, convert it to match the other operand's type.
+		var err error
+		t1, t2, err = tc.maybeConvertInterfaceOperand(op, t1, t2, expr1, expr2)
+		if err != nil {
+			return nil, err
+		}
+
 		if t1.Untyped() != t2.Untyped() {
-			// Make both typed.
-			if t1.Untyped() {
-				c, err := tc.convert(t1, expr1, t2.Type)
-				if err != nil {
-					if err == errNotRepresentable {
-						err = fmt.Errorf("cannot convert %#v (type %s) to type %s", t1.Constant, t1, t2)
-					}
-					return nil, err
+			// Auto-convert for string concatenation: when + has one string operand and one non-string,
+			// convert the non-string to string instead of trying to convert string to non-string.
+			result := tc.maybeConvertForStringConcat(op, t1, t2, expr1, expr2, true)
+			if result.converted {
+				t1, t2 = result.t1, result.t2
+				// Clear constant value for typed result
+				if t1.Type.Kind() == reflect.String {
+					t2.setValue(nil)
+				} else {
+					t1.setValue(nil)
 				}
-				if t1.Nil() {
-					if op != ast.OperatorEqual && op != ast.OperatorNotEqual &&
-						op != ast.OperatorContains && op != ast.OperatorNotContains {
-						return nil, fmt.Errorf("operator %s not defined on %s", op, t2.Type.Kind())
-					}
-					return untypedBoolTypeInfo, nil
-				}
-				t1.setValue(t2.Type)
-				t1 = &typeInfo{Type: t2.Type, Constant: c}
 			} else {
-				c, err := tc.convert(t2, expr2, t1.Type)
-				if err != nil {
-					if err == errNotRepresentable {
-						err = fmt.Errorf("cannot convert %#v (type %s) to type %s", t2.Constant, t2, t1)
+				// Make both typed.
+				if t1.Untyped() {
+					c, err := tc.convert(t1, expr1, t2.Type)
+					if err != nil {
+						if err == errNotRepresentable {
+							err = fmt.Errorf("cannot convert %#v (type %s) to type %s", t1.Constant, t1, t2)
+						}
+						return nil, err
 					}
-					return nil, err
-				}
-				if t2.Nil() {
-					if op != ast.OperatorEqual && op != ast.OperatorNotEqual &&
-						op != ast.OperatorContains && op != ast.OperatorNotContains {
-						return nil, fmt.Errorf("operator %s not defined on %s", op, t1.Type.Kind())
+					if t1.Nil() {
+						if op != ast.OperatorEqual && op != ast.OperatorNotEqual &&
+							op != ast.OperatorContains && op != ast.OperatorNotContains {
+							return nil, fmt.Errorf("operator %s not defined on %s", op, t2.Type.Kind())
+						}
+						return untypedBoolTypeInfo, nil
 					}
-					return untypedBoolTypeInfo, nil
+					t1.setValue(t2.Type)
+					t1 = &typeInfo{Type: t2.Type, Constant: c}
+				} else {
+					c, err := tc.convert(t2, expr2, t1.Type)
+					if err != nil {
+						if err == errNotRepresentable {
+							err = fmt.Errorf("cannot convert %#v (type %s) to type %s", t2.Constant, t2, t1)
+						}
+						return nil, err
+					}
+					if t2.Nil() {
+						if op != ast.OperatorEqual && op != ast.OperatorNotEqual &&
+							op != ast.OperatorContains && op != ast.OperatorNotContains {
+							return nil, fmt.Errorf("operator %s not defined on %s", op, t1.Type.Kind())
+						}
+						return untypedBoolTypeInfo, nil
+					}
+					t2.setValue(t1.Type)
+					t2 = &typeInfo{Type: t1.Type, Constant: c}
 				}
-				t2.setValue(t1.Type)
-				t2 = &typeInfo{Type: t1.Type, Constant: c}
 			}
 		}
 	}
@@ -936,6 +1178,11 @@ func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2
 			t1.setValue(nil)
 			t2.setValue(nil)
 		} else {
+			// Auto-convert non-string constant to string for + operator (template string concatenation).
+			// This handles constant expressions like: "count: " + 42
+			result := tc.maybeConvertConstantForStringConcat(op, t1, t2, expr1, expr2)
+			t1, t2 = result.t1, result.t2
+
 			if t1.Type != t2.Type && !(t1.Untyped() && t1.IsNumeric() && t2.IsNumeric()) {
 				return nil, fmt.Errorf("mismatched types %s and %s", t1.ShortString(), t2.ShortString())
 			}
@@ -1030,6 +1277,14 @@ func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2
 		if t2.Nil() {
 			return nil, fmt.Errorf("cannot convert nil to type %s", t1.Type)
 		}
+
+		// Auto-convert non-string to string for + operator (template string concatenation).
+		// This handles untyped operands like: "count: " + someUntypedVar
+		result := tc.maybeConvertForStringConcat(op, t1, t2, expr1, expr2, true)
+		if result.converted {
+			return &typeInfo{Type: stringType}, nil
+		}
+
 		k1, k2 := t1.Type.Kind(), t2.Type.Kind()
 		if !(k1 == k2 || isNumeric(k1) && isNumeric(k2)) {
 			return nil, fmt.Errorf("mismatched types %s and %s", t1.Type, t2.Type)
@@ -1065,6 +1320,11 @@ func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2
 
 	t1.setValue(nil)
 	t2.setValue(nil)
+
+	// Auto-convert non-string to string for + operator (template string concatenation).
+	// This is a template-friendly extension that allows: "count: " + 42
+	result := tc.maybeConvertForStringConcat(op, t1, t2, expr1, expr2, true)
+	t1, t2 = result.t1, result.t2
 
 	if isComparison(op) {
 		if tc.isAssignableTo(t1, expr1, t2.Type) != nil && tc.isAssignableTo(t2, expr2, t1.Type) != nil {

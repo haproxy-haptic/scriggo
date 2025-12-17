@@ -47,6 +47,32 @@ func (err outError) Error() string {
 	return "out error: " + err.err.Error()
 }
 
+// formatValueForError safely formats a reflect.Value for inclusion in error messages,
+// with automatic truncation for long values. Returns an empty string if the value
+// cannot be safely formatted.
+func formatValueForError(actualValue reflect.Value) string {
+	if !actualValue.IsValid() || !actualValue.CanInterface() {
+		return ""
+	}
+
+	// Defensive: recover from any potential panic in Interface() or Sprintf.
+	// While CanInterface() should prevent panics, this ensures robustness
+	// in error handling code where we cannot afford to lose the error message.
+	defer func() {
+		recover() // Silently ignore any panics
+	}()
+
+	val := actualValue.Interface()
+	formatted := fmt.Sprintf("%#v", val)
+
+	// Truncate overly long values to keep error messages readable
+	const maxValueLen = 200
+	if len(formatted) > maxValueLen {
+		formatted = formatted[:maxValueLen] + "... (truncated)"
+	}
+	return fmt.Sprintf(" (value: %s)", formatted)
+}
+
 // errTypeAssertion returns a runtime error for a failed type assertion x.(T).
 // interfaceType is the type of x, dynamicType is dynamic type of x or nil if
 // x is nil and assertedType is the type T. If T is an interface type,
@@ -58,28 +84,7 @@ func (err outError) Error() string {
 // https://github.com/golang/go/issues/14443
 func errTypeAssertion(interfaceType, dynamicType, assertedType reflect.Type, missingMethod string, actualValue reflect.Value) runtimeError {
 	s := "interface conversion: "
-
-	// Show actual value if it's safe to print
-	valueStr := ""
-	if actualValue.IsValid() && actualValue.CanInterface() {
-		// Defensive: recover from any potential panic in Interface() or Sprintf.
-		// While CanInterface() should prevent panics, this ensures robustness
-		// in error handling code where we cannot afford to lose the error message.
-		defer func() {
-			if recover() != nil {
-				valueStr = ""
-			}
-		}()
-		val := actualValue.Interface()
-		formatted := fmt.Sprintf("%#v", val)
-
-		// Truncate overly long values to keep error messages readable
-		const maxValueLen = 200
-		if len(formatted) > maxValueLen {
-			formatted = formatted[:maxValueLen] + "... (truncated)"
-		}
-		valueStr = fmt.Sprintf(" (value: %s)", formatted)
-	}
+	valueStr := formatValueForError(actualValue)
 
 	if dynamicType == nil {
 		if assertedType.Kind() == reflect.Interface {
@@ -100,6 +105,25 @@ func errTypeAssertion(interfaceType, dynamicType, assertedType reflect.Type, mis
 		return runtimeError(s + "scopes)")
 	}
 	return runtimeError(s + "packages)")
+}
+
+// errInterfaceConversion returns a runtime error for a failed implicit conversion
+// from interface{} to a concrete type. interfaceType is the type of the source
+// interface, dynamicType is the actual type contained in the interface (or nil if
+// the interface is nil), targetType is the target type being converted to, and
+// actualValue is the runtime value that failed the conversion.
+func errInterfaceConversion(interfaceType, dynamicType, targetType reflect.Type, actualValue reflect.Value) runtimeError {
+	s := "interface conversion: "
+	valueStr := formatValueForError(actualValue)
+
+	// Build error message
+	if dynamicType == nil {
+		return runtimeError(s + "interface is nil, not " + targetType.String())
+	}
+
+	s += interfaceType.String() + " is " + dynamicType.String() + valueStr +
+		", cannot convert to " + targetType.String()
+	return runtimeError(s)
 }
 
 // stopError represents a stop error.

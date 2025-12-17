@@ -70,7 +70,10 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 		}
 		// Expr cannot be emitted as immediate: check if it's possible to emit
 		// it without allocating a new register.
-		if expr, ok := expr.(*ast.Identifier); ok && em.fb.declaredInFunc(expr.Name) {
+		// Skip this optimization when interface conversion is needed - the value
+		// must go through changeRegister to be converted from interface{}.
+		needsInterfaceConversion := ti.Properties&propertyNeedsInterfaceConversion != 0
+		if expr, ok := expr.(*ast.Identifier); ok && em.fb.declaredInFunc(expr.Name) && !needsInterfaceConversion {
 			if canEmitDirectly(ti.Type.Kind(), dstType.Kind()) {
 				return em.fb.scopeLookup(expr.Name), false
 			}
@@ -235,22 +238,29 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 
 		typ := ti.Type
 
+		// When interface conversion is needed, use ConvertFromType as the actual source type.
+		// The register holds an interface{} value that needs to be converted to ti.Type.
+		srcType := typ
+		if ti.Properties&propertyNeedsInterfaceConversion != 0 && ti.ConvertFromType != nil {
+			srcType = ti.ConvertFromType
+		}
+
 		if em.fb.declaredInFunc(expr.Name) {
 			ident := em.fb.scopeLookup(expr.Name)
-			em.changeRegister(false, ident, reg, typ, dstType)
+			em.changeRegister(false, ident, reg, srcType, dstType)
 			return reg, false
 		}
 
 		// Scriggo variables and closure variables.
 		if index, ok := em.varStore.nonLocalVarIndex(expr); ok {
-			if canEmitDirectly(typ.Kind(), dstType.Kind()) {
+			if canEmitDirectly(srcType.Kind(), dstType.Kind()) {
 				em.fb.emitGetVar(index, reg, dstType.Kind())
 				return reg, false
 			}
 			em.fb.enterStack()
-			tmp := em.fb.newRegister(typ.Kind())
-			em.fb.emitGetVar(index, tmp, typ.Kind())
-			em.changeRegister(false, tmp, reg, typ, dstType)
+			tmp := em.fb.newRegister(srcType.Kind())
+			em.fb.emitGetVar(index, tmp, srcType.Kind())
+			em.changeRegister(false, tmp, reg, srcType, dstType)
 			em.fb.exitStack()
 			return reg, false
 		}
@@ -431,6 +441,9 @@ func (em *emitter) emitBinaryOp(expr *ast.BinaryOperator, reg int8, regType refl
 	}
 
 	// Emit code for the two operands.
+	// Note: When an operand was marked with propertyNeedsInterfaceConversion in the checker,
+	// its Type was changed to the target type. The emitExpr/emitExprK calls will emit the
+	// expression and convert from interface{} to the target type via changeRegister.
 	t1 := em.typ(expr.Expr1)
 	t2 := em.typ(expr.Expr2)
 	x := em.emitExpr(expr.Expr1, t1)
@@ -734,16 +747,24 @@ func (em *emitter) emitIndex(v *ast.Index, reg int8, dstType reflect.Type) {
 	exprType := em.typ(v.Expr)
 	exprReg := em.emitExpr(v.Expr, exprType)
 	var indexType reflect.Type
-	if exprType.Kind() == reflect.Map {
+	switch exprType.Kind() {
+	case reflect.Map:
 		indexType = exprType.Key()
-	} else {
+	case reflect.Interface:
+		// interface{} indexing uses string keys at runtime
+		indexType = stringType
+	default:
 		indexType = intType
 	}
 	index, kindex := em.emitExprK(v.Index, indexType)
 	var elemType reflect.Type
-	if exprType.Kind() == reflect.String {
+	switch exprType.Kind() {
+	case reflect.String:
 		elemType = uint8Type
-	} else {
+	case reflect.Interface:
+		// interface{} indexing returns interface{} at runtime
+		elemType = emptyInterfaceType
+	default:
 		elemType = exprType.Elem()
 	}
 	pos := v.Pos()
