@@ -97,7 +97,7 @@ func ExampleHTMLEscape() {
 
 func ExampleBuildError() {
 	fsys := scriggo.Files{
-		"index.html": []byte(`{{ 42 + "hello" }}`),
+		"index.html": []byte(`{{ 42 + true }}`),
 	}
 	_, err := scriggo.BuildTemplate(fsys, "index.html", nil)
 	if err != nil {
@@ -107,6 +107,6 @@ func ExampleBuildError() {
 	}
 	// Output:
 	// Error has type *scriggo.BuildError
-	// Error message is: invalid operation: 42 + "hello" (mismatched types int and string)
+	// Error message is: invalid operation: 42 + true (mismatched types int and bool)
 	// Error path is: index.html
 }

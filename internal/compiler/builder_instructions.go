@@ -240,6 +240,36 @@ func (fb *functionBuilder) emitConvert(src int8, typ reflect.Type, dst int8, src
 	fn.Body = append(fn.Body, runtime.Instruction{Op: op, A: src, B: int8(regType), C: dst})
 }
 
+// emitInterfaceConvert appends a new "ConvertFromInterface" instruction to the function body.
+// This performs an implicit conversion from interface{} to a concrete type at runtime.
+//
+//	dst = dstType(src)  // where src is interface{}
+func (fb *functionBuilder) emitInterfaceConvert(k bool, srcType, dstType reflect.Type, src, dst int8) {
+	fn := fb.fn
+	regType := fb.addType(dstType, false)
+
+	// If k is true, we need a temporary register to handle indirect access
+	if k {
+		fb.enterScope()
+		tmp := fb.newRegister(reflect.Interface)
+		fb.emitMove(true, src, tmp, reflect.Interface)
+		fn.Body = append(fn.Body, runtime.Instruction{
+			Op: runtime.OpConvertFromInterface,
+			A:  tmp,
+			B:  int8(regType),
+			C:  dst,
+		})
+		fb.exitScope()
+	} else {
+		fn.Body = append(fn.Body, runtime.Instruction{
+			Op: runtime.OpConvertFromInterface,
+			A:  src,
+			B:  int8(regType),
+			C:  dst,
+		})
+	}
+}
+
 // emitCopy appends a new "Copy" instruction to the function body.
 //
 //	n == 0:   copy(dst, src)

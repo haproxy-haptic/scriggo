@@ -26,6 +26,7 @@ const (
 	propertyIsMacroDeclaration                                    // is macro declaration
 	propertyMacroDeclaredInFileWithExtends                        // is macro declared in file with extends
 	propertyMapSelector                                           // is a map selector expression
+	propertyNeedsInterfaceConversion                              // needs runtime interface{} to concrete conversion
 )
 
 // A typeInfo holds the type checking information. For example, every expression
@@ -42,7 +43,11 @@ type typeInfo struct {
 	// MacroFormat stores the output format (HTML, CSS, JS, etc.) for macro declarations.
 	// Only valid when propertyIsMacroDeclaration is set. Used to synthesize return types
 	// for macros without explicit return type declarations when called in expression contexts.
-	MacroFormat       ast.Format
+	MacroFormat ast.Format
+	// ConvertFromType holds the original interface{} type when converting to a concrete
+	// type in binary operations. Only valid when propertyNeedsInterfaceConversion is set.
+	// The Type field holds the target type, ConvertFromType holds the source interface type.
+	ConvertFromType reflect.Type
 	value             interface{}  // value; for packages has type *Package.
 	valueType         reflect.Type // When value is a native type holds the original type of value.
 	replacement       ast.Node     // Replacement node.
@@ -141,6 +146,11 @@ func (ti *typeInfo) MacroDeclaredInExtendingFile() bool {
 // IsMapSelector reports whether it is a map selector expression.
 func (ti *typeInfo) IsMapSelector() bool {
 	return ti.Properties&propertyMapSelector != 0
+}
+
+// IsEmptyInterface reports whether the type is interface{} (empty interface).
+func (ti *typeInfo) IsEmptyInterface() bool {
+	return ti.Type != nil && ti.Type.Kind() == reflect.Interface && ti.Type.NumMethod() == 0
 }
 
 // TypeName returns the name of the type. If it is an alias, it returns the

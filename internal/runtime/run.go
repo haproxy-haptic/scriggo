@@ -7,6 +7,7 @@ package runtime
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -587,6 +588,88 @@ mainLoop:
 					_ = vm.env.conv([]byte(v.String()), &b)
 					vm.setString(c, b.String())
 				}
+			}
+		case OpConvertFromInterface:
+			// Implicit conversion from interface{} to concrete type
+			// Instruction format: A=source register, B=type table index, C=destination register
+			t := vm.fn.Types[uint8(b)]
+			v := vm.general(a)
+
+			// Handle two nil-like cases that should produce zero values:
+			// 1. Invalid reflect.Value (e.g., uninitialized variable)
+			// 2. Nil interface value (interface{} containing nil)
+			// Note: We check Kind()==Interface before calling IsNil() to avoid panics on non-nillable types.
+			if !v.IsValid() || (v.Kind() == reflect.Interface && v.IsNil()) {
+				// Set zero value for target type
+				// Optimize by only allocating reflect.Zero when needed (default case)
+				switch t.Kind() {
+				case reflect.String:
+					vm.setString(c, "")
+				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+					reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+					vm.setInt(c, 0)
+				case reflect.Float32, reflect.Float64:
+					vm.setFloat(c, 0)
+				case reflect.Bool:
+					vm.setInt(c, 0)
+				default:
+					vm.setGeneral(c, reflect.Zero(t))
+				}
+				break
+			}
+
+			// Get the actual value to convert
+			// Unwrap interface if needed
+			var elem reflect.Value
+			var sourceType reflect.Type
+			if v.Kind() == reflect.Interface {
+				// Value is wrapped in interface, unwrap it
+				// Note: v.IsNil() was already checked above, so v.Elem() is safe here
+				elem = v.Elem()
+				sourceType = v.Type()
+			} else {
+				// Value is already concrete (compiler optimized away the interface wrapping)
+				elem = v
+				sourceType = v.Type()
+			}
+
+			// Special case: converting any value to string via fmt.Sprint
+			// This enables template string concatenation like: "value: " + data["num"]
+			// where data["num"] is interface{} containing a non-string type (int, float64, bool, etc.)
+			// Note: We must use fmt.Sprint for all non-string types because Go's reflect.Convert
+			// treats int→string as a rune conversion (42 becomes '*'), not decimal string conversion.
+			if t.Kind() == reflect.String && elem.Kind() != reflect.String {
+				str := fmt.Sprint(elem.Interface())
+				vm.setString(c, str)
+				break
+			}
+
+			// Check convertibility
+			if !elem.CanConvert(t) {
+				panic(errInterfaceConversion(sourceType, elem.Type(), t, elem))
+			}
+
+			// Perform conversion
+			converted := elem.Convert(t)
+
+			// Store result in appropriate register
+			switch t.Kind() {
+			case reflect.String:
+				vm.setString(c, converted.String())
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				vm.setInt(c, converted.Int())
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+				vm.setInt(c, int64(converted.Uint()))
+			case reflect.Float32, reflect.Float64:
+				vm.setFloat(c, converted.Float())
+			case reflect.Bool:
+				if converted.Bool() {
+					vm.setInt(c, 1)
+				} else {
+					vm.setInt(c, 0)
+				}
+			default:
+				vm.setGeneral(c, converted)
 			}
 
 		// Concat

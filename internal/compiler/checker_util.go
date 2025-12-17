@@ -320,6 +320,12 @@ func (tc *typechecker) isAssignableTo(x *typeInfo, expr ast.Expression, t reflec
 		}
 		return err
 	}
+	// Allow implicit conversion from empty interface to concrete types
+	if x.Type.Kind() == reflect.Interface && x.Type.NumMethod() == 0 && t.Kind() != reflect.Interface {
+		// Mark this expression for runtime interface conversion
+		// The emitter will generate OpConvertFromInterface instead of simple assignment
+		return nil
+	}
 	if !types.AssignableTo(x.Type, t) {
 		return newInvalidTypeInAssignment(x, expr, t)
 	}

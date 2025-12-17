@@ -1406,6 +1406,7 @@ const (
 	OpConvertUint
 	OpConvertFloat
 	OpConvertString
+	OpConvertFromInterface
 
 	OpCopy
 
