@@ -460,3 +460,497 @@ func TestTrimJSONSpace(t *testing.T) {
 		}
 	}
 }
+
+// TestGroupBy tests the GroupBy function.
+func TestGroupBy(t *testing.T) {
+	t.Run("basic grouping", func(t *testing.T) {
+		items := []map[string]any{
+			{"name": "a", "type": "foo"},
+			{"name": "b", "type": "bar"},
+			{"name": "c", "type": "foo"},
+		}
+		result := GroupBy(items, "type")
+
+		if len(result) != 2 {
+			t.Errorf("expected 2 groups, got %d", len(result))
+		}
+		if len(result["foo"]) != 2 {
+			t.Errorf("expected 2 items in 'foo' group, got %d", len(result["foo"]))
+		}
+		if len(result["bar"]) != 1 {
+			t.Errorf("expected 1 item in 'bar' group, got %d", len(result["bar"]))
+		}
+	})
+
+	t.Run("nested key path", func(t *testing.T) {
+		items := []map[string]any{
+			{"meta": map[string]any{"ns": "default"}},
+			{"meta": map[string]any{"ns": "kube-system"}},
+			{"meta": map[string]any{"ns": "default"}},
+		}
+		result := GroupBy(items, "meta.ns")
+
+		if len(result["default"]) != 2 {
+			t.Errorf("expected 2 items in 'default' group, got %d", len(result["default"]))
+		}
+		if len(result["kube-system"]) != 1 {
+			t.Errorf("expected 1 item in 'kube-system' group, got %d", len(result["kube-system"]))
+		}
+	})
+
+	t.Run("nil input", func(t *testing.T) {
+		result := GroupBy(nil, "key")
+		if len(result) != 0 {
+			t.Errorf("expected empty map for nil input, got %d items", len(result))
+		}
+	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		result := GroupBy([]map[string]any{}, "key")
+		if len(result) != 0 {
+			t.Errorf("expected empty map for empty slice, got %d items", len(result))
+		}
+	})
+
+	t.Run("missing key produces empty string key", func(t *testing.T) {
+		items := []map[string]any{
+			{"name": "a"},
+			{"name": "b", "type": "foo"},
+		}
+		result := GroupBy(items, "type")
+
+		if len(result[""]) != 1 {
+			t.Errorf("expected 1 item with empty key, got %d", len(result[""]))
+		}
+		if len(result["foo"]) != 1 {
+			t.Errorf("expected 1 item with 'foo' key, got %d", len(result["foo"]))
+		}
+	})
+}
+
+// TestCountBy tests the CountBy function.
+func TestCountBy(t *testing.T) {
+	t.Run("basic counting", func(t *testing.T) {
+		items := []map[string]any{
+			{"type": "foo"},
+			{"type": "bar"},
+			{"type": "foo"},
+			{"type": "foo"},
+		}
+		result := CountBy(items, "type")
+
+		if result["foo"] != 3 {
+			t.Errorf("expected count 3 for 'foo', got %d", result["foo"])
+		}
+		if result["bar"] != 1 {
+			t.Errorf("expected count 1 for 'bar', got %d", result["bar"])
+		}
+	})
+
+	t.Run("nil input", func(t *testing.T) {
+		result := CountBy(nil, "key")
+		if len(result) != 0 {
+			t.Errorf("expected empty map for nil input, got %d items", len(result))
+		}
+	})
+
+	t.Run("nested key path", func(t *testing.T) {
+		items := []map[string]any{
+			{"spec": map[string]any{"kind": "http"}},
+			{"spec": map[string]any{"kind": "grpc"}},
+			{"spec": map[string]any{"kind": "http"}},
+		}
+		result := CountBy(items, "spec.kind")
+
+		if result["http"] != 2 {
+			t.Errorf("expected count 2 for 'http', got %d", result["http"])
+		}
+		if result["grpc"] != 1 {
+			t.Errorf("expected count 1 for 'grpc', got %d", result["grpc"])
+		}
+	})
+}
+
+// TestIndexBy tests the IndexBy function.
+func TestIndexBy(t *testing.T) {
+	t.Run("basic indexing", func(t *testing.T) {
+		items := []map[string]any{
+			{"id": "a", "value": 1},
+			{"id": "b", "value": 2},
+		}
+		result := IndexBy(items, "id")
+
+		if len(result) != 2 {
+			t.Errorf("expected 2 items, got %d", len(result))
+		}
+		if result["a"].(map[string]any)["value"] != 1 {
+			t.Errorf("expected value 1 for key 'a'")
+		}
+		if result["b"].(map[string]any)["value"] != 2 {
+			t.Errorf("expected value 2 for key 'b'")
+		}
+	})
+
+	t.Run("last one wins", func(t *testing.T) {
+		items := []map[string]any{
+			{"id": "a", "value": 1},
+			{"id": "a", "value": 2},
+		}
+		result := IndexBy(items, "id")
+
+		if len(result) != 1 {
+			t.Errorf("expected 1 item, got %d", len(result))
+		}
+		if result["a"].(map[string]any)["value"] != 2 {
+			t.Errorf("expected value 2 for key 'a' (last one wins)")
+		}
+	})
+
+	t.Run("nil input", func(t *testing.T) {
+		result := IndexBy(nil, "key")
+		if len(result) != 0 {
+			t.Errorf("expected empty map for nil input, got %d items", len(result))
+		}
+	})
+}
+
+// TestUniqueBy tests the UniqueBy function.
+func TestUniqueBy(t *testing.T) {
+	t.Run("basic deduplication", func(t *testing.T) {
+		items := []map[string]any{
+			{"id": "a", "value": 1},
+			{"id": "b", "value": 2},
+			{"id": "a", "value": 3},
+		}
+		result := UniqueBy(items, "id")
+
+		if len(result) != 2 {
+			t.Errorf("expected 2 unique items, got %d", len(result))
+		}
+		// First occurrence should be kept
+		if result[0].(map[string]any)["value"] != 1 {
+			t.Errorf("expected first occurrence value 1, got %v", result[0].(map[string]any)["value"])
+		}
+	})
+
+	t.Run("nil input", func(t *testing.T) {
+		result := UniqueBy(nil, "key")
+		if len(result) != 0 {
+			t.Errorf("expected empty slice for nil input, got %d items", len(result))
+		}
+	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		result := UniqueBy([]map[string]any{}, "key")
+		if len(result) != 0 {
+			t.Errorf("expected empty slice for empty input, got %d items", len(result))
+		}
+	})
+
+	t.Run("all unique", func(t *testing.T) {
+		items := []map[string]any{
+			{"id": "a"},
+			{"id": "b"},
+			{"id": "c"},
+		}
+		result := UniqueBy(items, "id")
+
+		if len(result) != 3 {
+			t.Errorf("expected 3 items, got %d", len(result))
+		}
+	})
+}
+
+// TestMapExtract tests the MapExtract function.
+func TestMapExtract(t *testing.T) {
+	t.Run("basic extraction", func(t *testing.T) {
+		items := []map[string]any{
+			{"name": "a", "value": 1},
+			{"name": "b", "value": 2},
+		}
+		result := MapExtract(items, "name")
+
+		if len(result) != 2 {
+			t.Errorf("expected 2 items, got %d", len(result))
+		}
+		if result[0] != "a" {
+			t.Errorf("expected 'a', got %v", result[0])
+		}
+		if result[1] != "b" {
+			t.Errorf("expected 'b', got %v", result[1])
+		}
+	})
+
+	t.Run("nested extraction", func(t *testing.T) {
+		items := []map[string]any{
+			{"meta": map[string]any{"name": "x"}},
+			{"meta": map[string]any{"name": "y"}},
+		}
+		result := MapExtract(items, "meta.name")
+
+		if result[0] != "x" {
+			t.Errorf("expected 'x', got %v", result[0])
+		}
+		if result[1] != "y" {
+			t.Errorf("expected 'y', got %v", result[1])
+		}
+	})
+
+	t.Run("nil input", func(t *testing.T) {
+		result := MapExtract(nil, "key")
+		if len(result) != 0 {
+			t.Errorf("expected empty slice for nil input, got %d items", len(result))
+		}
+	})
+
+	t.Run("missing keys return nil", func(t *testing.T) {
+		items := []map[string]any{
+			{"name": "a"},
+			{"other": "b"},
+		}
+		result := MapExtract(items, "name")
+
+		if result[0] != "a" {
+			t.Errorf("expected 'a', got %v", result[0])
+		}
+		if result[1] != nil {
+			t.Errorf("expected nil for missing key, got %v", result[1])
+		}
+	})
+}
+
+// TestAnyToString tests the anyToString helper function.
+func TestAnyToString(t *testing.T) {
+	tests := []struct {
+		input    any
+		expected string
+	}{
+		{nil, ""},
+		{"hello", "hello"},
+		{42, "42"},
+		{int64(100), "100"},
+		{int32(50), "50"},
+		{3.14, "3.14"},
+		{float32(2.5), "2.5"},
+		{true, "true"},
+		{false, "false"},
+	}
+
+	for _, test := range tests {
+		result := anyToString(test.input)
+		if result != test.expected {
+			t.Errorf("anyToString(%v): expected %q, got %q", test.input, test.expected, result)
+		}
+	}
+}
+
+// generateTestData creates test data simulating Kubernetes resources.
+func generateTestData(n int) []map[string]any {
+	items := make([]map[string]any, n)
+	namespaces := []string{"default", "kube-system", "production", "staging", "development"}
+	types := []string{"http", "grpc", "tcp"}
+
+	for i := 0; i < n; i++ {
+		items[i] = map[string]any{
+			"metadata": map[string]any{
+				"name":      fmt.Sprintf("route-%d", i),
+				"namespace": namespaces[i%len(namespaces)],
+			},
+			"spec": map[string]any{
+				"type": types[i%len(types)],
+				"port": i % 100,
+			},
+		}
+	}
+	return items
+}
+
+// BenchmarkGroupBy benchmarks the GroupBy function with varying sizes.
+func BenchmarkGroupBy(b *testing.B) {
+	sizes := []int{100, 1000, 10000}
+
+	for _, size := range sizes {
+		items := generateTestData(size)
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				GroupBy(items, "metadata.namespace")
+			}
+		})
+	}
+}
+
+// BenchmarkCountBy benchmarks the CountBy function with varying sizes.
+func BenchmarkCountBy(b *testing.B) {
+	sizes := []int{100, 1000, 10000}
+
+	for _, size := range sizes {
+		items := generateTestData(size)
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				CountBy(items, "spec.type")
+			}
+		})
+	}
+}
+
+// BenchmarkIndexBy benchmarks the IndexBy function with varying sizes.
+func BenchmarkIndexBy(b *testing.B) {
+	sizes := []int{100, 1000, 10000}
+
+	for _, size := range sizes {
+		items := generateTestData(size)
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				IndexBy(items, "metadata.name")
+			}
+		})
+	}
+}
+
+// BenchmarkUniqueBy benchmarks the UniqueBy function with varying sizes.
+func BenchmarkUniqueBy(b *testing.B) {
+	sizes := []int{100, 1000, 10000}
+
+	for _, size := range sizes {
+		items := generateTestData(size)
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				UniqueBy(items, "metadata.namespace")
+			}
+		})
+	}
+}
+
+// BenchmarkMapExtract benchmarks the MapExtract function with varying sizes.
+func BenchmarkMapExtract(b *testing.B) {
+	sizes := []int{100, 1000, 10000}
+
+	for _, size := range sizes {
+		items := generateTestData(size)
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				MapExtract(items, "metadata.name")
+			}
+		})
+	}
+}
+
+// BenchmarkManualGroupBy benchmarks manual grouping loop for comparison.
+func BenchmarkManualGroupBy(b *testing.B) {
+	sizes := []int{100, 1000, 10000}
+
+	for _, size := range sizes {
+		items := generateTestData(size)
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				result := make(map[string][]any)
+				for _, item := range items {
+					meta := item["metadata"].(map[string]any)
+					ns := meta["namespace"].(string)
+					result[ns] = append(result[ns], item)
+				}
+				_ = result
+			}
+		})
+	}
+}
+
+// TestContains tests the Contains function.
+func TestContains(t *testing.T) {
+	t.Run("nil slice", func(t *testing.T) {
+		if Contains(nil, "test") {
+			t.Error("expected false for nil slice")
+		}
+	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		if Contains([]string{}, "test") {
+			t.Error("expected false for empty slice")
+		}
+	})
+
+	t.Run("string slice found", func(t *testing.T) {
+		slice := []string{"Prefix", "Exact", "RegularExpression"}
+		if !Contains(slice, "Prefix") {
+			t.Error("expected true, 'Prefix' is in slice")
+		}
+		if !Contains(slice, "Exact") {
+			t.Error("expected true, 'Exact' is in slice")
+		}
+	})
+
+	t.Run("string slice not found", func(t *testing.T) {
+		slice := []string{"Prefix", "Exact"}
+		if Contains(slice, "Regex") {
+			t.Error("expected false, 'Regex' is not in slice")
+		}
+	})
+
+	t.Run("int slice", func(t *testing.T) {
+		slice := []int{1, 2, 3, 4, 5}
+		if !Contains(slice, 3) {
+			t.Error("expected true, 3 is in slice")
+		}
+		if Contains(slice, 6) {
+			t.Error("expected false, 6 is not in slice")
+		}
+	})
+
+	t.Run("any slice", func(t *testing.T) {
+		slice := []any{"a", 1, true, nil}
+		if !Contains(slice, "a") {
+			t.Error("expected true, 'a' is in slice")
+		}
+		if !Contains(slice, 1) {
+			t.Error("expected true, 1 is in slice")
+		}
+		if !Contains(slice, true) {
+			t.Error("expected true, true is in slice")
+		}
+		if Contains(slice, "b") {
+			t.Error("expected false, 'b' is not in slice")
+		}
+	})
+
+	t.Run("non-slice returns false", func(t *testing.T) {
+		if Contains("not a slice", "a") {
+			t.Error("expected false for non-slice input")
+		}
+		if Contains(123, 1) {
+			t.Error("expected false for non-slice input")
+		}
+	})
+}
+
+// BenchmarkContains benchmarks the Contains function.
+func BenchmarkContains(b *testing.B) {
+	stringSlice := []string{"Prefix", "Exact", "RegularExpression", "PathPrefix", "Implementation"}
+	anySlice := []any{"Prefix", "Exact", "RegularExpression", "PathPrefix", "Implementation"}
+
+	b.Run("string_slice_found", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			Contains(stringSlice, "RegularExpression")
+		}
+	})
+
+	b.Run("string_slice_not_found", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			Contains(stringSlice, "NotFound")
+		}
+	})
+
+	b.Run("any_slice_found", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			Contains(anySlice, "RegularExpression")
+		}
+	})
+}

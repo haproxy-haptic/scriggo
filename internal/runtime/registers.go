@@ -400,6 +400,27 @@ func (vm *VM) appendSlice(first int8, length int, slice reflect.Value) reflect.V
 	case []string:
 		i := int(vm.fp[2] + Addr(first))
 		return reflect.ValueOf(append(s, vm.regs.string[i:i+length]...))
+	case []interface{}:
+		// Fast path for []interface{} ([]any) - the most common generic slice type
+		// Avoids reflect.MakeSlice overhead by using native append
+		ol := len(s)
+		nl := ol + length
+		if nl < ol {
+			panic("scriggo: slice overflow")
+		}
+		if c := cap(s); nl <= c {
+			s = s[:nl]
+		} else {
+			old := s
+			c = appendCap(c, nl)
+			s = make([]interface{}, nl, c)
+			copy(s, old)
+		}
+		regs := vm.regs.general[vm.fp[3]+Addr(first):]
+		for i, j := 0, ol; i < length; i, j = i+1, j+1 {
+			s[j] = regs[i].Interface()
+		}
+		return reflect.ValueOf(s)
 	default:
 		ol := slice.Len()
 		nl := ol + length
