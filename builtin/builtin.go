@@ -78,6 +78,13 @@
 //		"reverse": builtin.Reverse,
 //		"sort":    builtin.Sort,
 //
+//		// slice operations (for batch processing)
+//		"groupBy":    builtin.GroupBy,
+//		"countBy":    builtin.CountBy,
+//		"indexBy":    builtin.IndexBy,
+//		"uniqueBy":   builtin.UniqueBy,
+//		"mapExtract": builtin.MapExtract,
+//
 //		// strconv
 //		"formatFloat": builtin.FormatFloat,
 //		"formatInt":   builtin.FormatInt,
@@ -288,6 +295,45 @@ func Fallback(value, fallbackValue any) any {
 	if value == nil {
 		return fallbackValue
 	}
+	// Fast paths for common types to avoid reflection overhead
+	switch v := value.(type) {
+	case string:
+		if v == "" {
+			return fallbackValue
+		}
+		return value
+	case int:
+		if v == 0 {
+			return fallbackValue
+		}
+		return value
+	case int64:
+		if v == 0 {
+			return fallbackValue
+		}
+		return value
+	case float64:
+		if v == 0 {
+			return fallbackValue
+		}
+		return value
+	case bool:
+		if !v {
+			return fallbackValue
+		}
+		return value
+	case []any:
+		if len(v) == 0 {
+			return fallbackValue
+		}
+		return value
+	case map[string]any:
+		if len(v) == 0 {
+			return fallbackValue
+		}
+		return value
+	}
+	// Fallback to reflection for other types
 	v := reflect.ValueOf(value)
 	if v.IsZero() {
 		return fallbackValue
@@ -1048,4 +1094,391 @@ func trimJSONSpace(data native.JSON) native.JSON {
 	for ; lookupJSONSpace[data[j]] == 1; j-- {
 	}
 	return data[i : j+1]
+}
+
+// GroupBy groups items by a key extracted using keyPath.
+// The keyPath is a dot-separated path to navigate nested structures.
+// Returns a map where keys are the extracted values (converted to strings)
+// and values are slices of items with that key.
+//
+// Example:
+//
+//	items := []map[string]any{
+//	    {"name": "a", "type": "foo"},
+//	    {"name": "b", "type": "bar"},
+//	    {"name": "c", "type": "foo"},
+//	}
+//	grouped := GroupBy(items, "type")
+//	// Result: map[string][]any{"foo": [{name:a}, {name:c}], "bar": [{name:b}]}
+func GroupBy(items any, keyPath string) map[string][]any {
+	result := make(map[string][]any)
+	if items == nil {
+		return result
+	}
+
+	// Fast path: []map[string]any with single-level key (most common case in templates)
+	if slice, ok := items.([]map[string]any); ok && !strings.Contains(keyPath, ".") {
+		for _, item := range slice {
+			key := anyToString(item[keyPath])
+			result[key] = append(result[key], item)
+		}
+		return result
+	}
+
+	// Fast path: []any containing map[string]any with single-level key
+	if slice, ok := items.([]any); ok && !strings.Contains(keyPath, ".") {
+		for _, item := range slice {
+			if m, ok := item.(map[string]any); ok {
+				key := anyToString(m[keyPath])
+				result[key] = append(result[key], item)
+			}
+		}
+		return result
+	}
+
+	// Generic fallback with reflection
+	rv := reflect.ValueOf(items)
+	if rv.Kind() != reflect.Slice {
+		panic("groupBy: first argument must be a slice, got " + rv.Type().String())
+	}
+
+	keys := splitKeyPath(keyPath)
+	l := rv.Len()
+	for i := 0; i < l; i++ {
+		item := rv.Index(i).Interface()
+		key := extractKeyAsString(item, keys)
+		result[key] = append(result[key], item)
+	}
+	return result
+}
+
+// CountBy counts items by a key extracted using keyPath.
+// The keyPath is a dot-separated path to navigate nested structures.
+// Returns a map where keys are the extracted values (converted to strings)
+// and values are the count of items with that key.
+//
+// Example:
+//
+//	items := []map[string]any{
+//	    {"type": "foo"},
+//	    {"type": "bar"},
+//	    {"type": "foo"},
+//	}
+//	counts := CountBy(items, "type")
+//	// Result: map[string]int{"foo": 2, "bar": 1}
+func CountBy(items any, keyPath string) map[string]int {
+	result := make(map[string]int)
+	if items == nil {
+		return result
+	}
+
+	rv := reflect.ValueOf(items)
+	if rv.Kind() != reflect.Slice {
+		panic("countBy: first argument must be a slice, got " + rv.Type().String())
+	}
+
+	keys := splitKeyPath(keyPath)
+	l := rv.Len()
+	for i := 0; i < l; i++ {
+		item := rv.Index(i).Interface()
+		key := extractKeyAsString(item, keys)
+		result[key]++
+	}
+	return result
+}
+
+// IndexBy creates a lookup map from items using keyPath.
+// The keyPath is a dot-separated path to navigate nested structures.
+// If multiple items have the same key, the last one wins.
+// Returns a map where keys are the extracted values (converted to strings)
+// and values are the corresponding items.
+//
+// Example:
+//
+//	items := []map[string]any{
+//	    {"id": "a", "value": 1},
+//	    {"id": "b", "value": 2},
+//	}
+//	indexed := IndexBy(items, "id")
+//	// Result: map[string]any{"a": {id:a, value:1}, "b": {id:b, value:2}}
+func IndexBy(items any, keyPath string) map[string]any {
+	result := make(map[string]any)
+	if items == nil {
+		return result
+	}
+
+	rv := reflect.ValueOf(items)
+	if rv.Kind() != reflect.Slice {
+		panic("indexBy: first argument must be a slice, got " + rv.Type().String())
+	}
+
+	keys := splitKeyPath(keyPath)
+	l := rv.Len()
+	for i := 0; i < l; i++ {
+		item := rv.Index(i).Interface()
+		key := extractKeyAsString(item, keys)
+		result[key] = item
+	}
+	return result
+}
+
+// UniqueBy returns items with unique keys, keeping the first occurrence.
+// The keyPath is a dot-separated path to navigate nested structures.
+//
+// Example:
+//
+//	items := []map[string]any{
+//	    {"id": "a", "value": 1},
+//	    {"id": "b", "value": 2},
+//	    {"id": "a", "value": 3},
+//	}
+//	unique := UniqueBy(items, "id")
+//	// Result: []any{{id:a, value:1}, {id:b, value:2}}
+func UniqueBy(items any, keyPath string) []any {
+	if items == nil {
+		return []any{}
+	}
+
+	rv := reflect.ValueOf(items)
+	if rv.Kind() != reflect.Slice {
+		panic("uniqueBy: first argument must be a slice, got " + rv.Type().String())
+	}
+
+	keys := splitKeyPath(keyPath)
+	seen := make(map[string]bool)
+	result := []any{}
+
+	l := rv.Len()
+	for i := 0; i < l; i++ {
+		item := rv.Index(i).Interface()
+		key := extractKeyAsString(item, keys)
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+// MapExtract extracts a field from each item in the slice.
+// The keyPath is a dot-separated path to navigate nested structures.
+// Returns a slice of the extracted values.
+//
+// Example:
+//
+//	items := []map[string]any{
+//	    {"name": "a", "value": 1},
+//	    {"name": "b", "value": 2},
+//	}
+//	names := MapExtract(items, "name")
+//	// Result: []any{"a", "b"}
+func MapExtract(items any, keyPath string) []any {
+	if items == nil {
+		return []any{}
+	}
+
+	// Fast path: []map[string]any with single-level key (most common case in templates)
+	if slice, ok := items.([]map[string]any); ok && !strings.Contains(keyPath, ".") {
+		result := make([]any, len(slice))
+		for i, item := range slice {
+			result[i] = item[keyPath]
+		}
+		return result
+	}
+
+	// Fast path: []any containing map[string]any with single-level key
+	if slice, ok := items.([]any); ok && !strings.Contains(keyPath, ".") {
+		result := make([]any, len(slice))
+		for i, item := range slice {
+			if m, ok := item.(map[string]any); ok {
+				result[i] = m[keyPath]
+			}
+		}
+		return result
+	}
+
+	// Generic fallback with reflection
+	rv := reflect.ValueOf(items)
+	if rv.Kind() != reflect.Slice {
+		panic("mapExtract: first argument must be a slice, got " + rv.Type().String())
+	}
+
+	keys := splitKeyPath(keyPath)
+	l := rv.Len()
+	result := make([]any, l)
+
+	for i := 0; i < l; i++ {
+		item := rv.Index(i).Interface()
+		result[i] = extractKey(item, keys)
+	}
+	return result
+}
+
+// splitKeyPath splits a dot-separated key path into parts.
+// Empty path returns an empty slice.
+func splitKeyPath(keyPath string) []string {
+	if keyPath == "" {
+		return nil
+	}
+	return strings.Split(keyPath, ".")
+}
+
+// extractKey navigates through nested structures using the given keys
+// and returns the value at that path.
+func extractKey(item any, keys []string) any {
+	if len(keys) == 0 || item == nil {
+		return item
+	}
+
+	current := item
+	for _, key := range keys {
+		current = getField(current, key)
+		if current == nil {
+			return nil
+		}
+	}
+	return current
+}
+
+// extractKeyAsString extracts a key and converts it to a string.
+func extractKeyAsString(item any, keys []string) string {
+	value := extractKey(item, keys)
+	return anyToString(value)
+}
+
+// getField retrieves a field from a map or struct by name.
+func getField(item any, key string) any {
+	if item == nil {
+		return nil
+	}
+
+	rv := reflect.ValueOf(item)
+
+	// Dereference pointers
+	for rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+
+	switch rv.Kind() {
+	case reflect.Map:
+		// Try string key first (most common case)
+		keyVal := reflect.ValueOf(key)
+		if rv.Type().Key().Kind() == reflect.String {
+			val := rv.MapIndex(keyVal)
+			if val.IsValid() {
+				return val.Interface()
+			}
+		}
+		// Try to convert key to map's key type
+		if keyVal.Type().ConvertibleTo(rv.Type().Key()) {
+			val := rv.MapIndex(keyVal.Convert(rv.Type().Key()))
+			if val.IsValid() {
+				return val.Interface()
+			}
+		}
+		return nil
+
+	case reflect.Struct:
+		field := rv.FieldByName(key)
+		if field.IsValid() && field.CanInterface() {
+			return field.Interface()
+		}
+		return nil
+
+	default:
+		return nil
+	}
+}
+
+// anyToString converts any value to its string representation.
+func anyToString(v any) string {
+	if v == nil {
+		return ""
+	}
+
+	switch val := v.(type) {
+	case string:
+		return val
+	case int:
+		return strconv.Itoa(val)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case int32:
+		return strconv.FormatInt(int64(val), 10)
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(val), 'f', -1, 32)
+	case bool:
+		return strconv.FormatBool(val)
+	case fmt.Stringer:
+		return val.String()
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+// Contains checks if a slice contains the given value.
+// Returns true if the value is found in the slice, false otherwise.
+// Uses reflect.DeepEqual for comparison, so it works with complex types.
+//
+// Example:
+//
+//	types := []string{"Prefix", "Exact"}
+//	Contains(types, "Prefix")  // true
+//	Contains(types, "Regex")   // false
+//
+//	items := []any{"a", 1, true}
+//	Contains(items, 1)  // true
+func Contains(slice any, value any) bool {
+	if slice == nil {
+		return false
+	}
+
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return false
+	}
+
+	// Fast path for common slice types
+	switch s := slice.(type) {
+	case []string:
+		if str, ok := value.(string); ok {
+			for _, v := range s {
+				if v == str {
+					return true
+				}
+			}
+			return false
+		}
+	case []int:
+		if i, ok := value.(int); ok {
+			for _, v := range s {
+				if v == i {
+					return true
+				}
+			}
+			return false
+		}
+	case []any:
+		for _, v := range s {
+			if reflect.DeepEqual(v, value) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Generic fallback using reflection
+	l := rv.Len()
+	for i := 0; i < l; i++ {
+		elem := rv.Index(i).Interface()
+		if reflect.DeepEqual(elem, value) {
+			return true
+		}
+	}
+	return false
 }
