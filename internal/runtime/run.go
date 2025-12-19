@@ -1011,10 +1011,18 @@ mainLoop:
 		case OpDivFloat64, -OpDivFloat64:
 			vm.setFloat(c, vm.float(a)/vm.floatk(b, op < 0))
 
-		// Field
+		// Field with fast path for single-level access (Phase 3 optimization)
 		case OpField:
 			v := vm.general(a)
-			vm.setFromReflectValue(c, vm.fieldByIndex(v, uint8(b)))
+			fieldIndexes := vm.fn.FieldIndexes[uint8(b)]
+			// Fast path: single-level field access (most common case)
+			if len(fieldIndexes) == 1 {
+				v = derefPointer(v)
+				vm.setFromReflectValue(c, v.Field(fieldIndexes[0]))
+			} else {
+				// Multi-level field access (embedded structs)
+				vm.setFromReflectValue(c, vm.fieldByIndex(v, uint8(b)))
+			}
 
 		// GetVar
 		case OpGetVar:
@@ -1531,19 +1539,59 @@ mainLoop:
 			t := vm.fn.Types[uint8(b)]
 			vm.setGeneral(c, reflect.New(t).Elem())
 
-		// MapIndex
+		// MapIndex with inline fast paths for common types (Phase 3 optimization)
 		case OpMapIndex, -OpMapIndex:
 			m := vm.general(a)
 			t := m.Type()
-			k := reflect.New(t.Key()).Elem()
-			vm.getIntoReflectValue(b, k, op < 0)
-			elem := reflect.New(t.Elem()).Elem()
-			index := m.MapIndex(k)
-			vm.ok = index.IsValid()
-			if vm.ok {
-				elem.Set(index)
+
+			// Fast path: try common map types to avoid reflection overhead
+			// Only for non-constant keys (op > 0) with string key type
+			handled := false
+			if t.Key().Kind() == reflect.String && op > 0 {
+				key := vm.string(b)
+				switch t.Elem().Kind() {
+				case reflect.String:
+					if mapVal, ok := m.Interface().(map[string]string); ok {
+						val, exists := mapVal[key]
+						vm.ok = exists
+						vm.setString(c, val)
+						handled = true
+					}
+				case reflect.Int:
+					if mapVal, ok := m.Interface().(map[string]int); ok {
+						val, exists := mapVal[key]
+						vm.ok = exists
+						vm.setInt(c, int64(val))
+						handled = true
+					}
+				case reflect.Int64:
+					if mapVal, ok := m.Interface().(map[string]int64); ok {
+						val, exists := mapVal[key]
+						vm.ok = exists
+						vm.setInt(c, val)
+						handled = true
+					}
+				case reflect.Bool:
+					if mapVal, ok := m.Interface().(map[string]bool); ok {
+						val, exists := mapVal[key]
+						vm.ok = exists
+						vm.setBool(c, val)
+						handled = true
+					}
+				}
 			}
-			vm.setFromReflectValue(c, elem)
+			// Generic path with reflection (for non-string keys, constant keys, or named types)
+			if !handled {
+				k := reflect.New(t.Key()).Elem()
+				vm.getIntoReflectValue(b, k, op < 0)
+				elem := reflect.New(t.Elem()).Elem()
+				index := m.MapIndex(k)
+				vm.ok = index.IsValid()
+				if vm.ok {
+					elem.Set(index)
+				}
+				vm.setFromReflectValue(c, elem)
+			}
 		case OpMapIndexAny, -OpMapIndexAny:
 			m := vm.general(a)
 			t := m.Type()
@@ -2633,6 +2681,123 @@ mainLoop:
 			if err != nil {
 				panic(outError{err})
 			}
+
+		// Super-instruction: OpFieldShow (fused OpField + OpShow)
+		// Encoding: Op=OpFieldShow, A=struct_reg, B=field_index, C=context
+		// Next instruction word: Op=type_index (other fields unused)
+		case OpFieldShow:
+			v := vm.general(a)
+			// Fast path for single-level field access (same optimization as OpField)
+			fieldIndexes := vm.fn.FieldIndexes[uint8(b)]
+			var field reflect.Value
+			if len(fieldIndexes) == 1 {
+				v = derefPointer(v)
+				field = v.Field(fieldIndexes[0])
+			} else {
+				field = vm.fieldByIndex(v, uint8(b))
+			}
+			// Read type index from next instruction
+			typeIdx := uint8(vm.fn.Body[vm.pc].Op)
+			vm.pc++
+			t := vm.fn.Types[typeIdx]
+			st, ok := t.(ScriggoType)
+			if ok {
+				t = st.GoType()
+			}
+			// Get field value and show it
+			var val interface{}
+			if field.IsValid() {
+				if st != nil {
+					field = st.Wrap(field)
+				}
+				val = field.Interface()
+			}
+			if err := vm.renderer.Show(vm.env, val, Context(c)); err != nil {
+				panic(outError{err})
+			}
+
+		// Super-instruction: OpMapIndexShow (fused OpMapIndex + OpShow)
+		// Encoding: Op=OpMapIndexShow, A=map_reg, B=key_reg, C=context
+		// Next instruction word: Op=type_index (other fields unused)
+		case OpMapIndexShow, -OpMapIndexShow:
+			m := vm.general(a)
+			t := m.Type()
+			k := reflect.New(t.Key()).Elem()
+			vm.getIntoReflectValue(b, k, op < 0)
+			index := m.MapIndex(k)
+			// Read type index from next instruction
+			typeIdx := uint8(vm.fn.Body[vm.pc].Op)
+			vm.pc++
+			showType := vm.fn.Types[typeIdx]
+			st, ok := showType.(ScriggoType)
+			if ok {
+				showType = st.GoType()
+			}
+			// Get element value and show it
+			var val interface{}
+			if index.IsValid() {
+				elem := reflect.New(t.Elem()).Elem()
+				elem.Set(index)
+				if st != nil {
+					elem = st.Wrap(elem)
+				}
+				val = elem.Interface()
+			}
+			if err := vm.renderer.Show(vm.env, val, Context(c)); err != nil {
+				panic(outError{err})
+			}
+
+		// Specialized map index handlers (Phase 3 - Bytecode Specialization)
+		// These are direct-dispatch handlers that skip type checking for known types.
+		case OpMapIndexStringString:
+			// Specialized: map[string]string - no reflection for key/value
+			m := vm.general(a)
+			key := vm.string(b)
+			if mapVal, ok := m.Interface().(map[string]string); ok {
+				val, exists := mapVal[key]
+				vm.ok = exists
+				vm.setString(c, val)
+			} else {
+				vm.mapIndexStringKeyFallback(m, key, c)
+			}
+
+		case OpMapIndexStringInt:
+			// Specialized: map[string]int - no reflection for key/value
+			m := vm.general(a)
+			key := vm.string(b)
+			if mapVal, ok := m.Interface().(map[string]int); ok {
+				val, exists := mapVal[key]
+				vm.ok = exists
+				vm.setInt(c, int64(val))
+			} else if mapVal, ok := m.Interface().(map[string]int64); ok {
+				val, exists := mapVal[key]
+				vm.ok = exists
+				vm.setInt(c, val)
+			} else {
+				vm.mapIndexStringKeyFallback(m, key, c)
+			}
+
+		case OpMapIndexStringBool:
+			// Specialized: map[string]bool - no reflection for key/value
+			m := vm.general(a)
+			key := vm.string(b)
+			if mapVal, ok := m.Interface().(map[string]bool); ok {
+				val, exists := mapVal[key]
+				vm.ok = exists
+				vm.setBool(c, val)
+			} else {
+				vm.mapIndexStringKeyFallback(m, key, c)
+			}
+
+		case OpFieldDirect:
+			// Specialized: direct single-field access for single-level FieldIndexes entries.
+			// Uses same encoding as OpField: b is index into FieldIndexes.
+			// Only used when FieldIndexes[b] has exactly one element.
+			// NOTE: This opcode is currently not emitted - it's infrastructure for future
+			// compile-time specialization when the compiler can detect single-level access.
+			v := derefPointer(vm.general(a))
+			fieldIdx := vm.fn.FieldIndexes[uint8(b)][0]
+			vm.setFromReflectValue(c, v.Field(fieldIdx))
 
 		// Slice
 		case OpSlice:

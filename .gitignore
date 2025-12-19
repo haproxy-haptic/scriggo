@@ -1,0 +1,7 @@
+# PGO profiles (machine-specific)
+default.pgo
+*.pgo
+*.prof
+
+# Benchmark results
+test/bench/results/

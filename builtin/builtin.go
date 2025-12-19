@@ -1239,6 +1239,37 @@ func UniqueBy(items any, keyPath string) []any {
 		return []any{}
 	}
 
+	// Fast path: []map[string]any with single-level key (most common case in templates)
+	if slice, ok := items.([]map[string]any); ok && !strings.Contains(keyPath, ".") {
+		seen := make(map[string]bool)
+		result := make([]any, 0, len(slice)/2) // Estimate 50% unique
+		for _, item := range slice {
+			key := anyToString(item[keyPath])
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, item)
+			}
+		}
+		return result
+	}
+
+	// Fast path: []any containing map[string]any with single-level key
+	if slice, ok := items.([]any); ok && !strings.Contains(keyPath, ".") {
+		seen := make(map[string]bool)
+		result := make([]any, 0, len(slice)/2)
+		for _, item := range slice {
+			if m, ok := item.(map[string]any); ok {
+				key := anyToString(m[keyPath])
+				if !seen[key] {
+					seen[key] = true
+					result = append(result, item)
+				}
+			}
+		}
+		return result
+	}
+
+	// Generic fallback with reflection
 	rv := reflect.ValueOf(items)
 	if rv.Kind() != reflect.Slice {
 		panic("uniqueBy: first argument must be a slice, got " + rv.Type().String())

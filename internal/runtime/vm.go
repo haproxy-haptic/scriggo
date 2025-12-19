@@ -231,6 +231,24 @@ const (
 	rangeChan
 )
 
+// Specialization states for bytecode quickening (Phase 3)
+const (
+	specStateUnspecialized uint32 = iota // Not yet specialized
+	specStateInProgress                  // Specialization in progress
+	specStateSpecialized                 // Successfully specialized
+	specStateDeoptimized                 // Deoptimized due to type mismatch
+)
+
+// SpecializationMetadata holds runtime type information for instruction specialization.
+// This is a sidecar structure that doesn't modify the original instruction,
+// ensuring concurrent safety for multiple VMs executing the same bytecode.
+type SpecializationMetadata struct {
+	state    uint32       // Atomic: specialization state (see specState* constants)
+	keyKind  reflect.Kind // For map specialization: key type kind
+	elemKind reflect.Kind // For map specialization: element type kind
+	fieldIdx int          // For field specialization: direct field index (-1 if nested)
+}
+
 // renderFuture holds the result of a parallel render operation.
 type renderFuture struct {
 	result chan string // receives rendered output
@@ -916,6 +934,34 @@ func (vm *VM) fieldByIndex(s reflect.Value, i uint8) reflect.Value {
 	return v
 }
 
+// mapIndexStringKeyFallback performs a generic map index operation for maps with string keys.
+// Used as fallback when specialized fast paths don't match (e.g., named types).
+// Sets vm.ok to indicate whether the key was found.
+func (vm *VM) mapIndexStringKeyFallback(m reflect.Value, key string, c int8) {
+	t := m.Type()
+	k := reflect.New(t.Key()).Elem()
+	k.SetString(key)
+	elem := reflect.New(t.Elem()).Elem()
+	index := m.MapIndex(k)
+	vm.ok = index.IsValid()
+	if vm.ok {
+		elem.Set(index)
+	}
+	vm.setFromReflectValue(c, elem)
+}
+
+// derefPointer dereferences a pointer value, panicking if nil.
+// Returns the dereferenced value, or the original if not a pointer.
+func derefPointer(v reflect.Value) reflect.Value {
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			panic(errNilPointer)
+		}
+		return v.Elem()
+	}
+	return v
+}
+
 func (vm *VM) finalize(regs [][2]int8) {
 	for _, reg := range regs {
 		vm.setFromReflectValue(reg[1], vm.generalIndirect(reg[0]))
@@ -1266,6 +1312,55 @@ type Function struct {
 	Body            []Instruction
 	Text            [][]byte
 	InstructionInfo map[Addr]InstructionInfo
+
+	// Specialization metadata for bytecode quickening (Phase 3).
+	// Lazily allocated on first specialization attempt.
+	// Each entry corresponds to an instruction in Body at the same index.
+	specializations []SpecializationMetadata
+	specInit        sync.Once
+}
+
+// ensureSpecializations lazily allocates the specializations slice.
+// Safe for concurrent calls from multiple VMs.
+func (fn *Function) ensureSpecializations() {
+	fn.specInit.Do(func() {
+		fn.specializations = make([]SpecializationMetadata, len(fn.Body))
+	})
+}
+
+// GetSpecialization returns the specialization metadata for instruction at addr.
+// Returns nil if specializations haven't been allocated yet.
+func (fn *Function) GetSpecialization(addr Addr) *SpecializationMetadata {
+	if fn.specializations == nil || int(addr) >= len(fn.specializations) {
+		return nil
+	}
+	return &fn.specializations[addr]
+}
+
+// TrySpecialize attempts to specialize an instruction at addr.
+// Returns the specialized opcode if successful, or 0 if already specialized/failed.
+// Uses atomic CAS to ensure only one goroutine performs specialization.
+func (fn *Function) TrySpecialize(addr Addr, specialize func(*SpecializationMetadata) Operation) Operation {
+	fn.ensureSpecializations()
+
+	spec := &fn.specializations[addr]
+
+	// Try to transition from unspecialized to in-progress
+	if !atomic.CompareAndSwapUint32(&spec.state, specStateUnspecialized, specStateInProgress) {
+		// Already being specialized or already done
+		return 0
+	}
+
+	// Perform specialization
+	newOp := specialize(spec)
+
+	if newOp != 0 {
+		atomic.StoreUint32(&spec.state, specStateSpecialized)
+	} else {
+		atomic.StoreUint32(&spec.state, specStateDeoptimized)
+	}
+
+	return newOp
 }
 
 // Position represents a source position.
@@ -1649,4 +1744,14 @@ const (
 	OpXor
 
 	OpZero
+
+	// Super-instructions: fused opcodes for common patterns
+	OpFieldShow    // Fused: OpField + OpShow (field access followed by display)
+	OpMapIndexShow // Fused: OpMapIndex + OpShow (map access followed by display)
+
+	// Specialized opcodes for common type patterns (Phase 3 - Bytecode Specialization)
+	OpMapIndexStringString // Specialized: map[string]string index
+	OpMapIndexStringInt    // Specialized: map[string]int index
+	OpMapIndexStringBool   // Specialized: map[string]bool index
+	OpFieldDirect          // Specialized: direct single-level struct field access
 )
