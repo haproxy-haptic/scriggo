@@ -1328,7 +1328,19 @@ LABEL:
 		if keyword == tokenDefer {
 			node = ast.NewDefer(pos, expr)
 		} else {
-			node = ast.NewGo(pos, expr)
+			// Check if it's a parallel render (go render or go render_glob)
+			switch e := expr.(type) {
+			case *ast.Render:
+				e.Parallel = true
+				e.Position = pos
+				node = e
+			case *ast.RenderGlob:
+				e.Parallel = true
+				e.Position = pos
+				node = e
+			default:
+				node = ast.NewGo(pos, expr)
+			}
 		}
 		p.addNode(node)
 		tok = p.parseEnd(tok, tokenSemicolon, end)

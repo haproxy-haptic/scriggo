@@ -9,12 +9,194 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"sync/atomic"
 	"unicode"
 
 	"github.com/open2b/scriggo/ast"
 )
+
+// panicErrorWithStack creates a PanicError from a recovered value with Go stack trace.
+// Used in parallel render goroutines where we don't have access to VM's Stack method.
+func panicErrorWithStack(r interface{}) *PanicError {
+	buf := make([]byte, 4096)
+	n := goruntime.Stack(buf, false)
+	return &PanicError{
+		message:    fmt.Sprintf("panic in parallel render: %v", r),
+		stackTrace: buf[:n],
+	}
+}
+
+// parallelRenderArgs holds captured argument registers for parallel render goroutines.
+// Arguments must be copied before spawning the goroutine since the parent VM continues
+// and may overwrite its registers.
+type parallelRenderArgs struct {
+	ints     []int64
+	floats   []float64
+	strings  []string
+	generals []reflect.Value
+}
+
+// captureArgs extracts arguments from VM registers based on stackShift.
+// Used by OpGoRender and OpGoRenderIndirect to prepare arguments for parallel execution.
+func (vm *VM) captureArgs(stackShift StackShift) parallelRenderArgs {
+	for i, shift := range stackShift {
+		if shift < 0 || int(shift) > maxRegisterIndex {
+			panic(vm.newPanic(fmt.Errorf("invalid stack shift %d in register type %d", shift, i)))
+		}
+	}
+	args := parallelRenderArgs{
+		ints:     make([]int64, maxRegisterIndex-int(stackShift[0])),
+		floats:   make([]float64, maxRegisterIndex-int(stackShift[1])),
+		strings:  make([]string, maxRegisterIndex-int(stackShift[2])),
+		generals: make([]reflect.Value, maxRegisterIndex-int(stackShift[3])),
+	}
+	if len(args.ints) > 0 {
+		copy(args.ints, vm.regs.int[vm.fp[0]+Addr(stackShift[0]):vm.fp[0]+maxRegisterIndex])
+	}
+	if len(args.floats) > 0 {
+		copy(args.floats, vm.regs.float[vm.fp[1]+Addr(stackShift[1]):vm.fp[1]+maxRegisterIndex])
+	}
+	if len(args.strings) > 0 {
+		copy(args.strings, vm.regs.string[vm.fp[2]+Addr(stackShift[2]):vm.fp[2]+maxRegisterIndex])
+	}
+	if len(args.generals) > 0 {
+		copy(args.generals, vm.regs.general[vm.fp[3]+Addr(stackShift[3]):vm.fp[3]+maxRegisterIndex])
+	}
+	return args
+}
+
+// copyToVM copies captured arguments to a child VM's registers.
+func (args parallelRenderArgs) copyToVM(nvm *VM) {
+	copy(nvm.regs.int, args.ints)
+	copy(nvm.regs.float, args.floats)
+	copy(nvm.regs.string, args.strings)
+	copy(nvm.regs.general, args.generals)
+}
+
+// toReflectValues converts captured arguments to []reflect.Value for native function calls.
+// Uses the function type to determine how to interpret each argument.
+func (args parallelRenderArgs) toReflectValues(fnType reflect.Type) []reflect.Value {
+	numArgs := fnType.NumIn()
+	result := make([]reflect.Value, numArgs)
+	intIdx, floatIdx, stringIdx, generalIdx := 0, 0, 0, 0
+
+	for i := 0; i < numArgs; i++ {
+		argType := fnType.In(i)
+		switch argType.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			result[i] = reflect.ValueOf(args.ints[intIdx]).Convert(argType)
+			intIdx++
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			result[i] = reflect.ValueOf(uint64(args.ints[intIdx])).Convert(argType)
+			intIdx++
+		case reflect.Float32, reflect.Float64:
+			result[i] = reflect.ValueOf(args.floats[floatIdx]).Convert(argType)
+			floatIdx++
+		case reflect.String:
+			result[i] = reflect.ValueOf(args.strings[stringIdx])
+			stringIdx++
+		default:
+			// Find the next general value that's assignable to argType.
+			// Skip internal runtime values like *callable that may be in the registers.
+			for generalIdx < len(args.generals) {
+				v := args.generals[generalIdx]
+				generalIdx++
+				if !v.IsValid() {
+					continue
+				}
+				// Direct type match
+				if v.Type().AssignableTo(argType) {
+					result[i] = v
+					break
+				}
+				// For interface types, check if the underlying value is assignable
+				if v.Kind() == reflect.Interface && !v.IsNil() {
+					elem := v.Elem()
+					if elem.Type().AssignableTo(argType) {
+						result[i] = elem
+						break
+					}
+				}
+			}
+			// If no matching value found, use zero value
+			if !result[i].IsValid() {
+				result[i] = reflect.Zero(argType)
+			}
+		}
+	}
+	return result
+}
+
+// runScriggoMacroParallel runs a Scriggo function in a goroutine and sends result to future.
+// This centralizes the VM setup, argument copying, execution, and cleanup.
+func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args parallelRenderArgs,
+	future *renderFuture, parentEnv *env) {
+	nvm := getPooledVM(parentEnv)
+	nvm.vars = fnVars
+	if nvm.vars == nil {
+		nvm.vars = parentEnv.globals
+	}
+
+	buf := stringBuilderPool.Get().(*strings.Builder)
+	buf.Reset()
+	nvm.renderer = newRenderer(buf)
+
+	nvm.fn = fn
+	nvm.fp = [4]Addr{0, 0, 0, 0}
+	nvm.pc = 0
+
+	args.copyToVM(nvm)
+
+	if fn.NumReg[0] > 0 && Addr(fn.NumReg[0]) > nvm.st[0] {
+		nvm.moreIntStack()
+	}
+	if fn.NumReg[1] > 0 && Addr(fn.NumReg[1]) > nvm.st[1] {
+		nvm.moreFloatStack()
+	}
+	if fn.NumReg[2] > 0 && Addr(fn.NumReg[2]) > nvm.st[2] {
+		nvm.moreStringStack()
+	}
+	if fn.NumReg[3] > 0 && Addr(fn.NumReg[3]) > nvm.st[3] {
+		nvm.moreGeneralStack()
+	}
+
+	defer func() {
+		putPooledVM(nvm)
+		stringBuilderPool.Put(buf)
+		if r := recover(); r != nil {
+			if pe, ok := r.(*PanicError); ok {
+				future.err <- pe
+			} else {
+				future.err <- panicErrorWithStack(r)
+			}
+		}
+	}()
+
+	nvm.run()
+	future.result <- buf.String()
+}
+
+// runNativeMacroParallel calls a native function wrapper and sends result to future.
+func runNativeMacroParallel(nativeFn *NativeFunction, args []reflect.Value, future *renderFuture) {
+	defer func() {
+		if r := recover(); r != nil {
+			if pe, ok := r.(*PanicError); ok {
+				future.err <- pe
+			} else {
+				future.err <- panicErrorWithStack(r)
+			}
+		}
+	}()
+
+	results := nativeFn.value.Call(args)
+	if len(results) > 0 && results[0].Kind() == reflect.String {
+		future.result <- results[0].String()
+	} else {
+		future.result <- ""
+	}
+}
 
 func (vm *VM) runFunc(fn *Function, vars []reflect.Value) error {
 	vm.fn = fn
@@ -772,6 +954,64 @@ mainLoop:
 			wasNative := vm.startGoroutine()
 			if wasNative {
 				startNativeGoroutine = true
+			}
+
+		// GoRender - spawn a parallel render operation
+		case OpGoRender:
+			fn := vm.fn.Functions[uint8(a)]
+			off := vm.fn.Body[vm.pc]
+			vm.pc++
+
+			future := getRenderFuture()
+			vm.renderer.addFutureSlot(future)
+
+			stackShift := StackShift{int8(off.Op), off.A, off.B, off.C}
+			args := vm.captureArgs(stackShift)
+
+			vm.renderer.spawnParallelRender(func(fn *Function, args parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
+				return func() {
+					runScriggoMacroParallel(fn, parentEnv.globals, args, future, parentEnv)
+				}
+			}(fn, args, future, vm.env))
+
+		// GoRenderIndirect - spawn a parallel render operation for an indirect function call
+		case OpGoRenderIndirect:
+			f := vm.general(a).Interface().(*callable)
+			off := vm.fn.Body[vm.pc]
+			vm.pc++
+
+			future := getRenderFuture()
+			vm.renderer.addFutureSlot(future)
+
+			stackShift := StackShift{int8(off.Op), off.A, off.B, off.C}
+			args := vm.captureArgs(stackShift)
+
+			if f.fn == nil {
+				// Native function path: callable was converted to a native wrapper via callable.Value()
+				nativeFn := f.Native()
+				reflectArgs := args.toReflectValues(nativeFn.value.Type())
+
+				vm.renderer.spawnParallelRender(func(nativeFn *NativeFunction, args []reflect.Value, future *renderFuture) func() {
+					return func() {
+						runNativeMacroParallel(nativeFn, args, future)
+					}
+				}(nativeFn, reflectArgs, future))
+			} else {
+				// Scriggo function path: callable has a direct function reference
+				fn := f.fn
+				fnVars := f.vars
+
+				vm.renderer.spawnParallelRender(func(fn *Function, fnVars []reflect.Value, args parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
+					return func() {
+						runScriggoMacroParallel(fn, fnVars, args, future, parentEnv)
+					}
+				}(fn, fnVars, args, future, vm.env))
+			}
+
+		// GoRenderWait - wait for all pending parallel renders and flush output
+		case OpGoRenderWait:
+			if err := vm.renderer.flushWithFutures(); err != nil {
+				panic(vm.newPanic(err))
 			}
 
 		// Goto

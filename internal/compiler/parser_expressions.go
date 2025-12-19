@@ -231,6 +231,71 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 			default:
 				operand = ast.NewArrayType(pos, length, typ)
 			}
+		case tokenGo:
+			// go render or go render_glob for parallel execution
+			goPos := tok.pos
+			tok = p.next()
+			switch tok.typ {
+			case tokenRender:
+				pos := tok.pos
+				tok = p.next()
+				if tok.typ != tokenInterpretedString && tok.typ != tokenRawString {
+					panic(syntaxError(tok.pos, "unexpected %s, expecting string", tok))
+				}
+				var path = unquoteString(tok.txt)
+				if !ValidTemplatePath(path) {
+					panic(syntaxError(tok.pos, "invalid file path: %q", path))
+				}
+				pos.End = tok.pos.End
+				render := ast.NewRender(pos, path)
+				render.Parallel = true
+				render.Position = goPos.WithEnd(pos.End)
+				tok = p.next()
+				if tok.typ == tokenInheritContext {
+					render.InheritContext = true
+					render.Position.End = tok.pos.End
+					tok = p.next()
+				}
+				operand = render
+				p.unexpanded = append(p.unexpanded, operand)
+			case tokenRenderGlob:
+				pos := tok.pos
+				tok = p.next()
+				if tok.typ != tokenInterpretedString && tok.typ != tokenRawString {
+					panic(syntaxError(tok.pos, "unexpected %s, expecting string", tok))
+				}
+				var pattern = unquoteString(tok.txt)
+				if !ValidGlobPattern(pattern) {
+					panic(syntaxError(tok.pos, "invalid glob pattern: %q", pattern))
+				}
+				pos.End = tok.pos.End
+				renderGlob := ast.NewRenderGlob(pos, pattern)
+				renderGlob.Parallel = true
+				renderGlob.Position = goPos.WithEnd(pos.End)
+				tok = p.next()
+				if tok.typ == tokenInheritContext {
+					renderGlob.InheritContext = true
+					renderGlob.Position.End = tok.pos.End
+					tok = p.next()
+				}
+				operand = renderGlob
+				p.unexpanded = append(p.unexpanded, operand)
+			default:
+				// go MacroCall() - parse as expression and expect a call
+				var expr ast.Expression
+				expr, tok = p.parseExpr(tok, false, false, false, false)
+				if expr == nil {
+					panic(syntaxError(tok.pos, "unexpected %s after go, expecting render, render_glob, or function call", tok))
+				}
+				call, ok := expr.(*ast.Call)
+				if !ok {
+					panic(syntaxError(goPos, "go requires render, render_glob, or function call"))
+				}
+				call.Parallel = true
+				// Extend position to include the 'go' keyword
+				call.Position = goPos.WithEnd(call.Pos().End)
+				operand = call
+			}
 		case tokenRender:
 			pos := tok.pos
 			tok = p.next()

@@ -26,9 +26,100 @@ const maxUint32 = 1<<31 - 1
 
 const stackSize = 512
 
+// maxRegisterIndex is the maximum register index in the instruction encoding.
+// Registers are indexed 0-127 in each type (int, float, string, general).
+const maxRegisterIndex = 127
+
 var envType = reflect.TypeOf((*native.Env)(nil)).Elem()
 var emptyInterfaceType = reflect.TypeOf(&[]interface{}{nil}[0]).Elem()
 var emptyInterfaceNil = reflect.ValueOf(&[]interface{}{nil}[0]).Elem()
+
+// vmPool is a pool of VMs for reuse in parallel render operations.
+var vmPool = sync.Pool{
+	New: func() interface{} {
+		return create(nil)
+	},
+}
+
+// getPooledVM gets a VM from the pool and initializes it with the given env.
+func getPooledVM(env *env) *VM {
+	vm := vmPool.Get().(*VM)
+	vm.env = env
+	vm.envArg = reflect.ValueOf(env)
+	return vm
+}
+
+// putPooledVM returns a VM to the pool after resetting it.
+func putPooledVM(vm *VM) {
+	// Clear all string registers to allow GC
+	for i := range vm.regs.string {
+		vm.regs.string[i] = ""
+	}
+
+	// Clear all general registers to allow GC
+	for i := range vm.regs.general {
+		vm.regs.general[i] = reflect.Value{}
+	}
+
+	// Clear other references
+	vm.fn = nil
+	vm.vars = nil
+	vm.renderer = nil
+	vm.env = nil
+	vm.envArg = reflect.Value{}
+	vm.panic = nil
+
+	// Reset stack pointers to full capacity
+	vm.st[0] = Addr(len(vm.regs.int))
+	vm.st[1] = Addr(len(vm.regs.float))
+	vm.st[2] = Addr(len(vm.regs.string))
+	vm.st[3] = Addr(len(vm.regs.general))
+	vm.fp = [4]Addr{0, 0, 0, 0}
+	vm.pc = 0
+	vm.ok = false
+
+	// Reset call/range stacks (keep capacity for reuse)
+	if vm.calls != nil {
+		vm.calls = vm.calls[:0]
+	}
+	if vm.cases != nil {
+		vm.cases = vm.cases[:0]
+	}
+	if vm.ranges != nil {
+		vm.ranges = vm.ranges[:0]
+	}
+
+	vmPool.Put(vm)
+}
+
+// renderFuturePool is a pool of renderFutures for reuse.
+var renderFuturePool = sync.Pool{
+	New: func() interface{} {
+		return &renderFuture{
+			result: make(chan string, 1),
+			err:    make(chan error, 1),
+		}
+	},
+}
+
+// getRenderFuture gets a renderFuture from the pool.
+func getRenderFuture() *renderFuture {
+	return renderFuturePool.Get().(*renderFuture)
+}
+
+// putRenderFuture returns a renderFuture to the pool after draining channels.
+func putRenderFuture(f *renderFuture) {
+	// Drain channels (non-blocking) to reset state
+	select {
+	case <-f.result:
+	default:
+	}
+	select {
+	case <-f.err:
+	default:
+	}
+	renderFuturePool.Put(f)
+}
 
 // Converter is implemented by format converters.
 type Converter = func(src []byte, out io.Writer) error
@@ -137,24 +228,30 @@ const (
 	rangeChan
 )
 
+// renderFuture holds the result of a parallel render operation.
+type renderFuture struct {
+	result chan string // receives rendered output
+	err    chan error  // receives error if any
+}
+
 // VM represents a Scriggo virtual machine.
 type VM struct {
-	fp       [4]Addr              // frame pointers.
-	st       [4]Addr              // stack tops.
-	pc       Addr                 // program counter.
-	ok       bool                 // ok flag.
-	regs     registers            // registers.
-	fn       *Function            // running function.
-	vars     []reflect.Value      // global and closure variables.
-	env      *env                 // execution environment.
-	envArg   reflect.Value        // execution environment as argument.
-	renderer *renderer            // renderer
-	calls    []callFrame          // call stack frame.
-	cases    []reflect.SelectCase // select cases.
-	ranges   []rangeState         // inline range loop state stack.
-	panic    *PanicError          // panic.
-	main     bool                 // reports whether this VM is executing the main goroutine.
-	profiler *profiler            // profiler for execution timing (nil when disabled).
+	fp             [4]Addr              // frame pointers.
+	st             [4]Addr              // stack tops.
+	pc             Addr                 // program counter.
+	ok             bool                 // ok flag.
+	regs           registers            // registers.
+	fn             *Function            // running function.
+	vars           []reflect.Value      // global and closure variables.
+	env            *env                 // execution environment.
+	envArg         reflect.Value        // execution environment as argument.
+	renderer       *renderer            // renderer
+	calls          []callFrame          // call stack frame.
+	cases          []reflect.SelectCase // select cases.
+	ranges         []rangeState         // inline range loop state stack.
+	panic          *PanicError          // panic.
+	main           bool                 // reports whether this VM is executing the main goroutine.
+	profiler       *profiler            // profiler for execution timing (nil when disabled).
 }
 
 // NewVM returns a new virtual machine.
@@ -465,6 +562,16 @@ func (vm *VM) SetContext(ctx context.Context) {
 func (vm *VM) SetRenderer(out io.Writer, conv Converter) {
 	vm.renderer = newRenderer(out)
 	vm.env.conv = conv
+}
+
+// SetMaxParallelRenders sets the maximum number of concurrent "go render" operations.
+// If n is zero or negative, the default (2*GOMAXPROCS) is used.
+//
+// SetMaxParallelRenders must be called after SetRenderer and before vm has been started.
+func (vm *VM) SetMaxParallelRenders(n int) {
+	if vm.renderer != nil {
+		vm.renderer.maxParallelRenders = n
+	}
 }
 
 // SetPrint sets the "print" builtin function.
@@ -1425,6 +1532,11 @@ const (
 	OpGetVarAddr
 
 	OpGo
+
+	OpGoRender
+	OpGoRenderIndirect
+
+	OpGoRenderWait
 
 	OpGoto
 

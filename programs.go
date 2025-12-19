@@ -82,6 +82,12 @@ type RunOptions struct {
 	//
 	// Used for templates only. Ignored for programs.
 	Profile *Profile
+
+	// MaxParallelRenders limits the number of concurrent "go render" operations.
+	// If zero or negative, defaults to 2*GOMAXPROCS.
+	//
+	// Used for templates only. Ignored for programs.
+	MaxParallelRenders int
 }
 
 // Program is a program compiled with the [Build] function.

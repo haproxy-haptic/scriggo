@@ -683,7 +683,12 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 				return regs, types
 			}
 			if fn.Macro {
-				em.fb.emitCallMacro(index, stackShift, call.Pos(), toFormat)
+				if call.Parallel {
+					// Parallel macro call: emit OpGoRender to spawn goroutine with output capture
+					em.fb.emitGoRender(index, stackShift, call.Pos(), toFormat)
+				} else {
+					em.fb.emitCallMacro(index, stackShift, call.Pos(), toFormat)
+				}
 			} else {
 				em.fb.emitCallFunc(index, stackShift, call.Pos())
 			}
@@ -705,7 +710,12 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 					panic(internalError("not implemented"))
 				}
 				if fun.Macro {
-					em.fb.emitCallMacro(index, stackShift, call.Pos(), toFormat)
+					if call.Parallel {
+						// Parallel macro call: emit OpGoRender to spawn goroutine with output capture
+						em.fb.emitGoRender(index, stackShift, call.Pos(), toFormat)
+					} else {
+						em.fb.emitCallMacro(index, stackShift, call.Pos(), toFormat)
+					}
 				} else {
 					em.fb.emitCallFunc(index, stackShift, call.Pos())
 				}
@@ -753,6 +763,11 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 	if deferStmt {
 		args := stackDifference(em.fb.currentStackShift(), stackShift)
 		em.fb.emitDefer(reg, int8(runtime.NoVariadicArgs), stackShift, args, funTi.Type)
+		return regs, types
+	}
+	// Parallel macro call: emit OpGoRenderIndirect to spawn goroutine with output capture
+	if call.Parallel && funTi.IsMacroDeclaration() {
+		em.fb.emitGoRenderIndirect(reg, stackShift, call.Pos(), toFormat)
 		return regs, types
 	}
 	em.fb.emitCallIndirect(reg, int8(runtime.NoVariadicArgs), stackShift, call.Pos(), funTi.Type, toFormat)

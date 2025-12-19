@@ -571,6 +571,11 @@ func (fb *functionBuilder) flushText() {
 func (fb *functionBuilder) end() {
 	fn := fb.fn
 	fb.flushText()
+	// Emit OpGoRenderWait before returning to wait for any pending parallel renders.
+	// This is a no-op if there are no pending renders.
+	if fn.Macro {
+		fb.emitGoRenderWait()
+	}
 	fb.emitReturn()
 	// https://github.com/open2b/scriggo/issues/537
 	// if len(fn.Body) == 0 || fn.Body[len(fn.Body)-1].Op != runtime.OpReturn {

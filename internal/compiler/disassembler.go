@@ -275,7 +275,7 @@ func disassembleFunction(b *bytes.Buffer, globals []Global, fn *runtime.Function
 			b.WriteByte('\n')
 		}
 		switch in.Op {
-		case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpCallIndirect, runtime.OpCallNative,
+		case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpGoRender, runtime.OpCallIndirect, runtime.OpCallNative,
 			runtime.OpTailCall, runtime.OpSlice, runtime.OpStringSlice:
 			addr += 1
 		case runtime.OpDefer:
@@ -360,10 +360,10 @@ func disassembleInstruction(fn *runtime.Function, globals []Global, addr runtime
 		s += " " + disassembleOperand(fn, c, kind, false)
 	case runtime.OpBreak, runtime.OpContinue, runtime.OpGoto:
 		s += " " + strconv.Itoa(int(decodeUint24(a, b, c)))
-	case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpCallIndirect, runtime.OpCallNative, runtime.OpTailCall, runtime.OpDefer:
+	case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpGoRender, runtime.OpCallIndirect, runtime.OpCallNative, runtime.OpTailCall, runtime.OpDefer:
 		if a != runtime.CurrentFunction {
 			switch op {
-			case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpTailCall:
+			case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpGoRender, runtime.OpTailCall:
 				sf := fn.Functions[uint8(a)]
 				s += " " + packageName(sf.Pkg) + "." + sf.Name
 			case runtime.OpCallIndirect:
@@ -520,7 +520,7 @@ func disassembleInstruction(fn *runtime.Function, globals []Global, addr runtime
 	case runtime.OpGetVarAddr:
 		s += " " + disassembleVarRef(fn, globals, int16(int(a)<<8|int(uint8(b))))
 		s += " " + disassembleOperand(fn, c, reflect.Interface, false)
-	case runtime.OpGo, runtime.OpReturn:
+	case runtime.OpGo, runtime.OpGoRenderWait, runtime.OpReturn:
 	case runtime.OpIndex, runtime.OpIndexRef:
 		s += " " + disassembleOperand(fn, a, reflect.Interface, false)
 		s += " " + disassembleOperand(fn, b, reflect.Int, k)
@@ -738,7 +738,7 @@ func disassembleInstruction(fn *runtime.Function, globals []Global, addr runtime
 // index and addr is meaningful, depending on the operation specified by op.
 func funcNameType(fn *runtime.Function, index int8, addr runtime.Addr, op runtime.Operation) (bool, string, reflect.Type) {
 	switch op {
-	case runtime.OpCallFunc, runtime.OpCallMacro:
+	case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpGoRender:
 		macro := fn.Functions[index].Macro
 		typ := fn.Functions[index].Type
 		name := fn.Functions[index].Name
@@ -1040,6 +1040,10 @@ var operationName = [...]string{
 	runtime.OpGetVarAddr: "GetVarAddr",
 
 	runtime.OpGo: "Go",
+
+	runtime.OpGoRender: "GoRender",
+
+	runtime.OpGoRenderWait: "GoRenderWait",
 
 	runtime.OpGoto: "Goto",
 

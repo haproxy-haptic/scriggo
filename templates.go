@@ -160,6 +160,9 @@ func (t *Template) Run(out io.Writer, vars map[string]interface{}, options *RunO
 		}
 	}
 	vm.SetRenderer(out, t.conv)
+	if options != nil && options.MaxParallelRenders != 0 {
+		vm.SetMaxParallelRenders(options.MaxParallelRenders)
+	}
 	// Enable profiling if it was enabled at build time.
 	if t.profilingEnabled {
 		vm.SetProfiling(true)
