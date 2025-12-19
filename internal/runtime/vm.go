@@ -93,11 +93,14 @@ func putPooledVM(vm *VM) {
 }
 
 // renderFuturePool is a pool of renderFutures for reuse.
+// The channels are buffered with size 1 to allow non-blocking sends from
+// the parallel render goroutine, ensuring the goroutine can complete and
+// return to the pool without blocking on the receiver.
 var renderFuturePool = sync.Pool{
 	New: func() interface{} {
 		return &renderFuture{
-			result: make(chan string, 1),
-			err:    make(chan error, 1),
+			result: make(chan string, 1), // Buffered for non-blocking send
+			err:    make(chan error, 1),  // Buffered for non-blocking send
 		}
 	},
 }
@@ -890,7 +893,8 @@ func (vm *VM) equals(x, y reflect.Value) bool {
 		x, _ = t.Unwrap(x)
 		y, _ = t.Unwrap(y)
 	}
-	return x.Interface() == y.Interface()
+	// Use reflect.Value.Equal() to avoid interface boxing allocation
+	return x.Equal(y)
 }
 
 // fieldByIndex returns the field of the struct s at index i.
