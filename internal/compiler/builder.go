@@ -581,6 +581,14 @@ func (fb *functionBuilder) end() {
 	// if len(fn.Body) == 0 || fn.Body[len(fn.Body)-1].Op != runtime.OpReturn {
 	// 	fb.emitReturn()
 	// }
+
+	// Peephole optimization: fuse common instruction sequences into super-instructions.
+	// Only optimize if there are no gotos, as optimization changes instruction addresses.
+	// TODO: Implement address remapping to support optimization with control flow.
+	if len(fb.gotos) == 0 && len(fb.labelAddrs) == 0 {
+		fn.Body = peepholeOptimize(fn.Body)
+	}
+
 	if int64(len(fn.Body)) > math.MaxUint32 {
 		panic(newLimitExceededError(fn.Pos, fn.File, "instructions count exceeded %d", uint32(math.MaxUint32)))
 	}
