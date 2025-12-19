@@ -145,8 +145,7 @@ func (p *Program) Disassemble(pkgPath string) ([]byte, error) {
 // If the context has been canceled, Run returns the error returned by the Err
 // method of the context.
 func (p *Program) Run(options *RunOptions) error {
-	vm := runtime.GetPooledMainVM()
-	defer runtime.PutPooledMainVM(vm)
+	vm := runtime.NewVM()
 	if options != nil {
 		if options.Context != nil {
 			vm.SetContext(options.Context)

@@ -24,10 +24,7 @@ const ReturnString = -1
 
 const maxUint32 = 1<<31 - 1
 
-// stackSize is the initial size for register arrays.
-// VMs will dynamically grow stacks as needed via moreIntStack() etc.
-// Smaller initial size reduces allocation overhead for simple programs.
-const stackSize = 128
+const stackSize = 512
 
 // maxRegisterIndex is the maximum register index in the instruction encoding.
 // Registers are indexed 0-127 in each type (int, float, string, general).
@@ -92,23 +89,7 @@ func putPooledVM(vm *VM) {
 		vm.ranges = vm.ranges[:0]
 	}
 
-	vm.main = false
 	vmPool.Put(vm)
-}
-
-// GetPooledMainVM gets a main VM from the pool, ready for execution.
-// The caller must call PutPooledMainVM when done to return the VM to the pool.
-// This is more efficient than NewVM() for repeated program/template executions.
-func GetPooledMainVM() *VM {
-	vm := getPooledVM(&env{})
-	vm.main = true
-	return vm
-}
-
-// PutPooledMainVM returns a main VM to the pool after resetting it.
-// The VM must not be used after calling this function.
-func PutPooledMainVM(vm *VM) {
-	putPooledVM(vm)
 }
 
 // renderFuturePool is a pool of renderFutures for reuse.
