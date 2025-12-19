@@ -292,11 +292,14 @@ func (vm *VM) runFunc(fn *Function, vars []reflect.Value) error {
 	var stop chan struct{}
 	if vm.env.doneChan != nil {
 		stop = make(chan struct{})
+		// Capture env in a local variable to avoid race condition when VM is pooled.
+		// The goroutine may outlive vm.env being set to nil in putPooledVM.
+		env := vm.env
 		go func() {
 			select {
 			case <-stop:
-			case <-vm.env.ctx.Done():
-				atomic.StoreInt32(&vm.env.done, 1)
+			case <-env.ctx.Done():
+				atomic.StoreInt32(&env.done, 1)
 			}
 		}()
 	}
