@@ -11,6 +11,7 @@ import (
 	"reflect"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"unicode"
 
@@ -20,10 +21,26 @@ import (
 // panicErrorWithStack creates a PanicError from a recovered value with Go stack trace.
 // Used in parallel render goroutines where we don't have access to VM's Stack method.
 func panicErrorWithStack(r interface{}) *PanicError {
-	buf := make([]byte, 4096)
+	buf := make([]byte, 8192) // Larger buffer for more complete stack traces
 	n := goruntime.Stack(buf, false)
 	return &PanicError{
 		message:    fmt.Sprintf("panic in parallel render: %v", r),
+		stackTrace: buf[:n],
+	}
+}
+
+// panicErrorWithContext creates a PanicError with function context for better debugging.
+func panicErrorWithContext(r interface{}, fnName, fnPkg string) *PanicError {
+	buf := make([]byte, 8192)
+	n := goruntime.Stack(buf, false)
+	var msg string
+	if fnName != "" {
+		msg = fmt.Sprintf("panic in parallel render of %s.%s: %v", fnPkg, fnName, r)
+	} else {
+		msg = fmt.Sprintf("panic in parallel render: %v", r)
+	}
+	return &PanicError{
+		message:    msg,
 		stackTrace: buf[:n],
 	}
 }
@@ -36,6 +53,39 @@ type parallelRenderArgs struct {
 	floats   []float64
 	strings  []string
 	generals []reflect.Value
+}
+
+// parallelRenderArgsPool is a pool for parallelRenderArgs to reduce allocations.
+var parallelRenderArgsPool = sync.Pool{
+	New: func() interface{} {
+		return &parallelRenderArgs{
+			ints:     make([]int64, 0, 32),
+			floats:   make([]float64, 0, 32),
+			strings:  make([]string, 0, 32),
+			generals: make([]reflect.Value, 0, 32),
+		}
+	},
+}
+
+// getParallelRenderArgs gets a parallelRenderArgs from the pool.
+func getParallelRenderArgs() *parallelRenderArgs {
+	return parallelRenderArgsPool.Get().(*parallelRenderArgs)
+}
+
+// putParallelRenderArgs returns a parallelRenderArgs to the pool after resetting it.
+func putParallelRenderArgs(args *parallelRenderArgs) {
+	// Clear slices to allow GC but keep capacity
+	for i := range args.strings {
+		args.strings[i] = ""
+	}
+	for i := range args.generals {
+		args.generals[i] = reflect.Value{}
+	}
+	args.ints = args.ints[:0]
+	args.floats = args.floats[:0]
+	args.strings = args.strings[:0]
+	args.generals = args.generals[:0]
+	parallelRenderArgsPool.Put(args)
 }
 
 // captureArgs extracts arguments from VM registers based on stackShift.
@@ -77,6 +127,7 @@ func (args parallelRenderArgs) copyToVM(nvm *VM) {
 
 // toReflectValues converts captured arguments to []reflect.Value for native function calls.
 // Uses the function type to determine how to interpret each argument.
+// Arguments are consumed in order by type (ints, floats, strings, generals).
 func (args parallelRenderArgs) toReflectValues(fnType reflect.Type) []reflect.Value {
 	numArgs := fnType.NumIn()
 	result := make([]reflect.Value, numArgs)
@@ -86,29 +137,56 @@ func (args parallelRenderArgs) toReflectValues(fnType reflect.Type) []reflect.Va
 		argType := fnType.In(i)
 		switch argType.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			result[i] = reflect.ValueOf(args.ints[intIdx]).Convert(argType)
-			intIdx++
+			if intIdx < len(args.ints) {
+				result[i] = reflect.ValueOf(args.ints[intIdx]).Convert(argType)
+				intIdx++
+			} else {
+				result[i] = reflect.Zero(argType)
+			}
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			result[i] = reflect.ValueOf(uint64(args.ints[intIdx])).Convert(argType)
-			intIdx++
+			if intIdx < len(args.ints) {
+				result[i] = reflect.ValueOf(uint64(args.ints[intIdx])).Convert(argType)
+				intIdx++
+			} else {
+				result[i] = reflect.Zero(argType)
+			}
+		case reflect.Bool:
+			// Booleans are stored in int registers (0 or 1)
+			if intIdx < len(args.ints) {
+				result[i] = reflect.ValueOf(args.ints[intIdx] != 0)
+				intIdx++
+			} else {
+				result[i] = reflect.Zero(argType)
+			}
 		case reflect.Float32, reflect.Float64:
-			result[i] = reflect.ValueOf(args.floats[floatIdx]).Convert(argType)
-			floatIdx++
+			if floatIdx < len(args.floats) {
+				result[i] = reflect.ValueOf(args.floats[floatIdx]).Convert(argType)
+				floatIdx++
+			} else {
+				result[i] = reflect.Zero(argType)
+			}
 		case reflect.String:
-			result[i] = reflect.ValueOf(args.strings[stringIdx])
-			stringIdx++
+			if stringIdx < len(args.strings) {
+				result[i] = reflect.ValueOf(args.strings[stringIdx])
+				stringIdx++
+			} else {
+				result[i] = reflect.Zero(argType)
+			}
 		default:
 			// Find the next general value that's assignable to argType.
 			// Skip internal runtime values like *callable that may be in the registers.
-			for generalIdx < len(args.generals) {
-				v := args.generals[generalIdx]
-				generalIdx++
+			found := false
+			searchStart := generalIdx
+			for j := searchStart; j < len(args.generals); j++ {
+				v := args.generals[j]
 				if !v.IsValid() {
 					continue
 				}
 				// Direct type match
 				if v.Type().AssignableTo(argType) {
 					result[i] = v
+					generalIdx = j + 1
+					found = true
 					break
 				}
 				// For interface types, check if the underlying value is assignable
@@ -116,12 +194,14 @@ func (args parallelRenderArgs) toReflectValues(fnType reflect.Type) []reflect.Va
 					elem := v.Elem()
 					if elem.Type().AssignableTo(argType) {
 						result[i] = elem
+						generalIdx = j + 1
+						found = true
 						break
 					}
 				}
 			}
 			// If no matching value found, use zero value
-			if !result[i].IsValid() {
+			if !found {
 				result[i] = reflect.Zero(argType)
 			}
 		}
@@ -133,6 +213,10 @@ func (args parallelRenderArgs) toReflectValues(fnType reflect.Type) []reflect.Va
 // This centralizes the VM setup, argument copying, execution, and cleanup.
 func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args parallelRenderArgs,
 	future *renderFuture, parentEnv *env) {
+	// Capture function info for error reporting before any operations
+	fnName := fn.Name
+	fnPkg := fn.Pkg
+
 	nvm := getPooledVM(parentEnv)
 	nvm.vars = fnVars
 	if nvm.vars == nil {
@@ -169,7 +253,7 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args parallel
 			if pe, ok := r.(*PanicError); ok {
 				future.err <- pe
 			} else {
-				future.err <- panicErrorWithStack(r)
+				future.err <- panicErrorWithContext(r, fnName, fnPkg)
 			}
 		}
 	}()
@@ -180,12 +264,16 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args parallel
 
 // runNativeMacroParallel calls a native function wrapper and sends result to future.
 func runNativeMacroParallel(nativeFn *NativeFunction, args []reflect.Value, future *renderFuture) {
+	// Capture function info for error reporting
+	fnName := nativeFn.name
+	fnPkg := nativeFn.pkg
+
 	defer func() {
 		if r := recover(); r != nil {
 			if pe, ok := r.(*PanicError); ok {
 				future.err <- pe
 			} else {
-				future.err <- panicErrorWithStack(r)
+				future.err <- panicErrorWithContext(r, fnName, fnPkg)
 			}
 		}
 	}()
@@ -963,12 +1051,16 @@ mainLoop:
 			vm.pc++
 
 			future := getRenderFuture()
-			vm.renderer.addFutureSlot(future)
+			eg, err := vm.renderer.addFutureSlot(future)
+			if err != nil {
+				putRenderFuture(future)
+				panic(vm.newPanic(err))
+			}
 
 			stackShift := StackShift{int8(off.Op), off.A, off.B, off.C}
 			args := vm.captureArgs(stackShift)
 
-			vm.renderer.spawnParallelRender(func(fn *Function, args parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
+			vm.renderer.spawnParallelRender(eg, func(fn *Function, args parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
 				return func() {
 					runScriggoMacroParallel(fn, parentEnv.globals, args, future, parentEnv)
 				}
@@ -981,7 +1073,11 @@ mainLoop:
 			vm.pc++
 
 			future := getRenderFuture()
-			vm.renderer.addFutureSlot(future)
+			eg, err := vm.renderer.addFutureSlot(future)
+			if err != nil {
+				putRenderFuture(future)
+				panic(vm.newPanic(err))
+			}
 
 			stackShift := StackShift{int8(off.Op), off.A, off.B, off.C}
 			args := vm.captureArgs(stackShift)
@@ -991,7 +1087,7 @@ mainLoop:
 				nativeFn := f.Native()
 				reflectArgs := args.toReflectValues(nativeFn.value.Type())
 
-				vm.renderer.spawnParallelRender(func(nativeFn *NativeFunction, args []reflect.Value, future *renderFuture) func() {
+				vm.renderer.spawnParallelRender(eg, func(nativeFn *NativeFunction, args []reflect.Value, future *renderFuture) func() {
 					return func() {
 						runNativeMacroParallel(nativeFn, args, future)
 					}
@@ -1001,7 +1097,7 @@ mainLoop:
 				fn := f.fn
 				fnVars := f.vars
 
-				vm.renderer.spawnParallelRender(func(fn *Function, fnVars []reflect.Value, args parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
+				vm.renderer.spawnParallelRender(eg, func(fn *Function, fnVars []reflect.Value, args parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
 					return func() {
 						runScriggoMacroParallel(fn, fnVars, args, future, parentEnv)
 					}
@@ -1032,7 +1128,8 @@ mainLoop:
 			case ConditionEqual, ConditionNotEqual:
 				x := vm.general(a)
 				y := vm.generalk(c, op < 0)
-				cond = x.Interface() == y.Interface()
+				// Use reflect.Value.Equal() to avoid interface boxing allocation
+				cond = x.Equal(y)
 			case ConditionInterfaceEqual, ConditionInterfaceNotEqual:
 				x := vm.general(a)
 				y := vm.generalk(c, op < 0)
@@ -1050,9 +1147,9 @@ mainLoop:
 						}
 					}
 				} else {
-					e := y.Interface()
+					// Use reflect.Value.Equal() to avoid interface boxing allocation in loop
 					for i := 0; i < n; i++ {
-						if x.Index(i).Interface() == e {
+						if x.Index(i).Equal(y) {
 							cond = true
 							break
 						}

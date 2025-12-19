@@ -6,6 +6,7 @@ package runtime
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -76,11 +78,18 @@ type renderer struct {
 	// before the next written text. It can be true only if it is in a URL.
 	removeQuestionMark bool
 
+	// segmentsMu protects segments and pendingBuf from concurrent access.
+	// This is necessary because nested go render operations may add segments
+	// concurrently with the main VM thread.
+	segmentsMu sync.Mutex
+
 	// segments holds ordered output segments for parallel rendering.
 	// When non-nil, parallel rendering is active.
+	// Protected by segmentsMu.
 	segments []outputSegment
 
 	// pendingBuf collects output between future slots when parallel rendering is active.
+	// Protected by segmentsMu.
 	pendingBuf *strings.Builder
 
 	// eg is the errgroup used to limit concurrent go render operations.
@@ -90,9 +99,17 @@ type renderer struct {
 	// wg tracks all spawned parallel renders (including those waiting for slots).
 	wg sync.WaitGroup
 
+	// parallelDepth tracks the current nesting depth of parallel renders.
+	// Used to prevent unbounded recursion (DoS protection).
+	parallelDepth int32
+
 	// maxParallelRenders is the maximum number of concurrent go render operations.
 	// If zero, uses defaultMaxParallelRenders().
 	maxParallelRenders int
+
+	// maxParallelDepth is the maximum nesting depth for parallel renders.
+	// If zero, defaults to 100.
+	maxParallelDepth int32
 }
 
 // newRenderer returns a new renderer.
@@ -1125,13 +1142,32 @@ func decodeRenderContext(c Context) (ast.Context, bool, bool) {
 
 // addFutureSlot adds a placeholder for a parallel render's output.
 // This method flushes any pending output to segments first.
-func (r *renderer) addFutureSlot(future *renderFuture) {
+// Returns the errgroup for spawning work, or an error if the parallel render depth limit is exceeded.
+func (r *renderer) addFutureSlot(future *renderFuture) (*errgroup.Group, error) {
+	// Check depth limit to prevent unbounded recursion (DoS protection)
+	maxDepth := r.maxParallelDepth
+	if maxDepth <= 0 {
+		maxDepth = 100 // Default limit
+	}
+	depth := atomic.AddInt32(&r.parallelDepth, 1)
+	if depth > maxDepth {
+		atomic.AddInt32(&r.parallelDepth, -1)
+		return nil, errors.New("parallel render depth limit exceeded")
+	}
+
+	r.segmentsMu.Lock()
+	defer r.segmentsMu.Unlock()
+
 	// Initialize errgroup on first parallel render
 	if r.eg == nil {
 		r.eg = new(errgroup.Group)
 		limit := r.maxParallelRenders
 		if limit <= 0 {
 			limit = defaultMaxParallelRenders()
+		}
+		// Validate limit is within reasonable bounds
+		if limit > 65536 {
+			limit = 65536
 		}
 		r.eg.SetLimit(limit)
 	}
@@ -1154,17 +1190,23 @@ func (r *renderer) addFutureSlot(future *renderFuture) {
 		isLiteral: false,
 		future:    future,
 	})
+
+	// Return the errgroup for the caller to spawn work on
+	return r.eg, nil
 }
 
 // spawnParallelRender spawns a parallel render using the errgroup.
 // The work function should send its result to the future's channels.
 // This method returns immediately - a wrapper goroutine waits for the errgroup slot.
-func (r *renderer) spawnParallelRender(work func()) {
+// The depth counter is decremented when the work completes.
+// The errgroup must be passed from addFutureSlot to ensure proper synchronization.
+func (r *renderer) spawnParallelRender(eg *errgroup.Group, work func()) {
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
+		defer atomic.AddInt32(&r.parallelDepth, -1)
 		// This blocks until a slot is available, but doesn't block the main VM
-		r.eg.Go(func() error {
+		eg.Go(func() error {
 			work()
 			return nil // errors are communicated via future.err channel
 		})
@@ -1175,7 +1217,9 @@ func (r *renderer) spawnParallelRender(work func()) {
 // all output segments to the underlying writer in order.
 // Returns the first error encountered from any parallel render.
 func (r *renderer) flushWithFutures() error {
+	r.segmentsMu.Lock()
 	if r.segments == nil {
+		r.segmentsMu.Unlock()
 		return nil
 	}
 
@@ -1187,18 +1231,30 @@ func (r *renderer) flushWithFutures() error {
 		})
 	}
 
+	// Take ownership of segments and pendingBuf for cleanup
+	segments := r.segments
+	pendingBuf := r.pendingBuf
+	eg := r.eg
+
+	// Reset renderer state while holding the lock
+	r.segments = nil
+	r.pendingBuf = nil
+	r.eg = nil
+
+	r.segmentsMu.Unlock()
+
 	// Wait for all spawned goroutines to finish submitting work to errgroup
 	r.wg.Wait()
 
 	// Wait for all errgroup work to complete
 	// This ensures all work functions have finished before we read from channels
-	if r.eg != nil {
-		_ = r.eg.Wait() // errors are communicated via future.err channels
+	if eg != nil {
+		_ = eg.Wait() // errors are communicated via future.err channels
 	}
 
 	// Collect futures for cleanup - pre-allocate based on segment count
-	futures := make([]*renderFuture, 0, len(r.segments))
-	for _, seg := range r.segments {
+	futures := make([]*renderFuture, 0, len(segments))
+	for _, seg := range segments {
 		if !seg.isLiteral {
 			futures = append(futures, seg.future)
 		}
@@ -1206,20 +1262,17 @@ func (r *renderer) flushWithFutures() error {
 
 	// Cleanup function to return resources to pools
 	cleanup := func() {
-		if r.pendingBuf != nil {
-			stringBuilderPool.Put(r.pendingBuf)
-			r.pendingBuf = nil
+		if pendingBuf != nil {
+			stringBuilderPool.Put(pendingBuf)
 		}
 		for _, f := range futures {
 			putRenderFuture(f)
 		}
-		r.segments = nil
-		r.eg = nil
 	}
 
 	// Collect results from all futures (all work has completed after eg.Wait())
-	results := make([]string, len(r.segments))
-	for i, seg := range r.segments {
+	results := make([]string, len(segments))
+	for i, seg := range segments {
 		if seg.isLiteral {
 			results[i] = seg.literal
 		} else {
