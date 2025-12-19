@@ -108,7 +108,7 @@ func (tc *typechecker) checkIdentifier(ident *ast.Identifier, used bool) *typeIn
 				if nestedFuncs := tc.scopes.Functions(); len(nestedFuncs) > 0 {
 					upvar := ast.Upvar{
 						NativeName:      ident.Name,
-						NativePkg:       ident.Name,
+						NativePkg:       ti.NativePackageName,
 						NativeValue:     rv,
 						NativeValueType: ti.Type,
 					}
@@ -2727,6 +2727,18 @@ func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeIn
 		arg := ast.NewIdentifier(render.Pos(), lv.Name)
 		args = append(args, arg)
 
+		// Register typeInfo only for native/runtime variables.
+		// This is critical for runtime variables (native vars with nil pointer at
+		// compile time) to be properly resolved by the emitter when emitting the
+		// call arguments. Without this, em.ti(argNode) returns nil and causes a
+		// nil pointer dereference in nonLocalVarIndex().
+		// Note: We must NOT register typeInfo for non-native variables (like macros
+		// or regular Scriggo variables) because the emitter needs to look them up
+		// by name in their proper context.
+		if lv.TI.IsNative() {
+			tc.compilation.typeInfos[arg] = lv.TI
+		}
+
 		// Collect actual reflect.Type for direct type checking
 		inTypes = append(inTypes, lv.TI.Type)
 	}
@@ -2742,8 +2754,25 @@ func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeIn
 		tree.Format,
 	)
 
-	// Set the macro result type to the tree's format type (required for macros)
+	// Make the macro result type explicit in the AST (required for register allocation)
+	tc.makeMacroResultExplicit(macroDecl)
+
+	// Set the macro result type to the tree's format type (required for macros).
+	// First try the formatTypes map, then fall back to looking up the format type
+	// name in the universe scope (same as makeMacroResultExplicit does).
 	formatType := tc.opts.formatTypes[tree.Format]
+	if formatType == nil {
+		// Fallback: look up the format type name in the universe scope
+		formatTypeNameStr := formatTypeName[tree.Format]
+		if ti, ok := tc.scopes.Universe(formatTypeNameStr); ok {
+			formatType = ti.Type
+		} else {
+			// Final fallback to string type
+			if ti, ok := tc.scopes.Universe("string"); ok {
+				formatType = ti.Type
+			}
+		}
+	}
 	var outTypes []reflect.Type
 	if formatType != nil {
 		outTypes = []reflect.Type{formatType}
@@ -2789,15 +2818,14 @@ func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeIn
 	tc.ancestors = tc.ancestors[:len(tc.ancestors)-1]
 	tc.scopes.Exit()
 
-	// Now create the import structure for the emitter
-	// Note: This modifies tree.Nodes to contain only the macro wrapped in a package,
-	// which is intentional for the emitter but must happen AFTER we've saved and
-	// type-checked childNodes
+	// Now create the import structure for the emitter.
+	// IMPORTANT: Create a NEW tree instead of modifying the original tree.Nodes.
+	// The original tree may be shared by multiple render nodes (when the same file
+	// is rendered from different places), so mutating it would corrupt other uses.
 	importt := ast.NewImport(nil, ast.NewIdentifier(nil, "."), "/"+render.Path, nil)
-	importt.Tree = tree
 	// Wrap the macro in a package structure (required by the emitter)
 	pkg := ast.NewPackage(nil, "main", []ast.Node{macroDecl})
-	importt.Tree.Nodes = []ast.Node{pkg}
+	importt.Tree = ast.NewTree(tree.Path, []ast.Node{pkg}, tree.Format)
 
 	// Store for the emitter (and for caching if the same render is checked again)
 	stored := renderIR{Import: importt, Macro: macroDecl, Args: args}

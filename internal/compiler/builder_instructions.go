@@ -352,6 +352,34 @@ func (fb *functionBuilder) emitGo() {
 	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpGo})
 }
 
+// emitGoRender appends a new "GoRender" instruction to the function body.
+// This spawns a parallel render operation that continues immediately.
+//
+//	go render "path"
+func (fb *functionBuilder) emitGoRender(f int8, shift runtime.StackShift, pos *ast.Position, toFormat ast.Format) {
+	fb.addPosAndPath(pos)
+	fn := fb.fn
+	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.OpGoRender, A: f, B: int8(toFormat)})
+	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.Operation(shift[0]), A: shift[1], B: shift[2], C: shift[3]})
+}
+
+// emitGoRenderIndirect appends a new "GoRenderIndirect" instruction to the function body.
+// This spawns a parallel render operation for an indirect (register-based) function call.
+//
+//	go macroInRegister()
+func (fb *functionBuilder) emitGoRenderIndirect(fnReg int8, shift runtime.StackShift, pos *ast.Position, toFormat ast.Format) {
+	fb.addPosAndPath(pos)
+	fn := fb.fn
+	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.OpGoRenderIndirect, A: fnReg, B: int8(toFormat)})
+	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.Operation(shift[0]), A: shift[1], B: shift[2], C: shift[3]})
+}
+
+// emitGoRenderWait appends a new "GoRenderWait" instruction to the function body.
+// This waits for all pending parallel renders and flushes their output.
+func (fb *functionBuilder) emitGoRenderWait() {
+	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpGoRenderWait})
+}
+
 // emitGoto appends a new "goto" instruction to the function body.
 //
 //	goto label

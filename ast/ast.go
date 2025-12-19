@@ -518,6 +518,7 @@ type Call struct {
 	Func       Expression   // function.
 	Args       []Expression // arguments.
 	IsVariadic bool         // reports whether it is variadic.
+	Parallel   bool         // if true, execute macro in parallel (go MacroCall).
 
 	IR struct {
 		// AppendArg1, in transformed calls to the builtin function 'append',
@@ -1153,6 +1154,7 @@ type Render struct {
 	Path           string  // path of the file to render.
 	Tree           *Tree   // expanded tree of <path>.
 	InheritContext bool    // if true, inherit local variables from call site.
+	Parallel       bool    // if true, execute in parallel (go render).
 
 	// IR holds the internal representation. The type checker transforms the
 	// 'render' expression into a macro call, where the macro body is the
@@ -1173,7 +1175,11 @@ func NewRender(pos *Position, path string) *Render {
 
 // String returns the string representation of n.
 func (n *Render) String() string {
-	s := "render " + strconv.Quote(n.Path)
+	s := ""
+	if n.Parallel {
+		s = "go "
+	}
+	s += "render " + strconv.Quote(n.Path)
 	if n.InheritContext {
 		s += " inherit_context"
 	}
@@ -1188,6 +1194,7 @@ type RenderGlob struct {
 	*Position              // position in the source.
 	Pattern        string  // glob pattern for files to render.
 	InheritContext bool    // if true, inherit local variables from call site.
+	Parallel       bool    // if true, execute in parallel (go render_glob).
 	Renders        []*Render // expanded render nodes (filled during parsing).
 }
 
@@ -1198,7 +1205,11 @@ func NewRenderGlob(pos *Position, pattern string) *RenderGlob {
 
 // String returns the string representation of n.
 func (n *RenderGlob) String() string {
-	s := "render_glob " + strconv.Quote(n.Pattern)
+	s := ""
+	if n.Parallel {
+		s = "go "
+	}
+	s += "render_glob " + strconv.Quote(n.Pattern)
 	if n.InheritContext {
 		s += " inherit_context"
 	}

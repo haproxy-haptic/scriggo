@@ -10,6 +10,7 @@ import (
 	"html"
 	"io"
 	"reflect"
+	goruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/open2b/scriggo/ast"
 	"github.com/open2b/scriggo/native"
+	"golang.org/x/sync/errgroup"
 )
 
 var byteSliceType = reflect.TypeOf([]byte(nil))
@@ -31,7 +33,30 @@ var stringBuilderPool = sync.Pool{
 	},
 }
 
-// renderer is used by te Show and Text instructions to render template files.
+// outputSegment represents a segment of output in the renderer.
+// It can either be a literal string or a future waiting for a parallel render.
+type outputSegment struct {
+	isLiteral bool
+	literal   string
+	future    *renderFuture
+}
+
+// defaultMaxParallelRenders returns the default maximum number of concurrent go render operations.
+// Uses 2*GOMAXPROCS to adapt to the machine while limiting goroutine contention.
+// Caps at a reasonable maximum to prevent excessive concurrency.
+func defaultMaxParallelRenders() int {
+	const maxConcurrency = 256 // reasonable upper bound
+	n := 2 * goruntime.GOMAXPROCS(0)
+	if n > maxConcurrency {
+		return maxConcurrency
+	}
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// renderer is used by the Show and Text instructions to render template files.
 type renderer struct {
 
 	// out is the io.Writer to write to.
@@ -50,11 +75,38 @@ type renderer struct {
 	// removeQuestionMark reports whether a question mark must be removed
 	// before the next written text. It can be true only if it is in a URL.
 	removeQuestionMark bool
+
+	// segments holds ordered output segments for parallel rendering.
+	// When non-nil, parallel rendering is active.
+	segments []outputSegment
+
+	// pendingBuf collects output between future slots when parallel rendering is active.
+	pendingBuf *strings.Builder
+
+	// eg is the errgroup used to limit concurrent go render operations.
+	// Lazily initialized on first go render.
+	eg *errgroup.Group
+
+	// wg tracks all spawned parallel renders (including those waiting for slots).
+	wg sync.WaitGroup
+
+	// maxParallelRenders is the maximum number of concurrent go render operations.
+	// If zero, uses defaultMaxParallelRenders().
+	maxParallelRenders int
 }
 
 // newRenderer returns a new renderer.
 func newRenderer(out io.Writer) *renderer {
 	return &renderer{out: out}
+}
+
+// outputWriter returns the writer to use for output - either the pending
+// buffer for parallel rendering or the main output writer.
+func (r *renderer) outputWriter() io.Writer {
+	if r.pendingBuf != nil {
+		return r.pendingBuf
+	}
+	return r.out
 }
 
 // Show shows v in the given context.
@@ -75,36 +127,37 @@ func (r *renderer) Show(env *env, v interface{}, context Context) error {
 	}
 
 	var err error
+	out := r.outputWriter()
 
 	switch ctx {
 	case ast.ContextText:
-		err = showInText(env, r.out, v)
+		err = showInText(env, out, v)
 	case ast.ContextHTML:
-		err = showInHTML(env, r.out, v)
+		err = showInHTML(env, out, v)
 	case ast.ContextTag:
-		err = showInTag(env, r.out, v)
+		err = showInTag(env, out, v)
 	case ast.ContextQuotedAttr:
-		err = showInAttribute(env, r.out, v, true)
+		err = showInAttribute(env, out, v, true)
 	case ast.ContextUnquotedAttr:
-		err = showInAttribute(env, r.out, v, false)
+		err = showInAttribute(env, out, v, false)
 	case ast.ContextCSS:
-		err = showInCSS(env, r.out, v)
+		err = showInCSS(env, out, v)
 	case ast.ContextCSSString:
-		err = showInCSSString(env, r.out, v)
+		err = showInCSSString(env, out, v)
 	case ast.ContextJS:
-		err = showInJS(env, r.out, v)
+		err = showInJS(env, out, v)
 	case ast.ContextJSString:
-		err = showInJSString(env, r.out, v)
+		err = showInJSString(env, out, v)
 	case ast.ContextJSON:
-		err = showInJSON(env, r.out, v)
+		err = showInJSON(env, out, v)
 	case ast.ContextJSONString:
-		err = showInJSONString(env, r.out, v)
+		err = showInJSONString(env, out, v)
 	case ast.ContextMarkdown:
-		err = showInMarkdown(env, r.out, v)
+		err = showInMarkdown(env, out, v)
 	case ast.ContextTabCodeBlock:
-		err = showInMarkdownCodeBlock(env, r.out, v, false)
+		err = showInMarkdownCodeBlock(env, out, v, false)
 	case ast.ContextSpacesCodeBlock:
-		err = showInMarkdownCodeBlock(env, r.out, v, true)
+		err = showInMarkdownCodeBlock(env, out, v, true)
 	default:
 		panic("scriggo: unknown context")
 	}
@@ -136,7 +189,7 @@ func (r *renderer) Text(txt []byte, inURL, isSet bool) error {
 				txt = txt[1:]
 			}
 			if r.addAmpersand && len(txt) > 0 && txt[0] != '&' {
-				_, err := io.WriteString(r.out, "&amp;")
+				_, err := r.writeStringForParallel("&amp;")
 				if err != nil {
 					return err
 				}
@@ -146,11 +199,11 @@ func (r *renderer) Text(txt []byte, inURL, isSet bool) error {
 		} else {
 			r.query = bytes.ContainsAny(txt, "?#")
 		}
-		_, err := r.out.Write(txt)
+		_, err := r.writeForParallel(txt)
 		return err
 	}
 
-	_, err := r.out.Write(txt)
+	_, err := r.writeForParallel(txt)
 	return err
 }
 
@@ -167,7 +220,7 @@ func (r *renderer) showInURL(env *env, v interface{}, ctx ast.Context) error {
 
 	s := html.UnescapeString(b.String())
 	stringBuilderPool.Put(b)
-	out := newStringWriter(r.out)
+	out := newStringWriter(r.outputWriter())
 
 	if r.query {
 		if r.removeQuestionMark {
@@ -1068,4 +1121,145 @@ func decodeRenderContext(c Context) (ast.Context, bool, bool) {
 		isURLSet = c&0b01000000 != 0
 	}
 	return ctx, inURL, isURLSet
+}
+
+// addFutureSlot adds a placeholder for a parallel render's output.
+// This method flushes any pending output to segments first.
+func (r *renderer) addFutureSlot(future *renderFuture) {
+	// Initialize errgroup on first parallel render
+	if r.eg == nil {
+		r.eg = new(errgroup.Group)
+		limit := r.maxParallelRenders
+		if limit <= 0 {
+			limit = defaultMaxParallelRenders()
+		}
+		r.eg.SetLimit(limit)
+	}
+
+	// If this is the first future, we need to start capturing output to pendingBuf
+	if r.pendingBuf == nil {
+		r.pendingBuf = stringBuilderPool.Get().(*strings.Builder)
+		r.pendingBuf.Reset()
+	} else if r.pendingBuf.Len() > 0 {
+		// Flush pending output to a literal segment
+		r.segments = append(r.segments, outputSegment{
+			isLiteral: true,
+			literal:   r.pendingBuf.String(),
+		})
+		r.pendingBuf.Reset()
+	}
+
+	// Add the future slot
+	r.segments = append(r.segments, outputSegment{
+		isLiteral: false,
+		future:    future,
+	})
+}
+
+// spawnParallelRender spawns a parallel render using the errgroup.
+// The work function should send its result to the future's channels.
+// This method returns immediately - a wrapper goroutine waits for the errgroup slot.
+func (r *renderer) spawnParallelRender(work func()) {
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		// This blocks until a slot is available, but doesn't block the main VM
+		r.eg.Go(func() error {
+			work()
+			return nil // errors are communicated via future.err channel
+		})
+	}()
+}
+
+// flushWithFutures waits for all pending parallel renders and writes
+// all output segments to the underlying writer in order.
+// Returns the first error encountered from any parallel render.
+func (r *renderer) flushWithFutures() error {
+	if r.segments == nil {
+		return nil
+	}
+
+	// Flush any remaining pending output
+	if r.pendingBuf != nil && r.pendingBuf.Len() > 0 {
+		r.segments = append(r.segments, outputSegment{
+			isLiteral: true,
+			literal:   r.pendingBuf.String(),
+		})
+	}
+
+	// Wait for all spawned goroutines to finish submitting work to errgroup
+	r.wg.Wait()
+
+	// Wait for all errgroup work to complete
+	// This ensures all work functions have finished before we read from channels
+	if r.eg != nil {
+		_ = r.eg.Wait() // errors are communicated via future.err channels
+	}
+
+	// Collect futures for cleanup - pre-allocate based on segment count
+	futures := make([]*renderFuture, 0, len(r.segments))
+	for _, seg := range r.segments {
+		if !seg.isLiteral {
+			futures = append(futures, seg.future)
+		}
+	}
+
+	// Cleanup function to return resources to pools
+	cleanup := func() {
+		if r.pendingBuf != nil {
+			stringBuilderPool.Put(r.pendingBuf)
+			r.pendingBuf = nil
+		}
+		for _, f := range futures {
+			putRenderFuture(f)
+		}
+		r.segments = nil
+		r.eg = nil
+	}
+
+	// Collect results from all futures (all work has completed after eg.Wait())
+	results := make([]string, len(r.segments))
+	for i, seg := range r.segments {
+		if seg.isLiteral {
+			results[i] = seg.literal
+		} else {
+			// Work has completed, so exactly one channel has a value
+			select {
+			case err := <-seg.future.err:
+				cleanup()
+				return err
+			case result := <-seg.future.result:
+				results[i] = result
+			}
+		}
+	}
+
+	// Write all segments to output in order
+	for _, result := range results {
+		if _, err := io.WriteString(r.out, result); err != nil {
+			cleanup()
+			return err
+		}
+	}
+
+	cleanup()
+	return nil
+}
+
+// writeForParallel writes to either the pending buffer (if parallel rendering
+// is active) or directly to out.
+func (r *renderer) writeForParallel(p []byte) (int, error) {
+	if r.pendingBuf != nil {
+		return r.pendingBuf.Write(p)
+	}
+	return r.out.Write(p)
+}
+
+// writeStringForParallel writes a string to either the pending buffer (if
+// parallel rendering is active) or directly to out.
+func (r *renderer) writeStringForParallel(s string) (int, error) {
+	if r.pendingBuf != nil {
+		return r.pendingBuf.WriteString(s)
+	}
+	return io.WriteString(r.out, s)
 }

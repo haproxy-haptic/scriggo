@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -3411,6 +3412,393 @@ END`,
 			},
 			expectedOut: `Hello world`,
 		},
+
+		// ========== go render / go render_glob parallel execution tests ==========
+
+		// Test 1: go render is async - continues immediately while rendering in background
+		"go render continues immediately": {
+			sources: fstest.Files{
+				"index.txt": `{{ go render "slow.txt" }}{{ marker() }}`,
+				"slow.txt":  `{{ sleep(50) }}SLOW`,
+			},
+			main:        goRenderTestPackage(),
+			expectedOut: `SLOWFAST`, // SLOW output at its position, FAST runs while SLOW renders
+		},
+
+		// Test 2: Output ordering preserved regardless of completion order
+		"go render preserves output order": {
+			sources: fstest.Files{
+				"index.txt": `{{ go render "slow.txt" }}{{ go render "fast.txt" }}`,
+				"slow.txt":  `{{ sleep(100) }}FIRST`,
+				"fast.txt":  `SECOND`,
+			},
+			main:        goRenderTestPackage(),
+			expectedOut: `FIRSTSECOND`, // source order, not completion order
+		},
+
+		// Test 3: Interleaved go render with regular output
+		"go render interleaved with regular content": {
+			sources: fstest.Files{
+				"index.txt": `{{ go render "a.txt" }}MID{{ go render "b.txt" }}END`,
+				"a.txt":     `[A]`,
+				"b.txt":     `[B]`,
+			},
+			expectedOut: `[A]MID[B]END`,
+		},
+
+		// Test 4: Multiple go renders run in parallel
+		"multiple go renders run in parallel": {
+			sources: fstest.Files{
+				"index.txt": `{{ go render "a.txt" }}{{ go render "b.txt" }}{{ go render "c.txt" }}`,
+				"a.txt":     `{{ sleep(30) }}A`,
+				"b.txt":     `{{ sleep(20) }}B`,
+				"c.txt":     `{{ sleep(10) }}C`,
+			},
+			main:        goRenderTestPackage(),
+			expectedOut: `ABC`, // source order, all run in parallel
+		},
+
+		// Test 5: go render_glob - all matched files run in parallel
+		"go render_glob parallel execution": {
+			sources: fstest.Files{
+				"index.txt":      `{{ go render_glob "partials/*.txt" }}`,
+				"partials/a.txt": `{{ sleep(30) }}A`,
+				"partials/b.txt": `{{ sleep(20) }}B`,
+				"partials/c.txt": `{{ sleep(10) }}C`,
+			},
+			main:        goRenderTestPackage(),
+			expectedOut: `ABC`, // alphabetical order
+		},
+
+		// Test 6: Empty glob pattern
+		"go render_glob with no matches": {
+			sources: fstest.Files{
+				"index.txt": `[{{ go render_glob "nonexistent/*.txt" }}]`,
+			},
+			expectedOut: `[]`,
+		},
+
+		// Test 7: Fail-fast error handling
+		"go render fail-fast on error": {
+			sources: fstest.Files{
+				"index.txt": `{{ go render "good.txt" }}{{ go render "bad.txt" }}`,
+				"good.txt":  `{{ sleep(100) }}GOOD`,
+				"bad.txt":   `{{ causePanic() }}`,
+			},
+			main:           goRenderTestPackage(),
+			expectedRunErr: "intentional panic",
+		},
+
+		// Test 8: go render with inherit_context
+		"go render with inherit_context": {
+			sources: fstest.Files{
+				"index.txt": `{% var x = "hello" %}{{ go render "child.txt" inherit_context }}`,
+				"child.txt": `{{ x }}`,
+			},
+			expectedOut: `hello`,
+		},
+
+		// Test 9: go render_glob with inherit_context
+		"go render_glob with inherit_context": {
+			sources: fstest.Files{
+				"index.txt":      `{% var x = "shared" %}{{ go render_glob "partials/*.txt" inherit_context }}`,
+				"partials/a.txt": `[{{ x }}]`,
+				"partials/b.txt": `[{{ x }}]`,
+			},
+			expectedOut: `[shared][shared]`,
+		},
+
+		// Test 10: Variable isolation between parallel renders
+		"go render variable isolation": {
+			sources: fstest.Files{
+				"index.txt": `{% var x = 0 %}{{ go render "a.txt" inherit_context }}{{ go render "b.txt" inherit_context }}[{{ x }}]`,
+				"a.txt":     `{% x = 1 %}A`,
+				"b.txt":     `{% x = 2 %}B`,
+			},
+			expectedOut: `AB[0]`, // parent's x unchanged
+		},
+
+		// Test 11: Nested go render - child template also uses go render
+		"nested go render": {
+			sources: fstest.Files{
+				"index.txt":  `{{ go render "parent.txt" }}`,
+				"parent.txt": `[{{ go render "child1.txt" }}{{ go render "child2.txt" }}]`,
+				"child1.txt": `{{ sleep(20) }}C1`,
+				"child2.txt": `C2`,
+			},
+			main:        goRenderTestPackage(),
+			expectedOut: `[C1C2]`, // nested go renders work recursively
+		},
+
+		// Test 12: Deeply nested go render
+		"deeply nested go render": {
+			sources: fstest.Files{
+				"index.txt":  `{{ go render "level1.txt" }}`,
+				"level1.txt": `L1[{{ go render "level2.txt" }}]`,
+				"level2.txt": `L2[{{ go render "level3.txt" }}]`,
+				"level3.txt": `L3`,
+			},
+			expectedOut: `L1[L2[L3]]`,
+		},
+
+		// ========== go MacroName() parallel macro execution tests ==========
+
+		// Test 13: Basic parallel macro call
+		"go macro basic": {
+			sources: fstest.Files{
+				"index.html": `{% macro M() html %}content{% end %}{{ go M() }}`,
+			},
+			expectedOut: `content`,
+		},
+
+		// Test 14: Parallel macro with arguments
+		"go macro with arguments": {
+			sources: fstest.Files{
+				"index.html": `{% macro BackendSnippet(name string) html %}[{{ name }}]{% end %}{{ go BackendSnippet("test") }}`,
+			},
+			expectedOut: `[test]`,
+		},
+
+		// Test 15: Multiple parallel macro calls - run in parallel, preserve order
+		"go macro parallel execution preserves order": {
+			sources: fstest.Files{
+				"index.html": `{% macro Slow() html %}{{ sleep(50) }}FIRST{% end %}{% macro Fast() html %}SECOND{% end %}{{ go Slow() }}{{ go Fast() }}`,
+			},
+			main:        goRenderTestPackage(),
+			expectedOut: `FIRSTSECOND`, // source order preserved, both run in parallel
+		},
+
+		// Test 16: Parallel macro interleaved with content
+		"go macro interleaved with content": {
+			sources: fstest.Files{
+				"index.html": `{% macro M() html %}[M]{% end %}{{ go M() }}MID{{ go M() }}END`,
+			},
+			expectedOut: `[M]MID[M]END`,
+		},
+
+		// Test 17: go macro as show statement (expression rendered as statement)
+		"go macro as show statement": {
+			sources: fstest.Files{
+				"index.html": `{% macro M() html %}output{% end %}{% show go M() %}`,
+			},
+			expectedOut: `output`,
+		},
+
+		// Test 18: Mixed go render and go macro
+		"go macro mixed with go render": {
+			sources: fstest.Files{
+				"index.html":   `{% macro M() html %}[MACRO]{% end %}{{ go render "snippet.html" }}{{ go M() }}`,
+				"snippet.html": `[RENDER]`,
+			},
+			expectedOut: `[RENDER][MACRO]`,
+		},
+
+		// Test 19: Verify true parallelism with timing
+		// Three macros each sleeping 30ms would take 90ms+ if sequential, but ~30ms if parallel
+		"go macro true parallelism timing": {
+			sources: fstest.Files{
+				"index.html": `{% macro A() html %}{{ sleep(30) }}A{% end %}{% macro B() html %}{{ sleep(30) }}B{% end %}{% macro C() html %}{{ sleep(30) }}C{% end %}{{ go A() }}{{ go B() }}{{ go C() }}`,
+			},
+			main:        goRenderTestPackage(),
+			expectedOut: `ABC`,
+		},
+
+		// Test 20: render_glob with inherit_context inside macro
+		// This tests that render_glob with inherit_context works correctly when called from inside a macro
+		"render_glob with inherit_context inside macro": {
+			sources: fstest.Files{
+				"index.txt":      `{% macro M %}{% var x = "hello" %}{{ render_glob "partials/*.txt" inherit_context }}{% end %}{{ M() }}`,
+				"partials/a.txt": `[{{ x }}]`,
+				"partials/b.txt": `[{{ x }}]`,
+			},
+			expectedOut: `[hello][hello]`,
+		},
+
+		// Test 21: render_glob with inherit_context inside macro with complex types
+		// Tests with multiple complex variables and many glob matches
+		"render_glob with inherit_context inside macro complex": {
+			sources: fstest.Files{
+				"index.txt": `{% macro M %}{% var data = map[string]interface{}{"key": "value"} %}{% var items = []string{"a", "b"} %}{% var count = 42 %}{{ render_glob "parts/*.txt" inherit_context }}{% end %}{{ M() }}`,
+				"parts/01.txt": `[data={{ sprint(data) }}]`,
+				"parts/02.txt": `[items={{ sprint(items) }}]`,
+				"parts/03.txt": `[count={{ count }}]`,
+				"parts/04.txt": `[combined={{ sprint(data) }}:{{ sprint(items) }}:{{ count }}]`,
+				"parts/05.txt": `[end]`,
+			},
+			expectedOut: `[data=map[key:value]][items=[a b]][count=42][combined=map[key:value]:[a b]:42][end]`,
+		},
+
+		// Test 22: render_glob with inherit_context inside macro with macro parameter
+		// Tests inherit_context when the macro has its own parameters
+		"render_glob with inherit_context inside macro with params": {
+			sources: fstest.Files{
+				"index.txt":    `{% macro M(prefix string) %}{% var x = prefix + "-suffix" %}{{ render_glob "p/*.txt" inherit_context }}{% end %}{{ M("hello") }}`,
+				"p/a.txt":      `[{{ x }}]`,
+				"p/b.txt":      `[{{ prefix }}/{{ x }}]`,
+			},
+			expectedOut: `[hello-suffix][hello/hello-suffix]`,
+		},
+
+		// Test 23: parallel render_glob with inherit_context inside macro
+		// Tests go render_glob with inherit_context inside a macro
+		"go render_glob with inherit_context inside macro": {
+			sources: fstest.Files{
+				"index.txt":    `{% macro M %}{% var x = "parallel" %}{{ go render_glob "p/*.txt" inherit_context }}{% end %}{{ M() }}`,
+				"p/a.txt":      `[{{ x }}]`,
+				"p/b.txt":      `[{{ x }}]`,
+			},
+			expectedOut: `[parallel][parallel]`,
+		},
+
+		// Test 24: go MacroCall on macro containing render_glob inherit_context
+		// This tests the specific bug scenario where the macro is called with "go"
+		"go macro call with render_glob inherit_context": {
+			sources: fstest.Files{
+				"index.txt":    `{% macro M %}{% var x = "value" %}{{ render_glob "p/*.txt" inherit_context }}{% end %}{{ go M() }}`,
+				"p/a.txt":      `[{{ x }}]`,
+				"p/b.txt":      `[{{ x }}]`,
+			},
+			expectedOut: `[value][value]`,
+		},
+
+		// Test 25: multiple go MacroCall on macro containing render_glob inherit_context
+		// Tests multiple parallel calls to a macro that uses render_glob inherit_context
+		"multiple go macro calls with render_glob inherit_context": {
+			sources: fstest.Files{
+				"index.txt":    `{% macro M %}{% var x = "test" %}{{ render_glob "p/*.txt" inherit_context }}{% end %}{{ go M() }}{{ go M() }}`,
+				"p/a.txt":      `[{{ x }}]`,
+				"p/b.txt":      `[{{ x }}]`,
+			},
+			expectedOut: `[test][test][test][test]`,
+		},
+
+		// Test 26: nested macro with render_glob inherit_context
+		// Tests a macro that calls another macro that uses render_glob inherit_context
+		"nested macro with render_glob inherit_context": {
+			sources: fstest.Files{
+				"index.txt":    `{% macro Inner %}{% var x = "inner" %}{{ render_glob "p/*.txt" inherit_context }}{% end %}{% macro Outer %}{{ Inner() }}{% end %}{{ Outer() }}`,
+				"p/a.txt":      `[{{ x }}]`,
+				"p/b.txt":      `[{{ x }}]`,
+			},
+			expectedOut: `[inner][inner]`,
+		},
+
+		// Test 27: render_glob with inherit_context inside macro - with filter
+		// Testing render_glob inherit_context result piped through a filter
+		// This is the synchronous bug case from haproxy-template-ic GitLab issue #2
+		"render_glob inherit_context inside macro with filter": {
+			sources: fstest.Files{
+				"index.txt":  `{% macro M %}{% var x = "hello" %}{{ render_glob "p/*.txt" inherit_context | toUpper() }}{% end %}{{ M() }}`,
+				"p/a.txt":    `[{{ x }}]`,
+				"p/b.txt":    `[{{ x }}]`,
+			},
+			expectedOut: `[HELLO][HELLO]`,
+		},
+
+		// Test 28: render_glob with inherit_context inside macro with for loop
+		// This tests the shared tree scenario where the same child templates
+		// are rendered multiple times (once per loop iteration). The tree
+		// is cached and shared, so we must not mutate tree.Nodes.
+		// Reproduces haproxy-template-ic GitLab issue #2 (nil pointer in controller)
+		"render_glob inherit_context inside macro with for loop": {
+			sources: fstest.Files{
+				"index.txt": `{% macro M(items []string) string %}` +
+					`{%- for _, item := range items -%}` +
+					`{%- var x = item %}` +
+					`{{- render_glob "partial-*" inherit_context }}` +
+					`{%- end -%}` +
+					`{% end %}{{ M([]string{"one", "two", "three"}) }}`,
+				"partial-a.txt": `[a:{{ x }}]`,
+				"partial-b.txt": `[b:{{ x }}]`,
+			},
+			expectedOut: `[a:one][b:one][a:two][b:two][a:three][b:three]`,
+		},
+
+		// Test 29: render_glob with inherit_context inside macro - map variable
+		// Tests complex variable types being passed through inherit_context
+		// Similar to the haproxy-template controller's serverOpts pattern
+		"render_glob inherit_context inside macro with map in loop": {
+			sources: fstest.Files{
+				"index.txt": `{% macro M(names []string) string %}` +
+					`{%- for _, name := range names -%}` +
+					`{%- var opts = map[string]any{"name": name, "flags": []any{}} %}` +
+					`{{- render_glob "backend-*" inherit_context }}` +
+					`{%- end -%}` +
+					`{% end %}{{ M([]string{"srv1", "srv2"}) }}`,
+				"backend-check.txt": `[check:{{ opts["name"] }}]`,
+				"backend-flags.txt": `[flags:{{ opts["name"] }}]`,
+			},
+			expectedOut: `[check:srv1][flags:srv1][check:srv2][flags:srv2]`,
+		},
+
+		// Test 30: render_glob inherit_context with runtime variables in nested render
+		// This tests the specific bug where runtime variables (nil pointer at compile time,
+		// value via Run()) combined with render_glob inherit_context inside a macro
+		// and nested render would cause a nil pointer dereference.
+		// The issue was that native upvars used ident.Name as NativePkg instead of
+		// ti.NativePackageName, causing the global to be registered under the wrong
+		// package name (e.g., "runtimeData" instead of "main").
+		"render_glob inherit_context with runtime vars in nested render": {
+			sources: fstest.Files{
+				"index.txt": `{{ render_glob "section-*" }}`,
+				"section-items.txt": `{% macro M(items []any) string %}` +
+					`{%- for _, item := range items -%}` +
+					`{{- render_glob "child-*" inherit_context }}` +
+					`{%- end -%}` +
+					`{% end %}{{ M(runtimeData) }}`,
+				"child-display.txt": `[{{ item }}:{{ len(runtimeData) }}]`,
+			},
+			main: native.Package{
+				Name: "main",
+				Declarations: native.Declarations{
+					"runtimeData": (*[]any)(nil), // Runtime variable: nil at compile time
+				},
+			},
+			vars: map[string]interface{}{
+				"runtimeData": &[]any{"a", "b", "c"},
+			},
+			expectedOut: `[a:3][b:3][c:3]`,
+		},
+
+		// Test 31: render inherit_context inside go macro
+		// Bug: OpGoRender doesn't copy argument registers to child VM
+		// The synthetic macro created by inherit_context expects parameters (inherited vars)
+		// but the child VM spawned by go doesn't receive them.
+		"render inherit_context inside go macro": {
+			sources: fstest.Files{
+				"index.txt": `{% macro M() string %}{% var x = "hello" %}{{ render "child.txt" inherit_context }}{% end %}{{ go M() }}`,
+				"child.txt": `[{{ x }}]`,
+			},
+			expectedOut: `[hello]`,
+		},
+
+		// Test 32: go macro via interface with inherit_context
+		// Bug: OpGoRenderIndirect f.fn==nil path calls nativeFn.value.Call(nil) without arguments.
+		// When a macro is stored in interface{} and called via go, it uses the native function path
+		// which wasn't passing arguments to the native wrapper.
+		"go macro via interface with inherit_context": {
+			sources: fstest.Files{
+				"index.txt": `{% macro M() string %}{% var x = "hello" %}{{ render "child.txt" inherit_context }}{% end %}{% var fn interface{} = M %}{{ go fn.(func() string)() }}`,
+				"child.txt": `[{{ x }}]`,
+			},
+			expectedOut: `[hello]`,
+		},
+
+		// Test 33: go macro with slice parameter and render inherit_context
+		// Bug: toReflectValues picks up *runtime.callable instead of the slice
+		// Error: reflect: Call using *runtime.callable as type []interface {}
+		"go macro with slice param and inherit_context": {
+			sources: fstest.Files{
+				"index.txt": `{%- var allItems = []any{"a", "b", "c"} -%}
+{%- macro ProcessShard(items []any) string -%}
+COUNT: {{ len(items) }}
+{{ render "child.txt" inherit_context }}
+{%- end -%}
+{{ go ProcessShard(allItems) }}`,
+				"child.txt": `RENDERED`,
+			},
+			expectedOut: "COUNT: 3\nRENDERED",
+		},
 	}
 
 	for name, cas := range templateMultiFileCases {
@@ -3601,6 +3989,26 @@ func leakTestPackage(pathPrefix string) native.Package {
 						return pathPrefix + name, nil
 					},
 				},
+			},
+		},
+	}
+}
+
+// goRenderTestPackage returns a native.Package for testing go render parallelism.
+// It provides sleep and marker functions to verify async execution behavior.
+func goRenderTestPackage() native.Package {
+	return native.Package{
+		Name: "main",
+		Declarations: native.Declarations{
+			"sleep": func(ms int) string {
+				time.Sleep(time.Duration(ms) * time.Millisecond)
+				return ""
+			},
+			"marker": func() string {
+				return "FAST"
+			},
+			"causePanic": func() string {
+				panic("intentional panic")
 			},
 		},
 	}

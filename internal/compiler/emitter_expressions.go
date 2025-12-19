@@ -140,6 +140,46 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 			return reg, false
 		}
 
+		// Parallel macro call: emit OpGoRender or OpGoRenderIndirect and return empty string immediately.
+		if expr.Parallel {
+			funTi := em.ti(expr.Func)
+			if funTi != nil && funTi.IsMacroDeclaration() {
+				// Check if function is available in function store (direct call)
+				if ident, ok := expr.Func.(*ast.Identifier); ok {
+					if fn, ok := em.fnStore.availableScriggoFn(em.pkg, ident.Name); ok && fn.Macro {
+						// Direct parallel macro call
+						stackShift := em.fb.currentStackShift()
+						em.prepareCallParameters(fn.Type, expr.Args, callOptions{callHasDots: expr.IsVariadic})
+						index := em.fnStore.scriggoFnIndex(fn)
+						toFormat := fn.Format
+						em.fb.emitGoRender(index, stackShift, expr.Pos(), toFormat)
+						// Return empty string - actual output is handled by renderer segments
+						if !useGivenReg {
+							reg = em.fb.newRegister(reflect.String)
+						}
+						s := em.fb.makeStringValue("")
+						em.changeRegister(true, s, reg, stringType, dstType)
+						return reg, false
+					}
+				}
+				// Indirect parallel macro call (macro stored as variable)
+				em.fb.enterStack()
+				fnReg := em.emitExpr(expr.Func, em.typ(expr.Func))
+				stackShift := em.fb.currentStackShift()
+				em.prepareCallParameters(funTi.Type, expr.Args, callOptions{callHasDots: expr.IsVariadic})
+				em.fb.emitGoRenderIndirect(fnReg, stackShift, expr.Pos(), funTi.MacroFormat)
+				em.fb.exitStack()
+				// Return empty string - actual output is handled by renderer segments
+				if !useGivenReg {
+					reg = em.fb.newRegister(reflect.String)
+				}
+				s := em.fb.makeStringValue("")
+				em.changeRegister(true, s, reg, stringType, dstType)
+				return reg, false
+			}
+			// Not a macro - fall through to regular call path
+		}
+
 		// Function call.
 		em.fb.enterStack()
 		regs, types := em.emitCallNode(expr, false, false, runtime.ReturnString)
@@ -280,14 +320,38 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 
 	case *ast.Render:
 
-		// Emit the code that imports the dummy file, then emit the call to the
-		// dummy macro declared on it.
+		// Emit the code that imports the dummy file.
 		em.emitNodes([]ast.Node{expr.IR.Import})
+
+		if expr.Parallel {
+			// For parallel render, emit OpGoRender which spawns a goroutine
+			// and continues immediately. The result will be collected later.
+			call := expr.IR.Call
+			ident := call.Func.(*ast.Identifier)
+			fn, ok := em.fnStore.availableScriggoFn(em.pkg, ident.Name)
+			if !ok {
+				panic(internalError("function %q not found for parallel render", ident.Name))
+			}
+			stackShift := em.fb.currentStackShift()
+			em.prepareCallParameters(fn.Type, call.Args, callOptions{callHasDots: call.IsVariadic})
+			index := em.fnStore.scriggoFnIndex(fn)
+			toFormat := expr.Tree.Format
+			em.fb.emitGoRender(index, stackShift, call.Pos(), toFormat)
+			// Return empty string - actual output is handled by renderer segments
+			if !useGivenReg {
+				reg = em.fb.newRegister(reflect.String)
+			}
+			s := em.fb.makeStringValue("")
+			em.changeRegister(true, s, reg, stringType, dstType)
+			return reg, false
+		}
+
+		// Emit the call to the dummy macro declared on it.
 		return em._emitExpr(expr.IR.Call, dstType, reg, useGivenReg, allowK)
 
 	case *ast.RenderGlob:
 
-		// Emit the code for each expanded Render node in sequence, concatenating results.
+		// Handle empty glob pattern
 		if len(expr.Renders) == 0 {
 			// No renders - initialize register with empty string to prevent
 			// stale data from being passed to piped functions.
@@ -299,6 +363,33 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 			return reg, false
 		}
 
+		if expr.Parallel {
+			// For parallel render_glob, emit OpGoRender for each matched file.
+			// All files render in parallel, output collected in alphabetical order.
+			for _, render := range expr.Renders {
+				em.emitNodes([]ast.Node{render.IR.Import})
+				call := render.IR.Call
+				ident := call.Func.(*ast.Identifier)
+				fn, ok := em.fnStore.availableScriggoFn(em.pkg, ident.Name)
+				if !ok {
+					panic(internalError("function %q not found for parallel render_glob", ident.Name))
+				}
+				stackShift := em.fb.currentStackShift()
+				em.prepareCallParameters(fn.Type, call.Args, callOptions{callHasDots: call.IsVariadic})
+				index := em.fnStore.scriggoFnIndex(fn)
+				toFormat := render.Tree.Format
+				em.fb.emitGoRender(index, stackShift, call.Pos(), toFormat)
+			}
+			// Return empty string - actual output is handled by renderer segments
+			if !useGivenReg {
+				reg = em.fb.newRegister(reflect.String)
+			}
+			s := em.fb.makeStringValue("")
+			em.changeRegister(true, s, reg, stringType, dstType)
+			return reg, false
+		}
+
+		// Sequential render_glob: emit code for each expanded Render node, concatenating results.
 		// Emit first render
 		em.emitNodes([]ast.Node{expr.Renders[0].IR.Import})
 		var k bool
