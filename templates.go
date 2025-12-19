@@ -150,7 +150,8 @@ func (t *Template) Run(out io.Writer, vars map[string]interface{}, options *RunO
 	if out == nil {
 		return errors.New("invalid nil out")
 	}
-	vm := runtime.NewVM()
+	vm := runtime.GetPooledMainVM()
+	defer runtime.PutPooledMainVM(vm)
 	if options != nil {
 		if options.Context != nil {
 			vm.SetContext(options.Context)
@@ -169,6 +170,7 @@ func (t *Template) Run(out io.Writer, vars map[string]interface{}, options *RunO
 	}
 	err := vm.Run(t.fn, t.typeof, initGlobalVariables(t.globals, vars))
 	// Collect profiling data if profiling was enabled and Profile was provided.
+	// This must be done before the VM is returned to the pool by the deferred call.
 	if t.profilingEnabled && options != nil && options.Profile != nil {
 		if data := vm.GetProfileData(); data != nil {
 			options.Profile.StartTime = data.StartTime
