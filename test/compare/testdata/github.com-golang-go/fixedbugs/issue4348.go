@@ -1,4 +1,4 @@
-// skip : out of memory https://github.com/open2b/scriggo/issues/545
+// skip : out of memory https://gitlab.com/haproxy-haptic/scriggo/issues/545
 
 // compile
 

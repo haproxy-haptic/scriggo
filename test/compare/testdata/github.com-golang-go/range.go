@@ -100,7 +100,7 @@ func testslice() {
 		println("wrong sum ranging over makeslice", s)
 		panic("fail")
 	}
-	// https://github.com/open2b/scriggo/issues/182
+	// https://gitlab.com/haproxy-haptic/scriggo/issues/182
 	// x := []int{10, 20}
 	// y := []int{99}
 	// i := 1

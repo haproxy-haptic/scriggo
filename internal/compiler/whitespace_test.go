@@ -8,8 +8,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
 )
 
 // TestJinja2WhitespaceControl tests the Jinja2-style whitespace control markers.

@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/open2b/scriggo/internal/compiler"
+	"gitlab.com/haproxy-haptic/scriggo/internal/compiler"
 )
 
 func TestInitPackageLevelVariables(t *testing.T) {

@@ -5,7 +5,7 @@
 package compiler
 
 import (
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // isTypeGuard reports whether node is a switch type guard, as x.(type) and

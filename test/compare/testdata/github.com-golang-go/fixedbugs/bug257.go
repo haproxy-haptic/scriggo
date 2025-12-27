@@ -1,4 +1,4 @@
-// skip : investigate on this (interface conversion: interface {} is *md5.digest, not []uint8) https://github.com/open2b/scriggo/issues/268
+// skip : investigate on this (interface conversion: interface {} is *md5.digest, not []uint8) https://gitlab.com/haproxy-haptic/scriggo/issues/268
 
 // run
 

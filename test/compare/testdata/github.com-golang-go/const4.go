@@ -1,4 +1,4 @@
-// skip : constant dependent from variable https://github.com/open2b/scriggo/issues/206
+// skip : constant dependent from variable https://gitlab.com/haproxy-haptic/scriggo/issues/206
 
 // run
 

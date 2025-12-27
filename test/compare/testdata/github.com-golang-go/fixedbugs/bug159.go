@@ -1,4 +1,4 @@
-// skip : different output. https://github.com/open2b/scriggo/issues/418
+// skip : different output. https://gitlab.com/haproxy-haptic/scriggo/issues/418
 
 // run
 

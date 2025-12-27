@@ -21,9 +21,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/runtime"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 // formatTypeName reports the type name for each format.

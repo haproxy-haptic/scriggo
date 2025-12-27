@@ -11,9 +11,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/compiler"
-	"github.com/open2b/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/compiler"
+	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
 )
 
 func TestInitGlobals(t *testing.T) {

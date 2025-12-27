@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/open2b/scriggo/test/compare/testpkg"
+	"gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
 )
 
 var F func(int) int

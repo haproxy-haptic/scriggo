@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // FormatFS is the interface implemented by a file system that can determine

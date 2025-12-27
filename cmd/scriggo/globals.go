@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/open2b/scriggo/builtin"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo/builtin"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 var globals = native.Declarations{

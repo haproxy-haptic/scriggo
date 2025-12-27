@@ -7,7 +7,7 @@ package types
 import (
 	"reflect"
 
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // FuncOf behaves like reflect.FuncOf except when at least one of the

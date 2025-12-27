@@ -5,7 +5,7 @@
 package compiler
 
 import (
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 type funcKindToParse int

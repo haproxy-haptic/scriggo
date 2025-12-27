@@ -30,7 +30,7 @@ func main() {
 	test17()
 	test18()
 	test19()
-	// TODO: see the issue https://github.com/open2b/scriggo/issues/952.
+	// TODO: see the issue https://gitlab.com/haproxy-haptic/scriggo/issues/952.
 	// test20()
 
 }

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 var parseConstantsTests = []struct {

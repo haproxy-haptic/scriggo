@@ -1,4 +1,4 @@
-// skip : interface definition is not supported in Scriggo https://github.com/open2b/scriggo/issues/218
+// skip : interface definition is not supported in Scriggo https://gitlab.com/haproxy-haptic/scriggo/issues/218
 
 // errorcheck
 

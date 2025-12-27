@@ -4,7 +4,7 @@ package testpkg
 import (
 	"fmt"
 
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 const (

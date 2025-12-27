@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // scopes represents the universe block, global block, file/package block and

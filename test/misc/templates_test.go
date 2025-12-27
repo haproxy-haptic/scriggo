@@ -13,10 +13,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open2b/scriggo"
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/fstest"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 
 	"github.com/google/go-cmp/cmp"
 )
@@ -134,7 +134,7 @@ var rendererExprTests = []struct {
 	// {`interface{}((5.5)).(float64)`, "5.5", nil},
 	// {`interface{}('a').(rune)`, "97", nil},
 	// {`interface{}(a).(bool)`, "true", Vars{"a": true}},
-	// {`interface{}(a).(error)`, "err", Vars{"a": errors.New("err")}}, // https://github.com/open2b/scriggo/issues/64.
+	// {`interface{}(a).(error)`, "err", Vars{"a": errors.New("err")}}, // https://gitlab.com/haproxy-haptic/scriggo/issues/64.
 
 	// slice
 	// {"[]int{-3}[0]", "-3", nil},
@@ -230,7 +230,7 @@ var rendererExprTests = []struct {
 	// {`a != "<b>"`, "false", Vars{"a": "<b>"}},
 	// {`a != "<b>"`, "false", Vars{"a": HTML("<b>")}},
 
-	// https://github.com/open2b/scriggo/issues/177.
+	// https://gitlab.com/haproxy-haptic/scriggo/issues/177.
 	// {"[]interface{}{} == nil", "false", nil},
 	// {"[]byte{} == nil", "false", nil},
 
@@ -373,7 +373,7 @@ var rendererStmtTests = []struct {
 	// {"{% _, a := test2(4,5) %}{{ a }}", "5", nil},
 	// {"{% a := 3 %}{% _, a = test2(4,5) %}{{ a }}", "5", nil},
 
-	// https://github.com/open2b/scriggo/issues/324
+	// https://gitlab.com/haproxy-haptic/scriggo/issues/324
 	// {"{% a := []interface{}{1,2,3} %}{% a[1] = 5 %}{{ a }}", "1, 5, 3", nil},
 	// {"{% s := []interface{}{1,2,3} %}{% s2 := s[0:2] %}{% s2[0] = 5 %}{{ s2 }}", "5, 2", nil},
 
@@ -527,7 +527,7 @@ var rendererStmtTests = []struct {
 	// slice
 	// {`{% if _, ok := interface{}([]int{1,2,3}).([]int); ok %}ok{% end %}`, "ok", nil},
 	// {`{% if _, ok := interface{}([]interface{}(a)).([]interface{}); ok %}ok{% end %}`, "ok", Vars{"a": []interface{}{}}},
-	// {`{% if []interface{}(a) != nil %}ok{% end %}`, "ok", Vars{"a": []interface{}{}}}, // TODO (Gianluca): https://github.com/open2b/scriggo/issues/63.
+	// {`{% if []interface{}(a) != nil %}ok{% end %}`, "ok", Vars{"a": []interface{}{}}}, // TODO (Gianluca): https://gitlab.com/haproxy-haptic/scriggo/issues/63.
 }
 
 func TestRenderStatements(t *testing.T) {

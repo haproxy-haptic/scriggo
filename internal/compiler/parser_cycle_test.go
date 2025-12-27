@@ -7,8 +7,8 @@ package compiler
 import (
 	"testing"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
 )
 
 var cycleProgramTests = []struct {

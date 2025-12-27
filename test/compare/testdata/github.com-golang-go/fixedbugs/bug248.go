@@ -1,4 +1,4 @@
-// skip : unsupported mode 'errorcheckandrundir -1' https://github.com/open2b/scriggo/issues/417
+// skip : unsupported mode 'errorcheckandrundir -1' https://gitlab.com/haproxy-haptic/scriggo/issues/417
 
 // +build !nacl,!js,!plan9
 // errorcheckandrundir -1

@@ -7,7 +7,7 @@ package types
 import (
 	"reflect"
 
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // wrap and unwrap are called by the methods Wrap and Unwrap of the types

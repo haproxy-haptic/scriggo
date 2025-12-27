@@ -5,7 +5,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/open2b/scriggo/test/compare/testpkg"
+	"gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
 )
 
 type St struct{ F int }

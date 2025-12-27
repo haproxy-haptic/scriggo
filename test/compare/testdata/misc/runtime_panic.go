@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"runtime"
 
-	"github.com/open2b/scriggo/test/compare/testpkg"
+	"gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
 )
 
 func main() {
@@ -51,7 +51,7 @@ func main() {
 	test17d()
 	test18()
 	test19()
-	// TODO: see the issue https://github.com/open2b/scriggo/issues/952, Go 1.20, about slice to array conversion.
+	// TODO: see the issue https://gitlab.com/haproxy-haptic/scriggo/issues/952, Go 1.20, about slice to array conversion.
 	// test20()
 
 }
@@ -73,8 +73,8 @@ func recoverRuntimePanic(err string) {
 	}
 	if _, ok := os.LookupEnv("SCRIGGO"); ok {
 		typ := reflect.TypeOf(e)
-		if typ.PkgPath() != "github.com/open2b/scriggo/internal/runtime" {
-			log.Printf("expected type github.com/open2b/scriggo/internal/runtime.runtimeError, got %s.%s for error %q", typ.PkgPath(), typ.Name(), err)
+		if typ.PkgPath() != "gitlab.com/haproxy-haptic/scriggo/internal/runtime" {
+			log.Printf("expected type gitlab.com/haproxy-haptic/scriggo/internal/runtime.runtimeError, got %s.%s for error %q", typ.PkgPath(), typ.Name(), err)
 			os.Exit(1)
 		}
 	}

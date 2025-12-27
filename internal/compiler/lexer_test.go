@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 var typeTestsText = map[string][]tokenTyp{

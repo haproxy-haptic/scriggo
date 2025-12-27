@@ -1,4 +1,4 @@
-// skip : import "runtime" https://github.com/open2b/scriggo/issues/524
+// skip : import "runtime" https://gitlab.com/haproxy-haptic/scriggo/issues/524
 
 // errorcheck
 

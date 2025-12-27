@@ -1,4 +1,4 @@
-// skip : slice of unaddressable array (https://github.com/open2b/scriggo/issues/926)
+// skip : slice of unaddressable array (https://gitlab.com/haproxy-haptic/scriggo/issues/926)
 
 // run
 

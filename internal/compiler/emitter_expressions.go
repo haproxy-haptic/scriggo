@@ -9,8 +9,8 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // emitExpr emits expr into a register of a given type. emitExpr tries to not

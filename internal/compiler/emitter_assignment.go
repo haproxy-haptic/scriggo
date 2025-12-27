@@ -7,8 +7,8 @@ package compiler
 import (
 	"reflect"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // address represents an element on the left side of an assignment.

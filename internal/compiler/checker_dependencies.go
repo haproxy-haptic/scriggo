@@ -7,7 +7,7 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // Makes a dependency analysis after parsing and before the type checking. See

@@ -352,7 +352,7 @@ func (vm *VM) convertPanic(msg interface{}) error {
 			}
 		}
 	case OpSlice, OpStringSlice:
-		// https://github.com/open2b/scriggo/issues/321
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/321
 		switch err := msg.(type) {
 		case runtime.Error:
 			if s := err.Error(); strings.HasPrefix(s, "runtime error: slice bounds out of range") {

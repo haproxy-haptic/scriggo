@@ -7,8 +7,8 @@ package compiler
 import (
 	"reflect"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // A functionStore holds information about functions defined in Scriggo and

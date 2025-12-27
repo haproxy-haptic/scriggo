@@ -1,4 +1,4 @@
-// skip : 'declared but not used' not reported in type switch https://github.com/open2b/scriggo/issues/474
+// skip : 'declared but not used' not reported in type switch https://gitlab.com/haproxy-haptic/scriggo/issues/474
 
 // errorcheck
 

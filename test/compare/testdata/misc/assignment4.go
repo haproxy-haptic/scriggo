@@ -70,7 +70,7 @@ func main() {
 
 	// Assign to struct field.
 	{
-		// https://github.com/open2b/scriggo/issues/478
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/478
 		// type S struct{ A int }
 		// s := func() *S {
 		// 	p("called s")

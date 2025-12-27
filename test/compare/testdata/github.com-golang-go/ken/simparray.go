@@ -1,4 +1,4 @@
-// skip : invalid behaviour with arrays (https://github.com/open2b/scriggo/issues/827)
+// skip : invalid behaviour with arrays (https://gitlab.com/haproxy-haptic/scriggo/issues/827)
 
 // run
 

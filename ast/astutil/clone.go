@@ -7,7 +7,7 @@ package astutil
 import (
 	"fmt"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // CloneTree returns a complete copy of tree.

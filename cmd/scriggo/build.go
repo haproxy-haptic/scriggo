@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open2b/scriggo"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 
 	"github.com/yuin/goldmark"
 )

@@ -1,4 +1,4 @@
-// skip : directive //go:notinheap not handled by Scriggo (see https://github.com/open2b/scriggo/issues/895)
+// skip : directive //go:notinheap not handled by Scriggo (see https://gitlab.com/haproxy-haptic/scriggo/issues/895)
 
 // errorcheck
 
