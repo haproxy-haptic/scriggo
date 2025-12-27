@@ -106,7 +106,7 @@ func testfloat() {
 		}
 	}
 
-	// https://github.com/open2b/scriggo/issues/172
+	// https://gitlab.com/haproxy-haptic/scriggo/issues/172
 	// {
 	// 	var (
 	// 		pz   = complex64(0)

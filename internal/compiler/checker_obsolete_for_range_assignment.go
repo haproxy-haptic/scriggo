@@ -4,7 +4,7 @@
 
 package compiler
 
-import "github.com/open2b/scriggo/ast"
+import "gitlab.com/haproxy-haptic/scriggo/ast"
 
 // TODO: this method is obsolete and must be removed when changing the type
 // checking of ForRange nodes.

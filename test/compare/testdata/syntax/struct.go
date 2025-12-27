@@ -2,7 +2,7 @@
 
 package main
 
-import p "github.com/open2b/scriggo/test/compare/testpkg"
+import p "gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
 
 func main() {
 

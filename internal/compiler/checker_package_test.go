@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 func TestInitializationLoop(t *testing.T) {
@@ -285,7 +285,7 @@ func TestPackageOrdering(t *testing.T) {
 			`,
 			"T,v1,main,",
 		},
-		"https://github.com/open2b/scriggo/issues/254": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/254": {
 			`package pkg1
 
 			var Pkg1A = Pkg1B + 10

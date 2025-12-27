@@ -5,7 +5,7 @@
 package builtin
 
 import (
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 // Unsafeconv provides a package that implements functions to make unsafe

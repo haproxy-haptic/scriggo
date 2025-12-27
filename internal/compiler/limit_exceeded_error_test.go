@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 func newTestBuilder() *functionBuilder {

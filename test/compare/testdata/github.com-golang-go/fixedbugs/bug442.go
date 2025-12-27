@@ -1,4 +1,4 @@
-// skip : false positive 'duplicate field _' (see https://github.com/open2b/scriggo/issues/809)
+// skip : false positive 'duplicate field _' (see https://gitlab.com/haproxy-haptic/scriggo/issues/809)
 
 // run
 

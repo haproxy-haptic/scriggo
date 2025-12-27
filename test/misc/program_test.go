@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open2b/scriggo"
-	"github.com/open2b/scriggo/internal/fstest"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo"
+	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 type TypeStruct struct{}
@@ -24,7 +24,7 @@ type TypeStruct struct{}
 func (t TypeStruct) Method() {}
 
 // TestIssue403 executes a test the issue
-// https://github.com/open2b/scriggo/issues/403. This issue cannot be tested
+// https://gitlab.com/haproxy-haptic/scriggo/issues/403. This issue cannot be tested
 // with usual tests as it would require an execution environment that would be
 // hard to reproduce without writing host code
 func TestIssue403(t *testing.T) {
@@ -154,7 +154,7 @@ func TestIssue403(t *testing.T) {
 }
 
 // TestIssue309 executes a test the issue
-// https://github.com/open2b/scriggo/issues/309.
+// https://gitlab.com/haproxy-haptic/scriggo/issues/309.
 func TestIssue309(t *testing.T) {
 	t.Run("Add right position to 'imported and not used' errors", func(t *testing.T) {
 		packages := native.CombinedImporter{
@@ -192,7 +192,7 @@ func TestIssue309(t *testing.T) {
 }
 
 // TestIssue881 executes a test for the issue
-// https://github.com/open2b/scriggo/issues/881.
+// https://gitlab.com/haproxy-haptic/scriggo/issues/881.
 func TestIssue881(t *testing.T) {
 	packages := native.CombinedImporter{
 		native.Packages{
@@ -453,7 +453,7 @@ func TestImportPackageName2(t *testing.T) {
 }
 
 func TestIssue523(t *testing.T) {
-	// See https://github.com/open2b/scriggo/issues/523.
+	// See https://gitlab.com/haproxy-haptic/scriggo/issues/523.
 	src := `package main
 
 	import "fmt"
@@ -517,7 +517,7 @@ func TestContextCancellation(t *testing.T) {
 	}
 }
 
-// https://github.com/open2b/scriggo/issues/855
+// https://gitlab.com/haproxy-haptic/scriggo/issues/855
 func TestIssue855(t *testing.T) {
 	fsys := fstest.Files{
 		"index.go": `
@@ -578,7 +578,7 @@ type IPrinter interface {
 }
 
 // TestIssue967 executes a test the issue
-// https://github.com/open2b/scriggo/issues/967.
+// https://gitlab.com/haproxy-haptic/scriggo/issues/967.
 func TestIssue967(t *testing.T) {
 	t.Run("Case 1", func(t *testing.T) {
 		src := `

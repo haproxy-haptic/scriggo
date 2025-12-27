@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open2b/scriggo"
-	"github.com/open2b/scriggo/internal/fstest"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo"
+	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 var htmlEscapeCases = []struct {

@@ -11,7 +11,7 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 type dumper struct {

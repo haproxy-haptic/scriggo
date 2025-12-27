@@ -167,9 +167,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/open2b/scriggo"
-	"github.com/open2b/scriggo/internal/thirdparties"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo"
+	"gitlab.com/haproxy-haptic/scriggo/internal/thirdparties"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 
 	"gopkg.in/yaml.v3"
 )

@@ -12,11 +12,11 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/compiler"
-	"github.com/open2b/scriggo/internal/compiler/types"
-	"github.com/open2b/scriggo/internal/runtime"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/compiler"
+	"gitlab.com/haproxy-haptic/scriggo/internal/compiler/types"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 // A Format represents a content format.

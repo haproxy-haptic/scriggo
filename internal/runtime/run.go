@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"unicode"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // panicErrorWithStack creates a PanicError from a recovered value with Go stack trace.

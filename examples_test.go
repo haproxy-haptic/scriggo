@@ -9,8 +9,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/open2b/scriggo"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 func ExampleBuild() {

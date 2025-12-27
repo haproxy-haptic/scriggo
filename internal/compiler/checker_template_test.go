@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/fstest"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 func init() {

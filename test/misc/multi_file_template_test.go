@@ -23,10 +23,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/open2b/scriggo"
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/fstest"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 func TestMultiFileTemplate(t *testing.T) {
@@ -238,7 +238,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: `hello scriggo!a string`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/391": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/391": {
 			sources: fstest.Files{
 				"index.txt": `{{ a }}{{ b }}`,
 			},
@@ -534,7 +534,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		"https://github.com/open2b/scriggo/issues/392": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/392": {
 			sources: fstest.Files{
 				"product.html": `{{ "" }}{{ render "partials/products.html" }}
 `, // this newline is intentional
@@ -544,21 +544,21 @@ func TestMultiFileTemplate(t *testing.T) {
 			entryPoint:  "product.html",
 		},
 
-		"https://github.com/open2b/scriggo/issues/392 (minimal)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/392 (minimal)": {
 			sources: fstest.Files{
 				"index.html": `text{% macro M(s []int) %}{% end %}text`,
 			},
 			expectedOut: `texttext`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/392 (invalid memory address)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/392 (invalid memory address)": {
 			sources: fstest.Files{
 				"index.html": `{% macro M(s []int) %}{% end %}text`,
 			},
 			expectedOut: `text`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/393": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/393": {
 			sources: fstest.Files{
 				"product.html": `{{ render "partials/products.html" }}
 `, // this newline is intentional
@@ -814,7 +814,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "OK\nOK\nOK\nOK\nOK\nOK\nOK\nOK",
 		},
 
-		// https://github.com/open2b/scriggo/issues/640
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/640
 		"Importing a file that imports a file that declares a variable": {
 			sources: fstest.Files{
 				"index.html":     `{% import "imported1.html" %}`,
@@ -823,7 +823,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		// https://github.com/open2b/scriggo/issues/640
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/640
 		"Importing a file that imports a file that declares a macro": {
 			sources: fstest.Files{
 				"index.html":     `{% import "imported1.html" %}{% show M1(42) %}`,
@@ -833,7 +833,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "b is 42",
 		},
 
-		// https://github.com/open2b/scriggo/issues/641
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/641
 		"File imported by two sources - test compilation": {
 			sources: fstest.Files{
 				"index.html":   `{% import "/v.html" %}{{ render "/partial.html" }}`,
@@ -842,7 +842,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		// https://github.com/open2b/scriggo/issues/642
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/642
 		"Macro imported twice - test compilation": {
 			sources: fstest.Files{
 				"index.html":    `{% import "/imported.html" %}{% import "/macro.html" %}{% show M() %}`,
@@ -851,7 +851,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		// https://github.com/open2b/scriggo/issues/642
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/642
 		"Macro imported twice - test output": {
 			sources: fstest.Files{
 				"index.html":    `{% import "/imported.html" %}{% import "/macro.html" %}{% show M(42) %}`,
@@ -861,7 +861,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "a is 42",
 		},
 
-		// https://github.com/open2b/scriggo/issues/643
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/643
 		"Invalid variable value when imported": {
 			sources: fstest.Files{
 				"index.html": `{% import "/v.html" %}{{ V }}`,
@@ -870,7 +870,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "42",
 		},
 
-		// https://github.com/open2b/scriggo/issues/643
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/643
 		"Invalid variable value with multiple imports": {
 			sources: fstest.Files{
 				"index.html":   `{% import "/v.html" %}{{ render "/partial.html" }}V is {{ V }}`,
@@ -880,7 +880,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "V is 42",
 		},
 
-		// https://github.com/open2b/scriggo/issues/643
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/643
 		"Init function called more than once": {
 			sources: fstest.Files{
 				"index.html":   `{% import "v.html" %}{{ render "/partial.html" }}{{ V }}`,
@@ -986,7 +986,7 @@ func TestMultiFileTemplate(t *testing.T) {
 				"partial.txt": `{% var v int %}`,
 			},
 		},
-		"https://github.com/open2b/scriggo/issues/661": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/661": {
 			sources: fstest.Files{
 				"index.txt": `{% extends "extended.txt" %}
 {% macro M %}
@@ -996,14 +996,14 @@ func TestMultiFileTemplate(t *testing.T) {
 				"partial.txt":  `{% var v int %}`,
 			},
 		},
-		"https://github.com/open2b/scriggo/issues/660": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/660": {
 			sources: fstest.Files{
 				"index.txt":   `{% macro M() %}{{ render "partial.txt" }}{% end macro %}`,
 				"partial.txt": `{% var v int %}{% _ = v %}`,
 			},
 		},
 
-		// https://github.com/open2b/scriggo/issues/659
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/659
 		"Accessing global variable from function literal's body": {
 			sources: fstest.Files{
 				"index.txt": `{%
@@ -1020,7 +1020,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		// https://github.com/open2b/scriggo/issues/659
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/659
 		"Accessing global variable from function literal's body - nested": {
 			sources: fstest.Files{
 				"index.txt": `{%
@@ -1056,7 +1056,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t\t\t\t\t\t\t\t\n\t\t\t\t\t\tm2\n\n\t\t\t",
 		},
 
-		"https://github.com/open2b/scriggo/issues/679 (1)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/679 (1)": {
 			sources: fstest.Files{
 				"index.txt": `{% global := interface{}(global) %}ok`,
 			},
@@ -1069,7 +1069,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "ok",
 		},
 
-		"https://github.com/open2b/scriggo/issues/679 (2)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/679 (2)": {
 			sources: fstest.Files{
 				"index.txt": `{% var global = interface{}(global) %}ok`,
 			},
@@ -1082,7 +1082,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "ok",
 		},
 
-		"https://github.com/open2b/scriggo/issues/679 (3)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/679 (3)": {
 			sources: fstest.Files{
 				"index.txt": `{% _ = []int{} %}{% global := interface{}(global) %}ok`,
 			},
@@ -1112,7 +1112,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "ab",
 		},
 
-		"https://github.com/open2b/scriggo/issues/686": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/686": {
 			sources: fstest.Files{
 				"index.txt":    `{% extends "extended.txt" %}{% var _ = interface{}(global) %}`,
 				"extended.txt": `text`,
@@ -1126,7 +1126,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "text",
 		},
 
-		"https://github.com/open2b/scriggo/issues/687": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/687": {
 			sources: fstest.Files{
 				"index.html": `{% extends "extended.html" %}
 			
@@ -1156,7 +1156,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t\t<head>\n\t\t\t\t<script>....\n\t\t\t\t\"\"\t\t\n\t\t\t\t\"\"\t\t\n\t\t\t\tfef",
 		},
 
-		"https://github.com/open2b/scriggo/issues/655": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/655": {
 			sources: fstest.Files{
 				"index.html":  "{% extends \"layout.html\" %}\n{% var _ = func() { } %}",
 				"layout.html": `<a href="a">`,
@@ -1164,7 +1164,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "<a href=\"a\">",
 		},
 
-		"https://github.com/open2b/scriggo/issues/656": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/656": {
 			sources: fstest.Files{
 				"index.txt":  "{% extends \"layout.txt\" %}\n{% var _ = func() { } %}",
 				"layout.txt": `abc`,
@@ -1338,7 +1338,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: `S.bar undefined (cannot refer to unexported field or method bar)`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/694": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/694": {
 			sources: fstest.Files{
 				"index.txt":   `{{ render "partial.txt" }}`,
 				"partial.txt": `{% var a int %}{% func() { a = 20 }() %}`,
@@ -1361,7 +1361,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: `true`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/708 (1)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/708 (1)": {
 			sources: fstest.Files{
 				"index.txt":    `{% extends "extended.txt" %}{% macro M %}{%% a := 10 %%}{% end macro %}`,
 				"extended.txt": `a`,
@@ -1369,7 +1369,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: `a`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/708 (2)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/708 (2)": {
 			sources: fstest.Files{
 				"index.txt":    `{% import "imported.txt" %}`,
 				"imported.txt": `{% macro M %}{%% a := 20 %%}{% end %}`,
@@ -1528,7 +1528,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "--- start Markdown ---\n# title--- end Markdown ---\n",
 		},
 
-		"https://github.com/open2b/scriggo/issues/728: Text instruction merging error": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/728: Text instruction merging error": {
 			sources: fstest.Files{
 				"index.txt": `{% if false %}{% for false %}{% end %}<d>{% end %}<e>`,
 			},
@@ -1644,7 +1644,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: "4:12: Inner redeclared in this block\n\tprevious declaration at 3:14",
 		},
 
-		"https://github.com/open2b/scriggo/issues/701": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/701": {
 			sources: fstest.Files{
 				"index.html":   `{{ render "partial.html" }}`,
 				"partial.html": "{% var a int %}{% macro b %}{{ a }}{% end %}{{ b() }}",
@@ -1652,7 +1652,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: `0`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/739 (import)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/739 (import)": {
 			sources: fstest.Files{
 				"index.txt":    `{% import "imported.txt" %}`,
 				"imported.txt": `{%% a := 1 %%}`,
@@ -1660,7 +1660,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: `unexpected a, expecting declaration statement`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/739 (extends)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/739 (extends)": {
 			sources: fstest.Files{
 				"index.txt":    `{% extends "extended.txt" %}{%% a := 1 %%}`,
 				"extended.txt": ``,
@@ -1668,7 +1668,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: `unexpected a, expecting declaration statement`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/741 - non pointer": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/741 - non pointer": {
 			sources: fstest.Files{
 				"index.txt": `{%%
 				t := T{}
@@ -1702,7 +1702,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "that's ok",
 		},
 
-		"https://github.com/open2b/scriggo/issues/727 - Macro (1)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/727 - Macro (1)": {
 			sources: fstest.Files{
 				"index.html": `
 			{% macro M(param int) %}
@@ -1714,7 +1714,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n",
 		},
 
-		"https://github.com/open2b/scriggo/issues/727 - Macro (2)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/727 - Macro (2)": {
 			sources: fstest.Files{
 				"index.html": `
 			{% macro M(param int) %}
@@ -1726,7 +1726,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t\t\t\t\t\n\t\t\t\t42\n",
 		},
 
-		"https://github.com/open2b/scriggo/issues/727 - Function literal (1)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/727 - Function literal (1)": {
 			sources: fstest.Files{
 				"index.html": `
 			{%%
@@ -1741,7 +1741,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t",
 		},
 
-		"https://github.com/open2b/scriggo/issues/727 - Function literal (2)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/727 - Function literal (2)": {
 			sources: fstest.Files{
 				"index.html": `
 			{%%
@@ -1757,7 +1757,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t439",
 		},
 
-		"https://github.com/open2b/scriggo/issues/740 - Call of unexported macro declared in imported file": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/740 - Call of unexported macro declared in imported file": {
 			sources: fstest.Files{
 				"index.txt":    `{% import "imported.txt" %}{{ m() }}`,
 				"imported.txt": `{% macro m %}{% end %}`,
@@ -1865,7 +1865,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: "imported2.txt:1:4: syntax error: unexpected raw, expecting declaration statement",
 		},
 
-		"https://github.com/open2b/scriggo/issues/770": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/770": {
 			sources: fstest.Files{
 				"index.txt":    `{% import "imported.txt" %}`,
 				"imported.txt": `{% macro m %}{% end %}{{ m() }}`,
@@ -1873,7 +1873,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: "unexpected {{, expecting declaration statement",
 		},
 
-		"https://github.com/open2b/scriggo/issues/770 (2)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/770 (2)": {
 			sources: fstest.Files{
 				"index.txt":  `{% extends "layout.txt" %}{% macro m %}{% end %}{{ m() }}`,
 				"layout.txt": ``,
@@ -2094,7 +2094,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: `cannot use default expression in this context`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/572 (1)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/572 (1)": {
 			sources: fstest.Files{
 				"index.html":  `{% extends "layout.html" %}`,
 				"layout.html": `{% a = 5 %}`,
@@ -2102,14 +2102,14 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: `layout.html:1:4: undefined: a`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/572 (2)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/572 (2)": {
 			sources: fstest.Files{
 				"index.html": `{% extends "layout.html" %}{% a = 5 %}`,
 			},
 			expectedBuildErr: `index.html:1:31: syntax error: unexpected a, expecting declaration statement`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/768 (1)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/768 (1)": {
 			sources: fstest.Files{
 				"index.html":   `{% _ = render "partial.html" %}`,
 				"partial.html": `{% macro m %}{% _ = page %}{% end %}{{ m() }}`,
@@ -2123,7 +2123,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "",
 		},
 
-		"https://github.com/open2b/scriggo/issues/768 (2)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/768 (2)": {
 			sources: fstest.Files{
 				"index.html":    `{% import "imported.html" %}{% r := M() %}{{ r }}`,
 				"imported.html": `{% macro M %}{% _ = global %}{% end %}`,
@@ -2136,7 +2136,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		"https://github.com/open2b/scriggo/issues/768 (3)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/768 (3)": {
 			sources: fstest.Files{
 				"index.html":    `{% import "imported.html" %}{{ M() }}`,
 				"imported.html": `{% macro M %}{% macro m %}{% _ = global %}{% end %}{{ m() }}{% end %}`,
@@ -2149,7 +2149,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		"https://github.com/open2b/scriggo/issues/768 (4)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/768 (4)": {
 			sources: fstest.Files{
 				"index.html":    `{% import "imported.html" %}{{ M() }}`,
 				"imported.html": `{% macro M %}{% f := func() { _ = global } %}{% f() %}{% end %}`,
@@ -2162,7 +2162,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		"https://github.com/open2b/scriggo/issues/768 (5)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/768 (5)": {
 			sources: fstest.Files{
 				"index.html": `{% import "imported.html" %}{% M() %}`,
 				"imported.html": `{% var M = func() {
@@ -2178,7 +2178,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		"https://github.com/open2b/scriggo/issues/768 (6)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/768 (6)": {
 			sources: fstest.Files{
 				"index.html":    `{% import "imported.html" %}{{ M() }}`,
 				"imported.html": `{% macro M %}{% func() { _ = global }() %}{% end %}`,
@@ -2191,7 +2191,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		"https://github.com/open2b/scriggo/issues/768 (7)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/768 (7)": {
 			sources: fstest.Files{
 				"index.html":   `{{ render "partial.html" }}`,
 				"partial.html": `{% macro m %}{{ page }}{% end %}{{ m() }}`,
@@ -2205,7 +2205,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: `a`,
 		},
 
-		"https://github.com/open2b/scriggo/issues/768 (8)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/768 (8)": {
 			sources: fstest.Files{
 				"index.html":    `{% import "imported.html" %}{{ M() }}`,
 				"imported.html": `{% macro M %}{{ 2 * func() int { return global }() }}{% end %}`,
@@ -2706,7 +2706,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			},
 		},
 
-		"https://github.com/open2b/scriggo/issues/780": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/780": {
 			sources: fstest.Files{
 				"index.html":    `{% extends "extended.html" %}{% macro M %}{% end %}`,
 				"extended.html": `{% show M default 0 %}`,
@@ -2837,7 +2837,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t\n\t\t\t&lt;b&gt;ciao&lt;/b&gt;\n\t\t",
 		},
 
-		// https://github.com/open2b/scriggo/issues/842
+		// https://gitlab.com/haproxy-haptic/scriggo/issues/842
 		"Macro in extending file refers to a type defined in the same file": {
 			sources: fstest.Files{
 				"index.html": `
@@ -2875,7 +2875,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "32",
 		},
 
-		"https://github.com/open2b/scriggo/issues/849": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/849": {
 			sources: fstest.Files{
 				"index.html":    `{% extends "extended.html" %}{% var V = 1 %}`,
 				"extended.html": `{% var V = 2 %}`,
@@ -2883,7 +2883,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: "V redeclared in this block\n\textended.html:<nil>: previous declaration during import . \"index.html\"",
 		},
 
-		"https://github.com/open2b/scriggo/issues/849 (2)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/849 (2)": {
 			sources: fstest.Files{
 				"index.html":    `{% import "imported.html" %}{% var V = 32 %}`,
 				"imported.html": `{% var V = 2 %}`,
@@ -2891,7 +2891,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: "V redeclared in this block\n\tindex.html:1:11: previous declaration during import . \"imported.html\"",
 		},
 
-		"https://github.com/open2b/scriggo/issues/855": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/855": {
 			sources: fstest.Files{
 				"index.html":     `{% import "imported1.html" %}{{ V2 }}`,
 				"imported1.html": `{% import "imported2.html" %}`,
@@ -2900,14 +2900,14 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: "index.html:1:33: undefined: V2",
 		},
 
-		"https://github.com/open2b/scriggo/issues/851": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/851": {
 			sources: fstest.Files{
 				"index.html": `{% var x = { "one": 1, "two": 2, "three": 3 } %}`,
 			},
 			expectedBuildErr: "syntax error: unexpected {, expecting expression",
 		},
 
-		"https://github.com/open2b/scriggo/issues/850": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/850": {
 			sources: fstest.Files{
 				"index.txt": `{{ struct{T}{T{true}} }}`,
 			},
@@ -3014,14 +3014,14 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedBuildErr: "file index.html\n\textends extended1.html\n\textends extended2.html\n\textends extended1.html: cycle not allowed",
 		},
 
-		"https://github.com/open2b/scriggo/issues/857": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/857": {
 			sources: fstest.Files{
 				"index.html": `{% import "fmt" for Sprint, Fprint %}{% _ = Sprint %}{% _ = Fprint %}`,
 			},
 			importer: testPackages,
 		},
 
-		"https://github.com/open2b/scriggo/issues/852 (1)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/852 (1)": {
 			sources: fstest.Files{
 				"index.html": `
 				{% import "imported.html" %}
@@ -3034,7 +3034,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t",
 		},
 
-		"https://github.com/open2b/scriggo/issues/852 (2)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/852 (2)": {
 			sources: fstest.Files{
 				"index.html": `
 				{% import pkg "imported.html" %}
@@ -3047,7 +3047,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t",
 		},
 
-		"https://github.com/open2b/scriggo/issues/852 (3)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/852 (3)": {
 			sources: fstest.Files{
 				"index.html": `
 				{% import "imported.html" %}
@@ -3059,7 +3059,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t",
 		},
 
-		"https://github.com/open2b/scriggo/issues/852 (4)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/852 (4)": {
 			sources: fstest.Files{
 				"index.html": `
 				{% import pkg "imported.html" %}
@@ -3071,7 +3071,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t",
 		},
 
-		"https://github.com/open2b/scriggo/issues/852 (5)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/852 (5)": {
 			sources: fstest.Files{
 				"index.html": `
 				{% import . "imported.html" %}
@@ -3084,7 +3084,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t",
 		},
 
-		"https://github.com/open2b/scriggo/issues/852 (6)": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/852 (6)": {
 			sources: fstest.Files{
 				"index.html": `
 				{% import "imported.html" %}
@@ -3101,7 +3101,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "\n\t\t\t",
 		},
 
-		"https://github.com/open2b/scriggo/issues/888": {
+		"https://gitlab.com/haproxy-haptic/scriggo/issues/888": {
 			// The emitter used to emit two Convert instructions for every
 			// conversion in this code before fixing #888.
 			sources: fstest.Files{
@@ -3876,7 +3876,7 @@ var structWithUnexportedFields = &struct {
 }{foo: 100}
 
 // testGetValueCalled is used in a test.
-// See https://github.com/open2b/scriggo/issues/643
+// See https://gitlab.com/haproxy-haptic/scriggo/issues/643
 var testGetValueCalled = false
 
 // testTrue is true if the field Value is true.

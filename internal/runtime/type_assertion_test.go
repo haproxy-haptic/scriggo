@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open2b/scriggo"
-	"github.com/open2b/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo"
+	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
 )
 
 // buildAndRunExpectingPanic is a test helper that builds and runs a program,

@@ -1,4 +1,4 @@
-// skip : option '-race' not supported by mode 'run' https://github.com/open2b/scriggo/issues/417
+// skip : option '-race' not supported by mode 'run' https://gitlab.com/haproxy-haptic/scriggo/issues/417
 
 // +build cgo
 // run -race

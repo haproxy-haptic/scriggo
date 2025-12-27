@@ -1,4 +1,4 @@
-// skip : function body declarations with no body. This test cannot be run. https://github.com/open2b/scriggo/issues/417
+// skip : function body declarations with no body. This test cannot be run. https://gitlab.com/haproxy-haptic/scriggo/issues/417
 
 // errorcheck
 

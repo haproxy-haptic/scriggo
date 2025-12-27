@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 func p(line, column, start, end int) *ast.Position {
@@ -1886,7 +1886,7 @@ func equals(n1, n2 ast.Node, p int) error {
 			if err != nil {
 				return fmt.Errorf("struct type: field %d: %s", i, err)
 			}
-			// https://github.com/open2b/scriggo/issues/61.
+			// https://gitlab.com/haproxy-haptic/scriggo/issues/61.
 		}
 
 	case *ast.TypeDeclaration:

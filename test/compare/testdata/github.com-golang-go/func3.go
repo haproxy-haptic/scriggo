@@ -1,4 +1,4 @@
-// skip : https://github.com/open2b/scriggo/issues/541
+// skip : https://gitlab.com/haproxy-haptic/scriggo/issues/541
 
 // errorcheck
 

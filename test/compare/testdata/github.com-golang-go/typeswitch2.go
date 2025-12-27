@@ -1,4 +1,4 @@
-// skip : require interface definition https://github.com/open2b/scriggo/issues/218
+// skip : require interface definition https://gitlab.com/haproxy-haptic/scriggo/issues/218
 
 // errorcheck
 

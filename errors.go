@@ -7,8 +7,8 @@ package scriggo
 import (
 	"strconv"
 
-	"github.com/open2b/scriggo/internal/compiler"
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/internal/compiler"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // Position is a position in a file.

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // validModulePath reports whether path is a valid module path.

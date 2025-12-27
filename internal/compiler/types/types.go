@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // Types allows to create and manage types and values, as the reflect package

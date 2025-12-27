@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"unicode/utf8"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // parseExpr parses an expression and returns its tree and the last read token

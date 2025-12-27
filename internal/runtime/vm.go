@@ -14,8 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/native"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 const NoVariadicArgs = -1

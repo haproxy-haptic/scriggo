@@ -7,7 +7,7 @@ package types
 import (
 	"reflect"
 
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // PointerTo behaves like reflect.PointerTo except when it is a Scriggo type; in

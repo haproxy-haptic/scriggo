@@ -7,8 +7,8 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/open2b/scriggo/ast"
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // A LimitExceededError is an error returned by the compiler reporting that the

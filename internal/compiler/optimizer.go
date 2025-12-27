@@ -5,7 +5,7 @@
 package compiler
 
 import (
-	"github.com/open2b/scriggo/internal/runtime"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // peepholeOptimize performs peephole optimization on the instruction stream,

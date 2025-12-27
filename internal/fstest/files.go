@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // Files implements a file system that read the files from a map.

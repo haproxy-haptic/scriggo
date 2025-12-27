@@ -1,4 +1,4 @@
-// skip : labels on breakable statements are not full implemented https://github.com/open2b/scriggo/issues/83
+// skip : labels on breakable statements are not full implemented https://gitlab.com/haproxy-haptic/scriggo/issues/83
 
 // run
 

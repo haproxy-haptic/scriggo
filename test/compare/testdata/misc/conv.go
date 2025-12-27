@@ -164,5 +164,5 @@ func main() {
 	assert(float32(if5) == 40, "int8 -> float32")
 
 	// 3.b. Converting a complex type to another complex type.
-	// https://github.com/open2b/scriggo/issues/172.
+	// https://gitlab.com/haproxy-haptic/scriggo/issues/172.
 }

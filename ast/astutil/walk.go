@@ -7,7 +7,7 @@ package astutil
 import (
 	"fmt"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 // Visitor has a Visit method invoked for every node encountered by [Walk].

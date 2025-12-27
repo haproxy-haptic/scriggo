@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/open2b/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
 var cases = map[string]struct {

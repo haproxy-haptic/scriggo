@@ -12,7 +12,7 @@ Any help is appreciated, whether it's code, documentation or spelling correction
 ## Contributor Checklist
 
 1. Create a [GitHub account](https://github.com/signup/free).
-2. [Fork Scriggo](https://github.com/open2b/scriggo/fork).
+2. [Fork Scriggo](https://gitlab.com/haproxy-haptic/scriggo/fork).
 3. Make the changes.
 4. Add tests (if necessary) and run all the tests (see [the section
    below](#testing-scriggo))

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open2b/scriggo"
+	"gitlab.com/haproxy-haptic/scriggo"
 
 	"golang.org/x/tools/txtar"
 )
