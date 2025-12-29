@@ -528,6 +528,16 @@ var rendererStmtTests = []struct {
 	// {`{% if _, ok := interface{}([]int{1,2,3}).([]int); ok %}ok{% end %}`, "ok", nil},
 	// {`{% if _, ok := interface{}([]interface{}(a)).([]interface{}); ok %}ok{% end %}`, "ok", Vars{"a": []interface{}{}}},
 	// {`{% if []interface{}(a) != nil %}ok{% end %}`, "ok", Vars{"a": []interface{}{}}}, // TODO (Gianluca): https://gitlab.com/haproxy-haptic/scriggo/issues/63.
+
+	// Macro call with map access should not corrupt outer loop state
+	// Bug: When a macro modifies vm.ok (via map index), outer loops terminate prematurely
+	{`{% macro M(m map[string]string) %}{% for k := range m %}{% var v = m[k] %}{% end %}{% end %}{% var count = 0 %}{% for _, x := range []string{"a", "b", "c"} %}{% M(map[string]string{"k": "v"}) %}{% count++ %}{% end %}{{ count }}`, "3", nil},
+
+	// Nested loops with macro call containing map access
+	{`{% macro M(m map[string]string) %}{% for k := range m %}{% var v = m[k] %}{% end %}{% end %}{% var count = 0 %}{% for _, outer := range []string{"a", "b"} %}{% for _, inner := range []string{"x", "y"} %}{% M(map[string]string{"k": "v"}) %}{% count++ %}{% end %}{% end %}{{ count }}`, "4", nil},
+
+	// Macro with conditional map access (more realistic scenario)
+	{`{% macro M(items []map[string]string) %}{% for _, item := range items %}{% if true %}{% var name = item["name"] %}{% end %}{% end %}{% end %}{% var count = 0 %}{% for _, x := range []string{"a", "b", "c"} %}{% M([]map[string]string{{"name": "test"}}) %}{% count++ %}{% end %}{{ count }}`, "3", nil},
 }
 
 func TestRenderStatements(t *testing.T) {

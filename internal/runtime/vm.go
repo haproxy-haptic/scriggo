@@ -1405,6 +1405,8 @@ type callFrame struct {
 	pc          Addr       // program counter.
 	status      callStatus // status.
 	numVariadic int8       // number of variadic arguments.
+	ok          bool       // saved vm.ok for restoration after call.
+	rangesLen   int        // saved len(vm.ranges) for cleanup after call.
 }
 
 type callable struct {

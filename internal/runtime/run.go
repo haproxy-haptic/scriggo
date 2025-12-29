@@ -350,7 +350,7 @@ func (vm *VM) runRecoverable() (err error) {
 // executeMacro sets up and executes a macro function.
 // The format parameter specifies the expected output format (or ReturnString for string return).
 func (vm *VM) executeMacro(fn *Function, format int8) {
-	call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc + 1}
+	call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges)}
 	off := vm.fn.Body[vm.pc]
 	vm.fp[0] += Addr(off.Op)
 	if vm.fp[0]+Addr(fn.NumReg[0]) > vm.st[0] {
@@ -563,7 +563,7 @@ mainLoop:
 
 		// Call
 		case OpCallFunc:
-			call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1}
+			call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges)}
 			fn := vm.fn.Functions[uint8(a)]
 			// Profiling: record function call entry.
 			if vm.profiler != nil {
@@ -598,7 +598,7 @@ mainLoop:
 				startNativeGoroutine = false
 				vm.pc++
 			} else {
-				call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1}
+				call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges)}
 				fn := f.fn
 				// Profiling: record indirect Scriggo function call entry.
 				if vm.profiler != nil {
@@ -965,7 +965,7 @@ mainLoop:
 				vm.fp[3] + Addr(off.C),
 			}
 			vm.swapStack(&vm.fp, &fp, StackShift{int8(arg.Op), arg.A, arg.B, arg.C})
-			vm.calls = append(vm.calls, callFrame{cl: *cl, renderer: vm.renderer, fp: fp, pc: 0, status: deferred, numVariadic: c})
+			vm.calls = append(vm.calls, callFrame{cl: *cl, renderer: vm.renderer, fp: fp, pc: 0, status: deferred, numVariadic: c, ok: vm.ok, rangesLen: len(vm.ranges)})
 			vm.pc += 2
 
 		// Delete
@@ -2424,6 +2424,8 @@ mainLoop:
 				vm.fn = fn
 				vm.vars = call.cl.vars
 				vm.pc = call.pc
+				vm.ok = call.ok
+				vm.ranges = vm.ranges[:call.rangesLen]
 			} else if !vm.nextCall() {
 				return maxUint32, false
 			}
