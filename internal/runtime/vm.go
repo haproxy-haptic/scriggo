@@ -270,6 +270,7 @@ type VM struct {
 	calls          []callFrame          // call stack frame.
 	cases          []reflect.SelectCase // select cases.
 	ranges         []rangeState         // inline range loop state stack.
+	rangesBase     int                  // base index for current function's ranges.
 	panic          *PanicError          // panic.
 	main           bool                 // reports whether this VM is executing the main goroutine.
 	profiler       *profiler            // profiler for execution timing (nil when disabled).
@@ -1072,6 +1073,7 @@ func (vm *VM) nextCall() bool {
 				vm.fn = call.cl.fn
 				vm.vars = call.cl.vars
 				vm.renderer = call.renderer
+				vm.rangesBase = call.rangesLen
 				return true
 			}
 			vm.fp = call.fp
@@ -1407,6 +1409,7 @@ type callFrame struct {
 	numVariadic int8       // number of variadic arguments.
 	ok          bool       // saved vm.ok for restoration after call.
 	rangesLen   int        // saved len(vm.ranges) for cleanup after call.
+	rangesBase  int        // saved vm.rangesBase for restoration after call.
 }
 
 type callable struct {
