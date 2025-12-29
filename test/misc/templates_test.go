@@ -538,6 +538,12 @@ var rendererStmtTests = []struct {
 
 	// Macro with conditional map access (more realistic scenario)
 	{`{% macro M(items []map[string]string) %}{% for _, item := range items %}{% if true %}{% var name = item["name"] %}{% end %}{% end %}{% end %}{% var count = 0 %}{% for _, x := range []string{"a", "b", "c"} %}{% M([]map[string]string{{"name": "test"}}) %}{% count++ %}{% end %}{{ count }}`, "3", nil},
+
+	// Macro with break statement should not affect caller's loops
+	{`{% macro M() %}{% for _, x := range []string{"a", "b"} %}{% if x == "a" %}{% break %}{% end %}{% end %}{% end %}{% var count = 0 %}{% for _, outer := range []string{"1", "2", "3"} %}{% M() %}{% count++ %}{% end %}{{ count }}`, "3", nil},
+
+	// Nested loops calling macro with break
+	{`{% macro M() %}{% for _, x := range []string{"a", "b"} %}{% if x == "a" %}{% break %}{% end %}{% end %}{% end %}{% var count = 0 %}{% for _, a := range []string{"1", "2"} %}{% for _, b := range []string{"x", "y"} %}{% M() %}{% count++ %}{% end %}{% end %}{{ count }}`, "4", nil},
 }
 
 func TestRenderStatements(t *testing.T) {

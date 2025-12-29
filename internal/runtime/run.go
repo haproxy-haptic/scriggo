@@ -350,7 +350,7 @@ func (vm *VM) runRecoverable() (err error) {
 // executeMacro sets up and executes a macro function.
 // The format parameter specifies the expected output format (or ReturnString for string return).
 func (vm *VM) executeMacro(fn *Function, format int8) {
-	call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges)}
+	call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges), rangesBase: vm.rangesBase}
 	off := vm.fn.Body[vm.pc]
 	vm.fp[0] += Addr(off.Op)
 	if vm.fp[0]+Addr(fn.NumReg[0]) > vm.st[0] {
@@ -383,6 +383,7 @@ func (vm *VM) executeMacro(fn *Function, format int8) {
 	vm.fn = fn
 	vm.vars = vm.env.globals
 	vm.calls = append(vm.calls, call)
+	vm.rangesBase = len(vm.ranges)
 	vm.pc = 0
 }
 
@@ -548,13 +549,17 @@ mainLoop:
 		case OpBreak:
 			targetAddr := Addr(decodeUint24(a, b, c))
 			// Check if we're breaking from an inline range loop
-			// Find the range that this break targets (by matching end address)
-			for i := len(vm.ranges) - 1; i >= 0; i-- {
-				if vm.ranges[i].endAddr == targetAddr {
+			// Find the range that this break targets (by matching range address)
+			// Only search ranges belonging to current function (from rangesBase onward)
+			for i := len(vm.ranges) - 1; i >= vm.rangesBase; i-- {
+				if vm.ranges[i].rangeAddr == targetAddr {
 					// Found the target range - pop all ranges up to and including it
+					// Jump to endAddr which points to the Goto after OpRange (exits the loop)
+					// Set vm.ok = true so that for-else's else block is NOT executed
+					endAddr := vm.ranges[i].endAddr
 					vm.ranges = vm.ranges[:i]
-					vm.ok = false
-					vm.pc = targetAddr
+					vm.ok = true
+					vm.pc = endAddr
 					continue mainLoop
 				}
 			}
@@ -563,7 +568,7 @@ mainLoop:
 
 		// Call
 		case OpCallFunc:
-			call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges)}
+			call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges), rangesBase: vm.rangesBase}
 			fn := vm.fn.Functions[uint8(a)]
 			// Profiling: record function call entry.
 			if vm.profiler != nil {
@@ -589,6 +594,7 @@ mainLoop:
 			vm.fn = fn
 			vm.vars = vm.env.globals
 			vm.calls = append(vm.calls, call)
+			vm.rangesBase = len(vm.ranges)
 			vm.pc = 0
 		case OpCallIndirect:
 			f := vm.general(a).Interface().(*callable)
@@ -598,7 +604,7 @@ mainLoop:
 				startNativeGoroutine = false
 				vm.pc++
 			} else {
-				call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges)}
+				call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges), rangesBase: vm.rangesBase}
 				fn := f.fn
 				// Profiling: record indirect Scriggo function call entry.
 				if vm.profiler != nil {
@@ -643,6 +649,7 @@ mainLoop:
 				vm.fn = fn
 				vm.vars = f.vars
 				vm.calls = append(vm.calls, call)
+				vm.rangesBase = len(vm.ranges)
 				vm.pc = 0
 			}
 		case OpCallMacro:
@@ -720,7 +727,8 @@ mainLoop:
 		case OpContinue:
 			targetAddr := Addr(decodeUint24(a, b, c))
 			// Check if we're in an inline range loop targeting this address
-			if len(vm.ranges) > 0 {
+			// Only check ranges belonging to current function
+			if len(vm.ranges) > vm.rangesBase {
 				rs := &vm.ranges[len(vm.ranges)-1]
 				if rs.rangeAddr == targetAddr {
 					// Advance to next iteration
@@ -965,7 +973,7 @@ mainLoop:
 				vm.fp[3] + Addr(off.C),
 			}
 			vm.swapStack(&vm.fp, &fp, StackShift{int8(arg.Op), arg.A, arg.B, arg.C})
-			vm.calls = append(vm.calls, callFrame{cl: *cl, renderer: vm.renderer, fp: fp, pc: 0, status: deferred, numVariadic: c, ok: vm.ok, rangesLen: len(vm.ranges)})
+			vm.calls = append(vm.calls, callFrame{cl: *cl, renderer: vm.renderer, fp: fp, pc: 0, status: deferred, numVariadic: c, ok: vm.ok, rangesLen: len(vm.ranges), rangesBase: vm.rangesBase})
 			vm.pc += 2
 
 		// Delete
@@ -2426,6 +2434,7 @@ mainLoop:
 				vm.pc = call.pc
 				vm.ok = call.ok
 				vm.ranges = vm.ranges[:call.rangesLen]
+				vm.rangesBase = call.rangesBase
 			} else if !vm.nextCall() {
 				return maxUint32, false
 			}
