@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -59,5 +60,15 @@ func TestPanicToString(t *testing.T) {
 				t.Fatalf("expecting %s, got %s", tt.str, s)
 			}
 		})
+	}
+}
+
+func TestStopError_Error(t *testing.T) {
+	wrapped := errors.New("template stopped")
+	err := stopError{err: wrapped}
+	got := err.Error()
+	want := "stop: template stopped"
+	if got != want {
+		t.Errorf("stopError.Error() = %q, want %q", got, want)
 	}
 }
