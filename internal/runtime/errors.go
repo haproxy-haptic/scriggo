@@ -132,7 +132,7 @@ type stopError struct {
 }
 
 func (err stopError) Error() string {
-	return "stop: " + err.Error()
+	return "stop: " + err.err.Error()
 }
 
 // errIndexOutOfRange returns an index of range runtime error for the
