@@ -56,20 +56,16 @@ type parallelRenderArgs struct {
 }
 
 // parallelRenderArgsPool is a pool for parallelRenderArgs to reduce allocations.
+// Slices are allocated at maxRegisterIndex capacity since captureArgs needs up to that size.
 var parallelRenderArgsPool = sync.Pool{
 	New: func() interface{} {
 		return &parallelRenderArgs{
-			ints:     make([]int64, 0, 32),
-			floats:   make([]float64, 0, 32),
-			strings:  make([]string, 0, 32),
-			generals: make([]reflect.Value, 0, 32),
+			ints:     make([]int64, 0, maxRegisterIndex),
+			floats:   make([]float64, 0, maxRegisterIndex),
+			strings:  make([]string, 0, maxRegisterIndex),
+			generals: make([]reflect.Value, 0, maxRegisterIndex),
 		}
 	},
-}
-
-// getParallelRenderArgs gets a parallelRenderArgs from the pool.
-func getParallelRenderArgs() *parallelRenderArgs {
-	return parallelRenderArgsPool.Get().(*parallelRenderArgs)
 }
 
 // putParallelRenderArgs returns a parallelRenderArgs to the pool after resetting it.
@@ -90,35 +86,39 @@ func putParallelRenderArgs(args *parallelRenderArgs) {
 
 // captureArgs extracts arguments from VM registers based on stackShift.
 // Used by OpGoRender and OpGoRenderIndirect to prepare arguments for parallel execution.
-func (vm *VM) captureArgs(stackShift StackShift) parallelRenderArgs {
+// The returned *parallelRenderArgs is from the pool and must be returned via putParallelRenderArgs.
+func (vm *VM) captureArgs(stackShift StackShift) *parallelRenderArgs {
 	for i, shift := range stackShift {
 		if shift < 0 || int(shift) > maxRegisterIndex {
 			panic(vm.newPanic(fmt.Errorf("invalid stack shift %d in register type %d", shift, i)))
 		}
 	}
-	args := parallelRenderArgs{
-		ints:     make([]int64, maxRegisterIndex-int(stackShift[0])),
-		floats:   make([]float64, maxRegisterIndex-int(stackShift[1])),
-		strings:  make([]string, maxRegisterIndex-int(stackShift[2])),
-		generals: make([]reflect.Value, maxRegisterIndex-int(stackShift[3])),
-	}
-	if len(args.ints) > 0 {
+	args := parallelRenderArgsPool.Get().(*parallelRenderArgs)
+	intLen := maxRegisterIndex - int(stackShift[0])
+	floatLen := maxRegisterIndex - int(stackShift[1])
+	stringLen := maxRegisterIndex - int(stackShift[2])
+	generalLen := maxRegisterIndex - int(stackShift[3])
+	args.ints = args.ints[:intLen]
+	args.floats = args.floats[:floatLen]
+	args.strings = args.strings[:stringLen]
+	args.generals = args.generals[:generalLen]
+	if intLen > 0 {
 		copy(args.ints, vm.regs.int[vm.fp[0]+Addr(stackShift[0]):vm.fp[0]+maxRegisterIndex])
 	}
-	if len(args.floats) > 0 {
+	if floatLen > 0 {
 		copy(args.floats, vm.regs.float[vm.fp[1]+Addr(stackShift[1]):vm.fp[1]+maxRegisterIndex])
 	}
-	if len(args.strings) > 0 {
+	if stringLen > 0 {
 		copy(args.strings, vm.regs.string[vm.fp[2]+Addr(stackShift[2]):vm.fp[2]+maxRegisterIndex])
 	}
-	if len(args.generals) > 0 {
+	if generalLen > 0 {
 		copy(args.generals, vm.regs.general[vm.fp[3]+Addr(stackShift[3]):vm.fp[3]+maxRegisterIndex])
 	}
 	return args
 }
 
 // copyToVM copies captured arguments to a child VM's registers.
-func (args parallelRenderArgs) copyToVM(nvm *VM) {
+func (args *parallelRenderArgs) copyToVM(nvm *VM) {
 	copy(nvm.regs.int, args.ints)
 	copy(nvm.regs.float, args.floats)
 	copy(nvm.regs.string, args.strings)
@@ -128,7 +128,7 @@ func (args parallelRenderArgs) copyToVM(nvm *VM) {
 // toReflectValues converts captured arguments to []reflect.Value for native function calls.
 // Uses the function type to determine how to interpret each argument.
 // Arguments are consumed in order by type (ints, floats, strings, generals).
-func (args parallelRenderArgs) toReflectValues(fnType reflect.Type) []reflect.Value {
+func (args *parallelRenderArgs) toReflectValues(fnType reflect.Type) []reflect.Value {
 	numArgs := fnType.NumIn()
 	result := make([]reflect.Value, numArgs)
 	intIdx, floatIdx, stringIdx, generalIdx := 0, 0, 0, 0
@@ -211,7 +211,7 @@ func (args parallelRenderArgs) toReflectValues(fnType reflect.Type) []reflect.Va
 
 // runScriggoMacroParallel runs a Scriggo function in a goroutine and sends result to future.
 // This centralizes the VM setup, argument copying, execution, and cleanup.
-func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args parallelRenderArgs,
+func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args *parallelRenderArgs,
 	future *renderFuture, parentEnv *env) {
 	// Capture function info for error reporting before any operations
 	fnName := fn.Name
@@ -232,6 +232,7 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args parallel
 	nvm.pc = 0
 
 	args.copyToVM(nvm)
+	putParallelRenderArgs(args)
 
 	if fn.NumReg[0] > 0 && Addr(fn.NumReg[0]) > nvm.st[0] {
 		nvm.moreIntStack()
@@ -1076,7 +1077,7 @@ mainLoop:
 			stackShift := StackShift{int8(off.Op), off.A, off.B, off.C}
 			args := vm.captureArgs(stackShift)
 
-			vm.renderer.spawnParallelRender(eg, func(fn *Function, args parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
+			vm.renderer.spawnParallelRender(eg, func(fn *Function, args *parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
 				return func() {
 					runScriggoMacroParallel(fn, parentEnv.globals, args, future, parentEnv)
 				}
@@ -1102,6 +1103,7 @@ mainLoop:
 				// Native function path: callable was converted to a native wrapper via callable.Value()
 				nativeFn := f.Native()
 				reflectArgs := args.toReflectValues(nativeFn.value.Type())
+				putParallelRenderArgs(args)
 
 				vm.renderer.spawnParallelRender(eg, func(nativeFn *NativeFunction, args []reflect.Value, future *renderFuture) func() {
 					return func() {
@@ -1113,7 +1115,7 @@ mainLoop:
 				fn := f.fn
 				fnVars := f.vars
 
-				vm.renderer.spawnParallelRender(eg, func(fn *Function, fnVars []reflect.Value, args parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
+				vm.renderer.spawnParallelRender(eg, func(fn *Function, fnVars []reflect.Value, args *parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
 					return func() {
 						runScriggoMacroParallel(fn, fnVars, args, future, parentEnv)
 					}

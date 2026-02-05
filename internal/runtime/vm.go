@@ -49,16 +49,36 @@ func getPooledVM(env *env) *VM {
 	return vm
 }
 
+// maxPooledStackSize is the maximum register bank size allowed in pooled VMs.
+// If a VM's stacks grow beyond this (e.g. from deep recursion), they are
+// reallocated at the default stackSize on pool return to prevent memory bloat.
+const maxPooledStackSize = 2 * stackSize
+
 // putPooledVM returns a VM to the pool after resetting it.
 func putPooledVM(vm *VM) {
-	// Clear all string registers to allow GC
-	for i := range vm.regs.string {
-		vm.regs.string[i] = ""
+	// Cap oversized stacks to prevent a single deep-recursion call from
+	// permanently inflating all pooled VMs.
+	if len(vm.regs.int) > maxPooledStackSize {
+		vm.regs.int = make([]int64, stackSize)
 	}
-
-	// Clear all general registers to allow GC
-	for i := range vm.regs.general {
-		vm.regs.general[i] = reflect.Value{}
+	if len(vm.regs.float) > maxPooledStackSize {
+		vm.regs.float = make([]float64, stackSize)
+	}
+	if len(vm.regs.string) > maxPooledStackSize {
+		vm.regs.string = make([]string, stackSize)
+	} else {
+		// Clear string registers to allow GC
+		for i := range vm.regs.string {
+			vm.regs.string[i] = ""
+		}
+	}
+	if len(vm.regs.general) > maxPooledStackSize {
+		vm.regs.general = make([]reflect.Value, stackSize)
+	} else {
+		// Clear general registers to allow GC
+		for i := range vm.regs.general {
+			vm.regs.general[i] = reflect.Value{}
+		}
 	}
 
 	// Clear other references
@@ -725,6 +745,26 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 				go f(vm.string(2), int(vm.int(1)))
 			case func(string, string) bool:
 				go f(vm.string(1), vm.string(2))
+			case func(interface{}) bool:
+				go f(vm.general(1).Interface())
+			case func(interface{}) string:
+				go f(vm.general(1).Interface())
+			case func(interface{}, interface{}) interface{}:
+				go f(vm.general(2).Interface(), vm.general(3).Interface())
+			case func(interface{}, interface{}) bool:
+				go f(vm.general(1).Interface(), vm.general(2).Interface())
+			case func(interface{}, string) string:
+				go f(vm.general(1).Interface(), vm.string(2))
+			case func(interface{}, ...string) interface{}:
+				obj := vm.general(2).Interface()
+				var strs []string
+				if numVariadic > 0 {
+					strs = make([]string, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						strs[j] = vm.string(int8(j + 1))
+					}
+				}
+				go f(obj, strs...)
 			default:
 				panic("unexpected")
 			}
@@ -740,6 +780,27 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 				vm.setString(1, f(vm.string(2), int(vm.int(1))))
 			case func(string, string) bool:
 				vm.setBool(1, f(vm.string(1), vm.string(2)))
+			case func(interface{}) bool:
+				vm.setBool(1, f(vm.general(1).Interface()))
+			case func(interface{}) string:
+				vm.setString(1, f(vm.general(1).Interface()))
+			case func(interface{}, interface{}) interface{}:
+				vm.setGeneral(1, reflect.ValueOf(f(vm.general(2).Interface(), vm.general(3).Interface())))
+			case func(interface{}, interface{}) bool:
+				vm.setBool(1, f(vm.general(1).Interface(), vm.general(2).Interface()))
+			case func(interface{}, string) string:
+				vm.setString(1, f(vm.general(1).Interface(), vm.string(2)))
+			case func(interface{}, ...string) interface{}:
+				obj := vm.general(2).Interface()
+				if numVariadic == NoVariadicArgs || numVariadic == 0 {
+					vm.setGeneral(1, reflect.ValueOf(f(obj)))
+				} else {
+					strs := make([]string, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						strs[j] = vm.string(int8(j + 1))
+					}
+					vm.setGeneral(1, reflect.ValueOf(f(obj, strs...)))
+				}
 			default:
 				panic("unexpected")
 			}
@@ -1124,14 +1185,17 @@ func (vm *VM) startGoroutine() bool {
 	default:
 		return true
 	}
-	nvm := create(vm.env)
+	nvm := getPooledVM(vm.env)
 	vm.pc++
 	off := vm.fn.Body[vm.pc]
 	copy(nvm.regs.int, vm.regs.int[vm.fp[0]+Addr(off.Op):vm.fp[0]+127])
 	copy(nvm.regs.float, vm.regs.float[vm.fp[1]+Addr(off.A):vm.fp[1]+127])
 	copy(nvm.regs.string, vm.regs.string[vm.fp[2]+Addr(off.B):vm.fp[2]+127])
 	copy(nvm.regs.general, vm.regs.general[vm.fp[3]+Addr(off.C):vm.fp[3]+127])
-	go nvm.runFunc(fn, vars)
+	go func() {
+		defer putPooledVM(nvm)
+		nvm.runFunc(fn, vars)
+	}()
 	vm.pc++
 	return false
 }
@@ -1248,6 +1312,12 @@ func NewNativeFunction(pkg, name string, function interface{}) *NativeFunction {
 	case func(string, string) int:
 	case func(string, int) string:
 	case func(string, string) bool:
+	case func(interface{}) bool:
+	case func(interface{}) string:
+	case func(interface{}, interface{}) interface{}:
+	case func(interface{}, interface{}) bool:
+	case func(interface{}, string) string:
+	case func(interface{}, ...string) interface{}:
 	default:
 		fn.reflectCall = true
 		if numIn := typ.NumIn(); numIn > 0 {
