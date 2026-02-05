@@ -225,6 +225,19 @@ func (t *Template) UsedVars() []string {
 	return vars
 }
 
+// ClearVMPool releases pooled VMs to allow garbage collection.
+// Call this after large rendering operations complete to reduce memory usage
+// from parallel rendering spikes (go render statements).
+//
+// The pool will rebuild naturally on the next render operation - there is no
+// persistent impact on performance, just a one-time ~10ms overhead for creating
+// new VMs on the first render after clearing.
+//
+// Thread-safe: can be called from any goroutine.
+func ClearVMPool() {
+	runtime.ClearVMPool()
+}
+
 var emptyInit = map[string]interface{}{}
 
 // initGlobalVariables initializes the global variables and returns their

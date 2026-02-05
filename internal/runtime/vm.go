@@ -112,6 +112,21 @@ func putPooledVM(vm *VM) {
 	vmPool.Put(vm)
 }
 
+// ClearVMPool resets the VM pool, allowing accumulated VMs to be garbage collected.
+// Call this after rendering completes to release memory from high-concurrency spikes.
+// Thread-safe: can be called from any goroutine.
+//
+// When the pool is reset, ongoing Get() operations may use the old pool briefly,
+// which is safe - they'll just create new VMs. New operations will use the new pool.
+// The pool will rebuild naturally on subsequent render operations.
+func ClearVMPool() {
+	vmPool = sync.Pool{
+		New: func() interface{} {
+			return create(nil)
+		},
+	}
+}
+
 // renderFuturePool is a pool of renderFutures for reuse.
 // The channels are buffered with size 1 to allow non-blocking sends from
 // the parallel render goroutine, ensuring the goroutine can complete and
