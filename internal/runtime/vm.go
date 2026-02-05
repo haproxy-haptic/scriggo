@@ -704,6 +704,15 @@ func (vm *VM) Stack(buf []byte, all bool) int {
 	return len(b)
 }
 
+// generalToInterface safely converts a general register value to interface{}.
+// Zero/invalid reflect.Values (representing nil interfaces) return nil.
+func generalToInterface(v reflect.Value) interface{} {
+	if !v.IsValid() {
+		return nil
+	}
+	return v.Interface()
+}
+
 // callNative calls a native function. numVariadic is the number of variadic
 // arguments, shift is the stack shift and asGoroutine reports whether the
 // function must be started as a goroutine.
@@ -746,17 +755,17 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 			case func(string, string) bool:
 				go f(vm.string(1), vm.string(2))
 			case func(interface{}) bool:
-				go f(vm.general(1).Interface())
+				go f(generalToInterface(vm.general(1)))
 			case func(interface{}) string:
-				go f(vm.general(1).Interface())
+				go f(generalToInterface(vm.general(1)))
 			case func(interface{}, interface{}) interface{}:
-				go f(vm.general(2).Interface(), vm.general(3).Interface())
+				go f(generalToInterface(vm.general(2)), generalToInterface(vm.general(3)))
 			case func(interface{}, interface{}) bool:
-				go f(vm.general(1).Interface(), vm.general(2).Interface())
+				go f(generalToInterface(vm.general(1)), generalToInterface(vm.general(2)))
 			case func(interface{}, string) string:
-				go f(vm.general(1).Interface(), vm.string(2))
+				go f(generalToInterface(vm.general(1)), vm.string(2))
 			case func(interface{}, ...string) interface{}:
-				obj := vm.general(2).Interface()
+				obj := generalToInterface(vm.general(2))
 				var strs []string
 				if numVariadic > 0 {
 					strs = make([]string, int(numVariadic))
@@ -781,17 +790,17 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 			case func(string, string) bool:
 				vm.setBool(1, f(vm.string(1), vm.string(2)))
 			case func(interface{}) bool:
-				vm.setBool(1, f(vm.general(1).Interface()))
+				vm.setBool(1, f(generalToInterface(vm.general(1))))
 			case func(interface{}) string:
-				vm.setString(1, f(vm.general(1).Interface()))
+				vm.setString(1, f(generalToInterface(vm.general(1))))
 			case func(interface{}, interface{}) interface{}:
-				vm.setGeneral(1, reflect.ValueOf(f(vm.general(2).Interface(), vm.general(3).Interface())))
+				vm.setGeneral(1, reflect.ValueOf(f(generalToInterface(vm.general(2)), generalToInterface(vm.general(3)))))
 			case func(interface{}, interface{}) bool:
-				vm.setBool(1, f(vm.general(1).Interface(), vm.general(2).Interface()))
+				vm.setBool(1, f(generalToInterface(vm.general(1)), generalToInterface(vm.general(2))))
 			case func(interface{}, string) string:
-				vm.setString(1, f(vm.general(1).Interface(), vm.string(2)))
+				vm.setString(1, f(generalToInterface(vm.general(1)), vm.string(2)))
 			case func(interface{}, ...string) interface{}:
-				obj := vm.general(2).Interface()
+				obj := generalToInterface(vm.general(2))
 				if numVariadic == NoVariadicArgs || numVariadic == 0 {
 					vm.setGeneral(1, reflect.ValueOf(f(obj)))
 				} else {
