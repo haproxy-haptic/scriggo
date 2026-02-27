@@ -2033,8 +2033,13 @@ func cutSpaces(first, last *ast.Text) {
 				return
 			}
 		}
-		// Only set if not already trimmed by explicit Jinja2-style markers
-		if last.Cut.Left == 0 {
+		// Only set if not already trimmed by explicit Jinja2-style markers.
+		// Also skip when the preceding text (first) was already explicitly
+		// trimmed by {%- (trimAllTrailing sets Cut.Right > 0). In that case,
+		// the leading newline of last serves as a content separator and must
+		// be preserved — trimAllTrailing already handled the whitespace on
+		// the "before" side of the statement.
+		if last.Cut.Left == 0 && (first == nil || first.Cut.Right == 0) {
 			last.Cut.Left = lastCut
 		}
 	}
