@@ -6,10 +6,12 @@ package compiler
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
 	"gitlab.com/haproxy-haptic/scriggo/ast"
 	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // TestJinja2WhitespaceControl tests the Jinja2-style whitespace control markers.
@@ -463,6 +465,59 @@ func TestWhitespaceControlEmitter(t *testing.T) {
 			_, err := BuildTemplate(fsys, "test.txt", Options{})
 			if err != nil {
 				t.Fatalf("BuildTemplate failed: %v", err)
+			}
+		})
+	}
+}
+
+// TestWhitespaceControlEndToEnd tests whitespace control through the full
+// build + run pipeline, verifying actual rendered output for multi-line
+// templates where cutSpaces and trim markers interact.
+func TestWhitespaceControlEndToEnd(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+		want     string
+	}{
+		{
+			name:     "trimRight then statement-only line preserves content newline",
+			template: "line1\n{%- var x = 1 -%}\n{%- if true %}\nline2\n{% end %}\nline3",
+			want:     "line1\nline2\nline3",
+		},
+		{
+			name:     "trimLeft on if with content after",
+			template: "    daemon\n    {%- if true %}\n    nbthread 1\n    {%- end %}\n    default-path origin",
+			want:     "    daemon\n    nbthread 1\n    default-path origin",
+		},
+		{
+			name:     "trimLeft on if with show after",
+			template: "    daemon\n    {%- if true %}\n    nbthread {{ 1 }}\n    {%- end %}\n    default-path origin",
+			want:     "    daemon\n    nbthread 1\n    default-path origin",
+		},
+		{
+			name:     "trimRight and trimLeft combined on var and if",
+			template: "    daemon\n    {%- var x = 1 -%}\n    {%- if x > 0 %}\n    nbthread {{ x }}\n    {%- end %}\n    default-path origin",
+			want:     "    daemon\n    nbthread 1\n    default-path origin",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fsys := fstest.Files{"test.txt": tt.template}
+			code, err := BuildTemplate(fsys, "test.txt", Options{})
+			if err != nil {
+				t.Fatalf("BuildTemplate failed: %v", err)
+			}
+			var buf bytes.Buffer
+			vm := runtime.NewVM()
+			vm.SetRenderer(&buf, nil)
+			err = vm.Run(code.Main, code.TypeOf, make([]reflect.Value, len(code.Globals)))
+			if err != nil {
+				t.Fatalf("Run failed: %v", err)
+			}
+			got := buf.String()
+			if got != tt.want {
+				t.Errorf("template:\n%s\ngot:  %q\nwant: %q", tt.template, got, tt.want)
 			}
 		})
 	}
