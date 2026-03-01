@@ -390,10 +390,21 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 		}
 
 		// Sequential render_glob: emit code for each expanded Render node, concatenating results.
+		// OpConcat operates on string registers, so when the destination register
+		// is in a different bank (e.g. interface{}), we must concatenate in a
+		// temporary string register and convert at the end.
+		direct := canEmitDirectly(reflect.String, dstType.Kind())
+
+		concatReg := reg
+		if !direct {
+			em.fb.enterStack()
+			concatReg = em.fb.newRegister(reflect.String)
+		}
+
 		// Emit first render
 		em.emitNodes([]ast.Node{expr.Renders[0].IR.Import})
 		var k bool
-		reg, k = em._emitExpr(expr.Renders[0].IR.Call, dstType, reg, useGivenReg, allowK)
+		concatReg, k = em._emitExpr(expr.Renders[0].IR.Call, stringType, concatReg, true, allowK)
 
 		// Emit remaining renders and concatenate
 		for i := 1; i < len(expr.Renders); i++ {
@@ -402,8 +413,13 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 			em.fb.enterStack()
 			renderType := em.typ(render.IR.Call)
 			tmp := em.fb.newRegister(renderType.Kind())
-			tmp, _ = em._emitExpr(render.IR.Call, dstType, tmp, true, allowK)
-			em.fb.emitConcat(reg, tmp, reg)
+			tmp, _ = em._emitExpr(render.IR.Call, stringType, tmp, true, allowK)
+			em.fb.emitConcat(concatReg, tmp, concatReg)
+			em.fb.exitStack()
+		}
+
+		if !direct {
+			em.changeRegister(false, concatReg, reg, stringType, dstType)
 			em.fb.exitStack()
 		}
 		return reg, k

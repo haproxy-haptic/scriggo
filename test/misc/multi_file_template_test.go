@@ -3405,6 +3405,23 @@ END`,
 			expectedOut: `AAABBB`,
 		},
 
+		"render_glob with multiple files piped to interface param function": {
+			sources: fstest.Files{
+				"index.txt":      `{{ render_glob "snippets/*.txt" | identity() }}`,
+				"snippets/a.txt": `aaa`,
+				"snippets/b.txt": `bbb`,
+			},
+			expectedOut: `aaabbb`,
+		},
+
+		"render_glob with single file piped to interface param function": {
+			sources: fstest.Files{
+				"index.txt":      `{{ render_glob "snippets/*.txt" | identity() }}`,
+				"snippets/a.txt": `hello`,
+			},
+			expectedOut: `hello`,
+		},
+
 		"render piped through filter": {
 			sources: fstest.Files{
 				"index.txt":   `{{ render "snippet.txt" | capitalize() }}`,
@@ -3967,8 +3984,11 @@ func multiFileTemplateTestGlobals() native.Declarations {
 			return string(unicode.ToUpper(r)) + s[size:]
 		},
 		"toUpper": strings.ToUpper,
-		"I":       &I,
-		"C":       8,
+		"identity": func(v interface{}) interface{} {
+			return v
+		},
+		"I": &I,
+		"C": 8,
 	}
 }
 
