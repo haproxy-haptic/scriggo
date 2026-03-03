@@ -29,11 +29,9 @@ import (
 var byteSliceType = reflect.TypeOf([]byte(nil))
 
 // stringBuilderPool is a pool of strings.Builder for reuse in rendering operations.
-var stringBuilderPool = sync.Pool{
-	New: func() interface{} {
-		return &strings.Builder{}
-	},
-}
+var stringBuilderPool = newChanPool(256, func() *strings.Builder {
+	return &strings.Builder{}
+})
 
 // outputSegment represents a segment of output in the renderer.
 // It can either be a literal string or a future waiting for a parallel render.
@@ -227,16 +225,16 @@ func (r *renderer) Text(txt []byte, inURL, isSet bool) error {
 // showInURL shows v in a URL in the given context.
 func (r *renderer) showInURL(env *env, v interface{}, ctx ast.Context) error {
 
-	b := stringBuilderPool.Get().(*strings.Builder)
+	b := stringBuilderPool.get()
 	b.Reset()
 	err := showInHTML(env, b, v)
 	if err != nil {
-		stringBuilderPool.Put(b)
+		stringBuilderPool.put(b)
 		return err
 	}
 
 	s := html.UnescapeString(b.String())
-	stringBuilderPool.Put(b)
+	stringBuilderPool.put(b)
 	out := newStringWriter(r.outputWriter())
 
 	if r.query {
@@ -1174,7 +1172,7 @@ func (r *renderer) addFutureSlot(future *renderFuture) (*errgroup.Group, error) 
 
 	// If this is the first future, we need to start capturing output to pendingBuf
 	if r.pendingBuf == nil {
-		r.pendingBuf = stringBuilderPool.Get().(*strings.Builder)
+		r.pendingBuf = stringBuilderPool.get()
 		r.pendingBuf.Reset()
 	} else if r.pendingBuf.Len() > 0 {
 		// Flush pending output to a literal segment
@@ -1263,7 +1261,7 @@ func (r *renderer) flushWithFutures() error {
 	// Cleanup function to return resources to pools
 	cleanup := func() {
 		if pendingBuf != nil {
-			stringBuilderPool.Put(pendingBuf)
+			stringBuilderPool.put(pendingBuf)
 		}
 		for _, f := range futures {
 			putRenderFuture(f)
