@@ -718,6 +718,17 @@ func generalToInterface(v reflect.Value) interface{} {
 	return v.Interface()
 }
 
+// prepareEnvCallPath sets the call path on the VM's env for native functions
+// that accept native.Env. This must be called before invoking such functions
+// so error messages include the correct source location.
+func (vm *VM) prepareEnvCallPath() {
+	if vm.main {
+		vm.env.mu.Lock()
+		vm.env.callPath = vm.fn.InstructionInfo[vm.pc-1].Path
+		vm.env.mu.Unlock()
+	}
+}
+
 // callNative calls a native function. numVariadic is the number of variadic
 // arguments, shift is the stack shift and asGoroutine reports whether the
 // function must be started as a goroutine.
@@ -779,6 +790,104 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 					}
 				}
 				go f(obj, strs...)
+			// Phase 1: Simple single/multi-param signatures.
+			case func(interface{}) int:
+				go f(generalToInterface(vm.general(1)))
+			case func(interface{}) []string:
+				go f(generalToInterface(vm.general(2)))
+			case func(interface{}) []interface{}:
+				go f(generalToInterface(vm.general(2)))
+			case func(interface{}, interface{}) string:
+				go f(generalToInterface(vm.general(1)), generalToInterface(vm.general(2)))
+			case func(interface{}, interface{}) []string:
+				go f(generalToInterface(vm.general(2)), generalToInterface(vm.general(3)))
+			case func(interface{}, interface{}) []interface{}:
+				go f(generalToInterface(vm.general(2)), generalToInterface(vm.general(3)))
+			case func(interface{}, interface{}, interface{}) string:
+				go f(generalToInterface(vm.general(1)), generalToInterface(vm.general(2)), generalToInterface(vm.general(3)))
+			case func(float64) float64:
+				go f(vm.float(2))
+			case func(int) []int:
+				go f(int(vm.int(1)))
+			case func(interface{}, string) []string:
+				go f(generalToInterface(vm.general(2)), vm.string(1))
+			case func(interface{}, int, int) []interface{}:
+				go f(generalToInterface(vm.general(2)), int(vm.int(1)), int(vm.int(2)))
+			case func(string, string) string:
+				go f(vm.string(2), vm.string(3))
+			// Phase 2: Variadic signatures.
+			case func(...interface{}) string:
+				var args []interface{}
+				if numVariadic > 0 {
+					args = make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 1)))
+					}
+				}
+				go f(args...)
+			case func(string, ...interface{}) string:
+				s := vm.string(2)
+				var args []interface{}
+				if numVariadic > 0 {
+					args = make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 1)))
+					}
+				}
+				go f(s, args...)
+			case func(interface{}, string, ...interface{}) []interface{}:
+				obj := generalToInterface(vm.general(2))
+				attr := vm.string(1)
+				var args []interface{}
+				if numVariadic > 0 {
+					args = make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 3)))
+					}
+				}
+				go f(obj, attr, args...)
+			// Phase 3: Error-return signatures.
+			case func(interface{}) (float64, error):
+				go f(generalToInterface(vm.general(2)))
+			case func(interface{}) (string, error):
+				go f(generalToInterface(vm.general(2)))
+			case func(interface{}, ...interface{}) (string, error):
+				arg := generalToInterface(vm.general(2))
+				var args []interface{}
+				if numVariadic > 0 {
+					args = make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 3)))
+					}
+				}
+				go f(arg, args...)
+			case func([]interface{}, []string) ([]interface{}, error):
+				var items []interface{}
+				if v := vm.general(3); v.IsValid() {
+					items = v.Interface().([]interface{})
+				}
+				var criteria []string
+				if v := vm.general(4); v.IsValid() {
+					criteria = v.Interface().([]string)
+				}
+				go f(items, criteria)
+			// Phase 4: native.Env signatures.
+			case func(native.Env, ...interface{}) bool:
+				vm.prepareEnvCallPath()
+				var args []interface{}
+				if numVariadic > 0 {
+					args = make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 1)))
+					}
+				}
+				go f(vm.env, args...)
+			case func(native.Env, string) string:
+				vm.prepareEnvCallPath()
+				go f(vm.env, vm.string(2))
+			case func(native.Env, interface{}, interface{}) bool:
+				vm.prepareEnvCallPath()
+				go f(vm.env, generalToInterface(vm.general(1)), generalToInterface(vm.general(2)))
 			default:
 				panic("unexpected")
 			}
@@ -815,6 +924,135 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 					}
 					vm.setGeneral(1, reflect.ValueOf(f(obj, strs...)))
 				}
+			// Phase 1: Simple single/multi-param signatures.
+			case func(interface{}) int:
+				vm.setInt(1, int64(f(generalToInterface(vm.general(1)))))
+			case func(interface{}) []string:
+				vm.setGeneral(1, reflect.ValueOf(f(generalToInterface(vm.general(2)))))
+			case func(interface{}) []interface{}:
+				vm.setGeneral(1, reflect.ValueOf(f(generalToInterface(vm.general(2)))))
+			case func(interface{}, interface{}) string:
+				vm.setString(1, f(generalToInterface(vm.general(1)), generalToInterface(vm.general(2))))
+			case func(interface{}, interface{}) []string:
+				vm.setGeneral(1, reflect.ValueOf(f(generalToInterface(vm.general(2)), generalToInterface(vm.general(3)))))
+			case func(interface{}, interface{}) []interface{}:
+				vm.setGeneral(1, reflect.ValueOf(f(generalToInterface(vm.general(2)), generalToInterface(vm.general(3)))))
+			case func(interface{}, interface{}, interface{}) string:
+				vm.setString(1, f(generalToInterface(vm.general(1)), generalToInterface(vm.general(2)), generalToInterface(vm.general(3))))
+			case func(float64) float64:
+				vm.setFloat(1, f(vm.float(2)))
+			case func(int) []int:
+				vm.setGeneral(1, reflect.ValueOf(f(int(vm.int(1)))))
+			case func(interface{}, string) []string:
+				vm.setGeneral(1, reflect.ValueOf(f(generalToInterface(vm.general(2)), vm.string(1))))
+			case func(interface{}, int, int) []interface{}:
+				vm.setGeneral(1, reflect.ValueOf(f(generalToInterface(vm.general(2)), int(vm.int(1)), int(vm.int(2)))))
+			case func(string, string) string:
+				vm.setString(1, f(vm.string(2), vm.string(3)))
+			// Phase 2: Variadic signatures.
+			case func(...interface{}) string:
+				if numVariadic == NoVariadicArgs || numVariadic == 0 {
+					vm.setString(1, f())
+				} else {
+					args := make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 1)))
+					}
+					vm.setString(1, f(args...))
+				}
+			case func(string, ...interface{}) string:
+				s := vm.string(2)
+				if numVariadic == NoVariadicArgs || numVariadic == 0 {
+					vm.setString(1, f(s))
+				} else {
+					args := make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 1)))
+					}
+					vm.setString(1, f(s, args...))
+				}
+			case func(interface{}, string, ...interface{}) []interface{}:
+				obj := generalToInterface(vm.general(2))
+				attr := vm.string(1)
+				if numVariadic == NoVariadicArgs || numVariadic == 0 {
+					vm.setGeneral(1, reflect.ValueOf(f(obj, attr)))
+				} else {
+					args := make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 3)))
+					}
+					vm.setGeneral(1, reflect.ValueOf(f(obj, attr, args...)))
+				}
+			// Phase 3: Error-return signatures.
+			case func(interface{}) (float64, error):
+				result, err := f(generalToInterface(vm.general(2)))
+				vm.setFloat(1, result)
+				if err != nil {
+					vm.setGeneral(1, reflect.ValueOf(err))
+				} else {
+					vm.setGeneral(1, reflect.Value{})
+				}
+			case func(interface{}) (string, error):
+				result, err := f(generalToInterface(vm.general(2)))
+				vm.setString(1, result)
+				if err != nil {
+					vm.setGeneral(1, reflect.ValueOf(err))
+				} else {
+					vm.setGeneral(1, reflect.Value{})
+				}
+			case func(interface{}, ...interface{}) (string, error):
+				arg := generalToInterface(vm.general(2))
+				var s string
+				var err error
+				if numVariadic == NoVariadicArgs || numVariadic == 0 {
+					s, err = f(arg)
+				} else {
+					args := make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 3)))
+					}
+					s, err = f(arg, args...)
+				}
+				vm.setString(1, s)
+				if err != nil {
+					vm.setGeneral(1, reflect.ValueOf(err))
+				} else {
+					vm.setGeneral(1, reflect.Value{})
+				}
+			case func([]interface{}, []string) ([]interface{}, error):
+				var items []interface{}
+				if v := vm.general(3); v.IsValid() {
+					items = v.Interface().([]interface{})
+				}
+				var criteria []string
+				if v := vm.general(4); v.IsValid() {
+					criteria = v.Interface().([]string)
+				}
+				result, err := f(items, criteria)
+				vm.setGeneral(1, reflect.ValueOf(result))
+				if err != nil {
+					vm.setGeneral(2, reflect.ValueOf(err))
+				} else {
+					vm.setGeneral(2, reflect.Value{})
+				}
+			// Phase 4: native.Env signatures.
+			case func(native.Env, ...interface{}) bool:
+				vm.prepareEnvCallPath()
+				if numVariadic == NoVariadicArgs || numVariadic == 0 {
+					vm.setBool(1, f(vm.env))
+				} else {
+					args := make([]interface{}, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						args[j] = generalToInterface(vm.general(int8(j + 1)))
+					}
+					vm.setBool(1, f(vm.env, args...))
+				}
+			case func(native.Env, string) string:
+				vm.prepareEnvCallPath()
+				vm.setString(1, f(vm.env, vm.string(2)))
+			case func(native.Env, interface{}, interface{}) bool:
+				vm.prepareEnvCallPath()
+				vm.setBool(1, f(vm.env, generalToInterface(vm.general(1)), generalToInterface(vm.general(2))))
 			default:
 				panic("unexpected")
 			}
@@ -1321,6 +1559,7 @@ func NewNativeFunction(pkg, name string, function interface{}) *NativeFunction {
 		fn.outOff[kindToType[k]]++
 	}
 	switch fn.function.(type) {
+	// Existing fast-path signatures.
 	case func(string) int:
 	case func(string) string:
 	case func(string, string) int:
@@ -1332,6 +1571,32 @@ func NewNativeFunction(pkg, name string, function interface{}) *NativeFunction {
 	case func(interface{}, interface{}) bool:
 	case func(interface{}, string) string:
 	case func(interface{}, ...string) interface{}:
+	// Phase 1: Simple single/multi-param signatures.
+	case func(interface{}) int:
+	case func(interface{}) []string:
+	case func(interface{}) []interface{}:
+	case func(interface{}, interface{}) string:
+	case func(interface{}, interface{}) []string:
+	case func(interface{}, interface{}) []interface{}:
+	case func(interface{}, interface{}, interface{}) string:
+	case func(float64) float64:
+	case func(int) []int:
+	case func(interface{}, string) []string:
+	case func(interface{}, int, int) []interface{}:
+	case func(string, string) string:
+	// Phase 2: Variadic signatures.
+	case func(...interface{}) string:
+	case func(string, ...interface{}) string:
+	case func(interface{}, string, ...interface{}) []interface{}:
+	// Phase 3: Error-return signatures.
+	case func(interface{}) (float64, error):
+	case func(interface{}) (string, error):
+	case func(interface{}, ...interface{}) (string, error):
+	case func([]interface{}, []string) ([]interface{}, error):
+	// Phase 4: native.Env signatures.
+	case func(native.Env, ...interface{}) bool:
+	case func(native.Env, string) string:
+	case func(native.Env, interface{}, interface{}) bool:
 	default:
 		fn.reflectCall = true
 		if numIn := typ.NumIn(); numIn > 0 {
