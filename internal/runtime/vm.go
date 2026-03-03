@@ -35,15 +35,15 @@ var emptyInterfaceType = reflect.TypeOf(&[]interface{}{nil}[0]).Elem()
 var emptyInterfaceNil = reflect.ValueOf(&[]interface{}{nil}[0]).Elem()
 
 // vmPool is a pool of VMs for reuse in parallel render operations.
-var vmPool = sync.Pool{
-	New: func() interface{} {
-		return create(nil)
-	},
-}
+// Uses chanPool instead of sync.Pool to survive GC eviction cycles.
+// Capacity 128 covers peak usage (~114 VMs per render: 6 sharded ops × 19 shards).
+var vmPool = newChanPool(128, func() *VM {
+	return create(nil)
+})
 
 // getPooledVM gets a VM from the pool and initializes it with the given env.
 func getPooledVM(env *env) *VM {
-	vm := vmPool.Get().(*VM)
+	vm := vmPool.get()
 	vm.env = env
 	vm.envArg = reflect.ValueOf(env)
 	return vm
@@ -109,40 +109,30 @@ func putPooledVM(vm *VM) {
 		vm.ranges = vm.ranges[:0]
 	}
 
-	vmPool.Put(vm)
+	vmPool.put(vm)
 }
 
-// ClearVMPool resets the VM pool, allowing accumulated VMs to be garbage collected.
-// Call this after rendering completes to release memory from high-concurrency spikes.
+// ClearVMPool drains the VM pool, allowing accumulated VMs to be garbage collected.
+// Call this to release memory from high-concurrency spikes.
 // Thread-safe: can be called from any goroutine.
-//
-// When the pool is reset, ongoing Get() operations may use the old pool briefly,
-// which is safe - they'll just create new VMs. New operations will use the new pool.
-// The pool will rebuild naturally on subsequent render operations.
 func ClearVMPool() {
-	vmPool = sync.Pool{
-		New: func() interface{} {
-			return create(nil)
-		},
-	}
+	vmPool.drain()
 }
 
 // renderFuturePool is a pool of renderFutures for reuse.
 // The channels are buffered with size 1 to allow non-blocking sends from
 // the parallel render goroutine, ensuring the goroutine can complete and
 // return to the pool without blocking on the receiver.
-var renderFuturePool = sync.Pool{
-	New: func() interface{} {
-		return &renderFuture{
-			result: make(chan string, 1), // Buffered for non-blocking send
-			err:    make(chan error, 1),  // Buffered for non-blocking send
-		}
-	},
-}
+var renderFuturePool = newChanPool(256, func() *renderFuture {
+	return &renderFuture{
+		result: make(chan string, 1), // Buffered for non-blocking send
+		err:    make(chan error, 1),  // Buffered for non-blocking send
+	}
+})
 
 // getRenderFuture gets a renderFuture from the pool.
 func getRenderFuture() *renderFuture {
-	return renderFuturePool.Get().(*renderFuture)
+	return renderFuturePool.get()
 }
 
 // putRenderFuture returns a renderFuture to the pool after draining channels.
@@ -156,7 +146,7 @@ func putRenderFuture(f *renderFuture) {
 	case <-f.err:
 	default:
 	}
-	renderFuturePool.Put(f)
+	renderFuturePool.put(f)
 }
 
 // Converter is implemented by format converters.

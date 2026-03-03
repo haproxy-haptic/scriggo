@@ -11,7 +11,6 @@ import (
 	"reflect"
 	goruntime "runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"unicode"
 
@@ -57,16 +56,14 @@ type parallelRenderArgs struct {
 
 // parallelRenderArgsPool is a pool for parallelRenderArgs to reduce allocations.
 // Slices are allocated at maxRegisterIndex capacity since captureArgs needs up to that size.
-var parallelRenderArgsPool = sync.Pool{
-	New: func() interface{} {
-		return &parallelRenderArgs{
-			ints:     make([]int64, 0, maxRegisterIndex),
-			floats:   make([]float64, 0, maxRegisterIndex),
-			strings:  make([]string, 0, maxRegisterIndex),
-			generals: make([]reflect.Value, 0, maxRegisterIndex),
-		}
-	},
-}
+var parallelRenderArgsPool = newChanPool(256, func() *parallelRenderArgs {
+	return &parallelRenderArgs{
+		ints:     make([]int64, 0, maxRegisterIndex),
+		floats:   make([]float64, 0, maxRegisterIndex),
+		strings:  make([]string, 0, maxRegisterIndex),
+		generals: make([]reflect.Value, 0, maxRegisterIndex),
+	}
+})
 
 // putParallelRenderArgs returns a parallelRenderArgs to the pool after resetting it.
 func putParallelRenderArgs(args *parallelRenderArgs) {
@@ -81,7 +78,7 @@ func putParallelRenderArgs(args *parallelRenderArgs) {
 	args.floats = args.floats[:0]
 	args.strings = args.strings[:0]
 	args.generals = args.generals[:0]
-	parallelRenderArgsPool.Put(args)
+	parallelRenderArgsPool.put(args)
 }
 
 // captureArgs extracts arguments from VM registers based on stackShift.
@@ -93,7 +90,7 @@ func (vm *VM) captureArgs(stackShift StackShift) *parallelRenderArgs {
 			panic(vm.newPanic(fmt.Errorf("invalid stack shift %d in register type %d", shift, i)))
 		}
 	}
-	args := parallelRenderArgsPool.Get().(*parallelRenderArgs)
+	args := parallelRenderArgsPool.get()
 	intLen := maxRegisterIndex - int(stackShift[0])
 	floatLen := maxRegisterIndex - int(stackShift[1])
 	stringLen := maxRegisterIndex - int(stackShift[2])
@@ -223,7 +220,7 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args *paralle
 		nvm.vars = parentEnv.globals
 	}
 
-	buf := stringBuilderPool.Get().(*strings.Builder)
+	buf := stringBuilderPool.get()
 	buf.Reset()
 	nvm.renderer = newRenderer(buf)
 
@@ -249,7 +246,7 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args *paralle
 
 	defer func() {
 		putPooledVM(nvm)
-		stringBuilderPool.Put(buf)
+		stringBuilderPool.put(buf)
 		if r := recover(); r != nil {
 			if pe, ok := r.(*PanicError); ok {
 				future.err <- pe
