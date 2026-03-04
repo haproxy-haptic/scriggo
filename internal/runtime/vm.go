@@ -1080,8 +1080,14 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 		vm.fp[2] += Addr(fn.outOff[2])
 		vm.fp[3] += Addr(fn.outOff[3])
 
-		// Get a slice of reflect.Value for the arguments.
-		args = fn.argsPool.Get().([]reflect.Value)
+		// Allocate a fresh slice of reflect.Value for the arguments.
+		// Direct allocation is used instead of sync.Pool because the pool
+		// management overhead (pinSlow after GC) exceeds the reuse benefit
+		// for these small slices.
+		args = make([]reflect.Value, nunIn)
+		for i := 0; i < nunIn; i++ {
+			args[i] = reflect.New(typ.In(i)).Elem()
+		}
 
 		// Prepare the arguments.
 		lastNonVariadic := nunIn
@@ -1185,9 +1191,7 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 			vm.fp[r]++
 		}
 
-		if args != nil {
-			fn.argsPool.Put(args)
-		}
+		// args slice is not pooled — it will be collected by GC.
 
 	}
 
@@ -1534,7 +1538,6 @@ type NativeFunction struct {
 	outOff      [4]int8       // offset of out arguments.
 	value       reflect.Value // reflect value.
 	reflectCall bool          // reports whether it can be called only with reflect.
-	argsPool    *sync.Pool    // pool of arguments for reflect.Call and reflect.CallSlice.
 }
 
 // NewNativeFunction returns a new native function given its package and name
@@ -1599,18 +1602,6 @@ func NewNativeFunction(pkg, name string, function interface{}) *NativeFunction {
 	case func(native.Env, interface{}, interface{}) bool:
 	default:
 		fn.reflectCall = true
-		if numIn := typ.NumIn(); numIn > 0 {
-			fn.argsPool = &sync.Pool{
-				New: func() interface{} {
-					args := make([]reflect.Value, numIn)
-					for i := 0; i < numIn; i++ {
-						t := typ.In(i)
-						args[i] = reflect.New(t).Elem()
-					}
-					return args
-				},
-			}
-		}
 	}
 	return fn
 }
