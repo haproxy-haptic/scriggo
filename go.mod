@@ -2,7 +2,7 @@ module gitlab.com/haproxy-haptic/scriggo
 
 go 1.24.0
 
-toolchain go1.25.8
+toolchain go1.26.1
 
 require (
 	github.com/fsnotify/fsnotify v1.9.0
