@@ -3,7 +3,7 @@ stages:
 
 variables:
   # renovate: datasource=docker depName=golang
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.26"
 
 .go-cache:
   variables:
