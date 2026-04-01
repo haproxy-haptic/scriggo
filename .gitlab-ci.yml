@@ -30,7 +30,7 @@ test-integration:
   extends: .go-cache
   script:
     - cd test
-    - go mod download
+    - go mod tidy
     - go test -race -v ./...
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
