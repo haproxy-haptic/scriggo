@@ -11,7 +11,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["^\\.gitlab-ci\\.yml$"],
+      "managerFilePatterns": ["/^\\.gitlab-ci\\.yml$/"],
       "matchStrings": [
         "GO_VERSION:\\s*[\"']?(?<currentValue>[\\d.]+)[\"']?"
       ],
