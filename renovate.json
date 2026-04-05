@@ -20,6 +20,9 @@
       "versioningTemplate": "docker"
     }
   ],
+  "gomod": {
+    "managerFilePatterns": ["go.mod", "test/go.mod"]
+  },
   "packageRules": [
     {
       "matchManagers": ["gomod"],
