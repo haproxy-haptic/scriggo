@@ -20,12 +20,12 @@ The commands are:
     serve       run a web server and serve the template rooted at the current
                 directory
 
-    build       generate static files from the template rooted at the current 
+    build       generate static files from the template rooted at the current
                 directory, writing them to './public' by default
 
     init        initialize an interpreter for Go programs
 
-    import      generate the source for an importer used by Scriggo to import 
+    import      generate the source for an importer used by Scriggo to import
                 a package when an 'import' statement is executed
 
     version     print the scriggo command version
@@ -44,7 +44,7 @@ Additional help topics:
 `
 
 const helpBuild = `
-usage: scriggo build [-o output] [dir]
+usage: scriggo build [-llms url] [-const name=value] [-o output] [dir]
 
 Build processes the template rooted at the current directory and writes the
 generated files to the 'public' directory by default. If the 'public' directory
@@ -53,9 +53,9 @@ specified, the template rooted at that directory is built instead of the current
 directory.
 
 Directories whose names start with an underscore (_), and files or directories
-whose names start with a dot (.), are skipped. Only files with extension '.md'
-and '.html' are built, non-template files, such as CSS and JavaScript files are
-copied as-is. 
+whose names start with a dot (.), are skipped but can still be referenced in
+template files. Only files with extension '.md' and '.html' are built,
+non-template files, such as CSS and JavaScript files, are copied as-is.
 
 For example:
 
@@ -67,16 +67,48 @@ processing Markdown and HTML files and generating their final output in the
 without modification, resulting in a complete static site ready for deployment.
 If 'dist' already exists, the command returns an error.
 
+Markdown is converted to HTML with the Goldmark parser with the options
+html.WithUnsafe, parser.WithAutoHeadingID, extension.GFM and extension.Footnote.
+
+The -llms flag generates two outputs for each template file: an HTML version and
+a Markdown version. Both share the same path but use different file extensions.
+The Markdown output is intended for consumption by LLMs.
+
+This behavior applies only to Markdown template files that extend an HTML
+layout. For example, if the file page.md extends layout.html, the build process
+generates page.html by extending layout.html, and also page.md by extending
+layout.md. The file layout.md must exist in the same directory as layout.html.
+
+The -llms flag requires a base URL as its argument. This URL is used to rewrite
+link destinations in the generated Markdown by prefixing them with the provided
+base URL. Link destinations that are absolute, or consist only of a query string
+or a fragment, are left unchanged. For example:
+
+    scriggo build -llms https://example.com src
+
+builds the template and also generates the Markdown files. In these files,
+relative link destinations are rewritten as absolute ones; for example, the URL
+api/authentication.html becomes https://example.com/api/authentication.html.
+
+The -const name=value flag builds the template with a global constant with the
+given name and value. name should be a Go identifier and value should be a
+string literal, a number literal, true or false. There can be multiple
+name=value pairs.
+
 The -o flag allows specifying an alternative output directory instead of the
 default 'public'.
 
 Examples:
 
-	scriggo build src
+    scriggo build src
 
-	scriggo build -o ../public
+    scriggo build -llms https://docs.example.com/ src
 
-	scriggo build -o /var/www site
+    scriggo build -const 'version=1.12 title="The ancient art of tea"'
+
+    scriggo build -o ../public
+
+    scriggo build -o /var/www site
 
 `
 
@@ -98,7 +130,7 @@ It creates in the directory:
 * a main.go file with the 'main' function
 
 * a Scriggofile named 'Scriggofile' with the instructions to import the
-packages of the standard library
+  packages of the standard library
 
 then it calls the 'go mod tidy' command.
 
@@ -196,46 +228,46 @@ The -o flag writes the result to the named output file or directory, instead to
 the standard output.
 
 Markdown is converted to HTML with the Goldmark parser with the options
-html.WithUnsafe, parser.WithAutoHeadingID and extension.GFM.
+html.WithUnsafe, parser.WithAutoHeadingID, extension.GFM and extension.Footnote.
 
 The run flags are:
 
-	-root dir
-		set the root directory to dir instead of the file's directory.
-	-const name=value
-		run the template file with a global constant with the given name and
-		value. name should be a Go identifier and value should be a string
-		literal, a number literal, true or false. There can be multiple
-		name=value pairs.
-	-format format
-		use the named file format: Text, HTML, Markdown, CSS, JS or JSON.
-	-metrics
-		print metrics about execution time.
-	-S n
-		print the assembly code of the executed file to the standard error.
-		n determines the maximum length, in runes, of disassembled Text
-		instructions:
+    -root dir
+        set the root directory to dir instead of the file's directory.
+    -const name=value
+        run the template file with a global constant with the given name and
+        value. name should be a Go identifier and value should be a string
+        literal, a number literal, true or false. There can be multiple
+        name=value pairs.
+    -format format
+        use the named file format: Text, HTML, Markdown, CSS, JS or JSON.
+    -metrics
+        print metrics about execution time.
+    -S n
+        print the assembly code of the executed file to the standard error.
+        n determines the maximum length, in runes, of disassembled Text
+        instructions:
 
-		n > 0: at most n runes; leading and trailing white space are removed
-		n == 0: no text
-		n < 0: all text
+        n > 0: at most n runes; leading and trailing white space are removed
+        n == 0: no text
+        n < 0: all text
 
 Examples:
 
-	scriggo run index.html
+    scriggo run index.html
 
-	scriggo run -const 'version=1.12 title="The ancient art of tea"' index.md
+    scriggo run -const 'version=1.12 title="The ancient art of tea"' index.md
 
-	scriggo run -root . docs/article.html
+    scriggo run -root . docs/article.html
 
-	scriggo run -format Markdown index
+    scriggo run -format Markdown index
 
-	scriggo run -o ./public ./sources/index.html
+    scriggo run -o ./public ./sources/index.html
 
 `
 
 const helpServe = `
-usage: scriggo serve [-S n] [--metrics] [--disable-livereload] [-http host[:port]]
+usage: scriggo serve [-S n] [--metrics] [--disable-livereload] [-const name=value] [-http [host][:port]]
 
 Serve runs a web server and serves the template rooted at the current
 directory. It is useful to learn Scriggo templates.
@@ -256,7 +288,7 @@ Serving a URL terminating with a slash:
 it renders 'blog/index.html' or 'blog/index.md'.
 
 Markdown is converted to HTML with the Goldmark parser with the options
-html.WithUnsafe, parser.WithAutoHeadingID and extension.GFM.
+html.WithUnsafe, parser.WithAutoHeadingID, extension.GFM and extension.Footnote.
 
 When a file is modified, the server automatically rebuilds templates, and the
 browser reloads the page.
@@ -273,17 +305,24 @@ The --metrics flags prints metrics about execution time.
 The --disable-livereload flag disables LiveReload, preventing automatic page
 reloads in the browser.
 
-The -http flag configures the address the server listens on:
+The -http flag configures the address the server listens on, and at least one of
+the host and port must be provided when using this flag:
 
-	-http host[:port]   listen address (default "localhost:8080")
+    -http [host][:port]   listen address (default "localhost:8080")
+
+The -const name=value flag serves the template with a global constant with the
+given name and value. name should be a Go identifier and value should be a
+string literal, a number literal, true or false. There can be multiple
+name=value pairs.
 
 Examples:
 
-	scriggo serve -http example.com:80
+    scriggo serve
 
-	scriggo serve -http example.com
+    scriggo serve -http example.com:80
 
-	scriggo serve -http :80
+    scriggo serve -const 'version=1.12 title="The ancient art of tea"' -http example.com
+
 `
 
 const helpScriggofile = `
@@ -301,14 +340,14 @@ The format of the Scriggofile is:
 
 A line starting with '#' is a comment, and the instructions are case
 insensitive but for convention are written in uppercase (the syntax recalls
-that used by Dockerfile). 
+that used by Dockerfile).
 
 A Scriggofile must be encoded as UTF-8 and it should be named 'Scriggofile'
 or with the extension '.Scriggofile' as for 'example.Scriggofile'.
 
 The instructions are:
 
-    IMPORT STANDARD LIBRARY 
+    IMPORT STANDARD LIBRARY
 
         Makes the packages in the Go standard library (almost all) importable
         in a program executed by the interpreter.
@@ -317,7 +356,7 @@ The instructions are:
 
     IMPORT <package>
 
-        Make the package with path <package> importable. 
+        Make the package with path <package> importable.
 
     IMPORT <package> INCLUDING <A> <B> <C>
 
@@ -327,7 +366,7 @@ The instructions are:
     IMPORT <package> EXCLUDING <A> <B> <C>
 
         As for 'IMPORT <package>' but the exported names <A>, <B> and <C> are
-        not imported.  
+        not imported.
 
     IMPORT <package> AS <as>
 
@@ -336,7 +375,7 @@ The instructions are:
         forms of IMPORT at the end of the instruction. Is not possible to use
         a path <as> that would conflict with a Go standard library package path,
         even if this latter is not imported in the Scriggofile.
-    
+
     IMPORT <package> AS main
 
         Make the package with path <package> imported as the main package.
@@ -350,12 +389,12 @@ The instructions are:
         will be imported not capitalized. For example a name 'FooFoo' declared
         in the package will be imported in a template file as 'fooFoo'.
 
-    SET VARIABLE <name> 
+    SET VARIABLE <name>
 
         Set the name of the variable to witch is assigned the value of type
         scriggo.PackageImporter with the packages to import. By default the
         name is 'packages'. This instruction is only read by the 'import'
-        command. 
+        command.
 
     SET PACKAGE <name>
 
@@ -369,7 +408,7 @@ The instructions are:
         interpreter. If the GOOS at the time the Scriggofile is parsed is not
         listed in the GOOS instruction, the 'init' and 'import' commands
         fail. If there is no GOOS instruction, all the operating systems are
-        supported. 
+        supported.
 
         To view possible GOOS values run 'go tool dist list'.
 `

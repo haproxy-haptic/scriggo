@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"math"
 	"path"
 	"reflect"
@@ -32,14 +33,14 @@ import (
 func TestMultiFileTemplate(t *testing.T) {
 
 	templateMultiFileCases := map[string]struct {
-		sources          fs.FS                  // can be fstest.Files or fstest.FormatFiles
-		expectedBuildErr string                 // default to empty string (no build error). Mutually exclusive with expectedOut.
-		expectedRunErr   string                 // default to empty string (no run error). Mutually exclusive with expectedOut.
-		expectedOut      string                 // default to "". Mutually exclusive with expectedBuildErr.
-		main             native.Package         // default to nil
-		vars             map[string]interface{} // default to nil
-		entryPoint       string                 // default to "index.html"
-		importer         native.Importer        // default to nil
+		sources          fs.FS           // can be fstest.Files or fstest.FormatFiles
+		expectedBuildErr string          // default to empty string (no build error). Mutually exclusive with expectedOut.
+		expectedRunErr   string          // default to empty string (no run error). Mutually exclusive with expectedOut.
+		expectedOut      string          // default to "". Mutually exclusive with expectedBuildErr.
+		main             native.Package  // default to nil
+		vars             map[string]any  // default to nil
+		entryPoint       string          // default to "index.html"
+		importer         native.Importer // default to nil
 		noParseShow      bool
 	}{
 
@@ -199,7 +200,7 @@ func TestMultiFileTemplate(t *testing.T) {
 					"initMainVar": (*int)(nil),
 				},
 			},
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"initMainVar": 42,
 			},
 			expectedOut: `42`,
@@ -230,7 +231,7 @@ func TestMultiFileTemplate(t *testing.T) {
 					"lowercase": (*func(string) string)(nil),
 				},
 			},
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"lowercase": func(s string) string {
 					return strings.ToLower(s)
 				},
@@ -249,7 +250,7 @@ func TestMultiFileTemplate(t *testing.T) {
 					"b": (*string)(nil),
 				},
 			},
-			vars: map[string]interface{}{
+			vars: map[string]any{
 				"a": "AAA",
 				"b": "BBB",
 			},
@@ -611,7 +612,7 @@ func TestMultiFileTemplate(t *testing.T) {
 					"bytes": native.Package{
 						Name: "bytes",
 						Declarations: native.Declarations{
-							"Buffer": reflect.TypeOf(bytes.Buffer{}),
+							"Buffer": reflect.TypeFor[bytes.Buffer](),
 						},
 					},
 				},
@@ -806,9 +807,9 @@ func TestMultiFileTemplate(t *testing.T) {
 			main: native.Package{
 				Name: "main",
 				Declarations: native.Declarations{
-					"True":          reflect.TypeOf((*testTrue)(nil)).Elem(),
-					"TrueIf42":      reflect.TypeOf((*testTrueIf42)(nil)).Elem(),
-					"NotImplIsTrue": reflect.TypeOf((*testNotImplementIsTrue)(nil)).Elem(),
+					"True":          reflect.TypeFor[testTrue](),
+					"TrueIf42":      reflect.TypeFor[testTrueIf42](),
+					"NotImplIsTrue": reflect.TypeFor[testNotImplementIsTrue](),
 				},
 			},
 			expectedOut: "OK\nOK\nOK\nOK\nOK\nOK\nOK\nOK",
@@ -1679,7 +1680,7 @@ func TestMultiFileTemplate(t *testing.T) {
 			main: native.Package{
 				Name: "main",
 				Declarations: native.Declarations{
-					"T": reflect.TypeOf(struct{ A string }{}),
+					"T": reflect.TypeFor[struct{ A string }](),
 				},
 			},
 			expectedOut: "hello",
@@ -3287,6 +3288,20 @@ func TestMultiFileTemplate(t *testing.T) {
 			expectedOut: "--- start Markdown ---\n**bold**--- end Markdown ---\n",
 		},
 
+		"Show markdown macro in an HTML context": {
+			sources: fstest.Files{
+				"index.html": `{% macro M markdown %}# Hi{% end %}{{ M() }}`,
+			},
+			expectedOut: "--- start Markdown ---\n# Hi--- end Markdown ---\n",
+		},
+
+		"Show markdown macro in an HTML context - Indirect": {
+			sources: fstest.Files{
+				"index.html": `{% macro M markdown %}# Hi{% end %}{% _ = &M %}{{ M() }}`,
+			},
+			expectedOut: "--- start Markdown ---\n# Hi--- end Markdown ---\n",
+		},
+
 		"Recursive macro call (1)": {
 			sources: fstest.Files{
 				"index.html": `{% macro m(i int) %}{{ i }}{% if i > 0 %}{{ m(i - 1) }}{% end if %}{% end macro %}{{ m(5) }}`,
@@ -3841,9 +3856,7 @@ COUNT: {{ len(items) }}
 				}
 			}
 			globals := multiFileTemplateTestGlobals()
-			for k, v := range cas.main.Declarations {
-				globals[k] = v
-			}
+			maps.Copy(globals, cas.main.Declarations)
 			opts := &scriggo.BuildOptions{
 				Globals:              globals,
 				Packages:             cas.importer,
@@ -3967,10 +3980,10 @@ func multiFileTemplateTestGlobals() native.Declarations {
 			}
 			return x
 		},
-		"sprint": func(a ...interface{}) string {
+		"sprint": func(a ...any) string {
 			return fmt.Sprint(a...)
 		},
-		"sprintf": func(format string, a ...interface{}) string {
+		"sprintf": func(format string, a ...any) string {
 			return fmt.Sprintf(format, a...)
 		},
 		"title": func(env native.Env, s string) string {
@@ -4038,10 +4051,10 @@ func goRenderTestPackage() native.Package {
 // the same format used by the builtin print to print to the standard error.
 // The returned function can be used for the PrintFunc option.
 func printFunc(w io.Writer) scriggo.PrintFunc {
-	return func(v interface{}) {
+	return func(v any) {
 		r := reflect.ValueOf(v)
 		switch r.Kind() {
-		case reflect.Invalid, reflect.Array, reflect.Func, reflect.Interface, reflect.Ptr, reflect.Struct:
+		case reflect.Invalid, reflect.Array, reflect.Func, reflect.Interface, reflect.Pointer, reflect.Struct:
 			_, _ = fmt.Fprintf(w, "%#x", reflect.ValueOf(&v).Elem().InterfaceData()[1])
 		case reflect.Bool:
 			_, _ = fmt.Fprintf(w, "%t", r.Bool())

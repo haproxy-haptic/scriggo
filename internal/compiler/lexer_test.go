@@ -346,6 +346,8 @@ var contextTests = map[ast.Context]map[string][]ast.Context{
 		`<script>"{{a}}"{{a}}</script>`:                {ast.ContextText, ast.ContextJSString, ast.ContextJSString, ast.ContextJSString, ast.ContextText, ast.ContextJS, ast.ContextJS, ast.ContextJS, ast.ContextText},
 		`<script>{{a}}'{{a}}'</script>`:                {ast.ContextText, ast.ContextJS, ast.ContextJS, ast.ContextJS, ast.ContextText, ast.ContextJSString, ast.ContextJSString, ast.ContextJSString, ast.ContextText},
 		`<script>'{{a}}'{{a}}</script>`:                {ast.ContextText, ast.ContextJSString, ast.ContextJSString, ast.ContextJSString, ast.ContextText, ast.ContextJS, ast.ContextJS, ast.ContextJS, ast.ContextText},
+		`<script>// it's bad\n{{a}}</script>`:          {ast.ContextText, ast.ContextJS, ast.ContextJS, ast.ContextJS, ast.ContextText},
+		`<script>/* it's bad */{{a}}</script>`:         {ast.ContextText, ast.ContextJS, ast.ContextJS, ast.ContextJS, ast.ContextText},
 		`<script>'</script>'{{a}}</script>`:            {ast.ContextText, ast.ContextHTML, ast.ContextHTML, ast.ContextHTML, ast.ContextText},
 		`<script>"</script>"{{a}}</script>`:            {ast.ContextText, ast.ContextHTML, ast.ContextHTML, ast.ContextHTML, ast.ContextText},
 		`<script async></script>{{ "a" }}`:             {ast.ContextText, ast.ContextHTML, ast.ContextHTML, ast.ContextHTML},
@@ -1049,7 +1051,7 @@ func TestNumbers(t *testing.T) {
 		if tok.typ != test.typ {
 			t.Fatalf("unexpected token %s, expecting %s", tok.typ, test.typ)
 		}
-		for _, expected := range strings.Fields(test.tokens) {
+		for expected := range strings.FieldsSeq(test.tokens) {
 			if tok.typ == tokenEOF {
 				t.Fatalf("unexpected EOF, expecting token %q", expected)
 			}

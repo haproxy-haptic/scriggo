@@ -16,6 +16,7 @@ package compiler
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"reflect"
 	"strings"
 	"unicode"
@@ -70,7 +71,9 @@ type Options struct {
 	// MDConverter converts a Markdown source code to HTML.
 	MDConverter Converter
 
-	TreeTransformer func(*ast.Tree) error
+	UnexpandedTransformer func(*ast.Tree) error
+
+	ExpandedTransformer func(*ast.Tree) error
 
 	// EnableProfiling enables profiling instrumentation in the compiled code.
 	// When true, the runtime will collect timing data for function calls,
@@ -122,14 +125,14 @@ func isHiddenPath(path string) bool {
 // global variable indexing.
 func compileTemplateFile(fsys fs.FS, path string, opts Options, canonicalGlobals []Global) (*Code, error) {
 	// Parse the source code.
-	tree, err := ParseTemplate(fsys, path, opts.NoParseShortShowStmt)
+	tree, err := ParseTemplate(fsys, path, opts.NoParseShortShowStmt, opts.UnexpandedTransformer)
 	if err != nil {
 		return nil, err
 	}
 
-	// Transform the tree if transformer is provided.
-	if opts.TreeTransformer != nil {
-		if err := opts.TreeTransformer(tree); err != nil {
+	// Transform the expanded tree if a transformer is provided.
+	if opts.ExpandedTransformer != nil {
+		if err := opts.ExpandedTransformer(tree); err != nil {
 			return nil, err
 		}
 	}
@@ -171,14 +174,6 @@ func BuildProgram(fsys fs.FS, opts Options) (*Code, error) {
 		return nil, err
 	}
 
-	// Transform the tree.
-	if opts.TreeTransformer != nil {
-		err := opts.TreeTransformer(tree)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	// Type check the tree.
 	checkerOpts := checkerOptions{
 		mod:         programMod,
@@ -191,13 +186,11 @@ func BuildProgram(fsys fs.FS, opts Options) (*Code, error) {
 	}
 	typeInfos := map[ast.Node]*typeInfo{}
 	for _, pkgInfos := range tci {
-		for node, ti := range pkgInfos.TypeInfos {
-			typeInfos[node] = ti
-		}
+		maps.Copy(typeInfos, pkgInfos.TypeInfos)
 	}
 
 	// Emit the code.
-	code, err := emitProgram(tree.Nodes[0].(*ast.Package), typeInfos, tci["main"].IndirectVars)
+	code, err := emitProgram(tree.Nodes[0].(*ast.Package), typeInfos, tci[tree.Path].IndirectVars)
 	if err != nil {
 		return nil, err
 	}
@@ -377,6 +370,6 @@ func getExtends(nodes []ast.Node) (*ast.Extends, bool) {
 //	panic(internalError(format, a...))
 //
 // Keep in sync with types.internalError.
-func internalError(format string, a ...interface{}) string {
+func internalError(format string, a ...any) string {
 	return fmt.Sprintf("scriggo: internal error: "+format, a...)
 }

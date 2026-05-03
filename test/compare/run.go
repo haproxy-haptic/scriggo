@@ -321,8 +321,8 @@ func mustBeOK(exitCode int, stdout, stderr []byte) error {
 	if err != nil {
 		return err
 	}
-	if len(stderr) > 0 {
-		return errors.New("unexpected standard output: " + string(stderr))
+	if len(stdout) > 0 {
+		return fmt.Errorf("unexpected standard output: %s", stdout)
 	}
 	return nil
 }
@@ -379,31 +379,29 @@ func goldenCompare(testPath string, got []byte) error {
 	{
 		expectedLines := strings.Split(string(expected), "\n")
 		gotLines := strings.Split(string(got), "\n")
-		numLines := len(expectedLines)
 		// Find the minimum number of lines.
-		if len(gotLines) < numLines {
-			numLines = len(gotLines)
-		}
-		for i := 0; i < numLines; i++ {
+		numLines := min(len(gotLines), len(expectedLines))
+		for i := range numLines {
 			if expectedLines[i] != gotLines[i] {
 				return fmt.Errorf("difference at line %d\nexpecting:  %q\ngot:        %q.\n\nFull output: \n------------------------\n%s", i+1, expectedLines[i], gotLines[i], got)
 			}
 		}
 		if len(expectedLines) != len(gotLines) {
-			err := fmt.Sprintf("expecting an output of %d lines, got %d lines\n", len(expectedLines), len(gotLines))
+			var err strings.Builder
+			err.WriteString(fmt.Sprintf("expecting an output of %d lines, got %d lines\n", len(expectedLines), len(gotLines)))
 			if len(expectedLines) > len(gotLines) {
-				err += "expected lines (not returned by the test): \n"
+				err.WriteString("expected lines (not returned by the test): \n")
 				for i := len(gotLines); i < len(expectedLines); i++ {
-					err += "> " + expectedLines[i] + "\n"
+					err.WriteString(fmt.Sprintf("> %s\n", expectedLines[i]))
 				}
 			}
 			if len(expectedLines) < len(gotLines) {
-				err += "additional lines returned by the test (not expected): \n"
+				err.WriteString("additional lines returned by the test (not expected): \n")
 				for i := len(expectedLines); i < len(gotLines); i++ {
-					err += "> " + gotLines[i] + "\n"
+					err.WriteString(fmt.Sprintf("> %s\n", gotLines[i]))
 				}
 			}
-			return errors.New(err)
+			return errors.New(err.String())
 		}
 	}
 	// Make an additional compare: any difference not catched by the previous
@@ -457,7 +455,7 @@ func readMode(src []byte, ext string) (string, []string, error) {
 	}
 	switch ext {
 	case ".go":
-		for _, l := range strings.Split(string(src), "\n") {
+		for l := range strings.SplitSeq(string(src), "\n") {
 			l = strings.TrimSpace(l)
 			if l == "" {
 				continue
@@ -477,7 +475,7 @@ func readMode(src []byte, ext string) (string, []string, error) {
 			return s[0], s[1:], nil
 		}
 	default:
-		for _, l := range strings.Split(string(src), "\n") {
+		for l := range strings.SplitSeq(string(src), "\n") {
 			l = strings.TrimSpace(l)
 			if l == "" {
 				continue
@@ -501,7 +499,7 @@ func readMode(src []byte, ext string) (string, []string, error) {
 // runGc runs a Go program using gc and returns its output.
 func runGc(path string) (int, []byte, []byte, error) {
 	if ext := filepath.Ext(path); ext != ".go" {
-		return 0, nil, nil, errors.New("unsupported ext " + ext)
+		return 0, nil, nil, fmt.Errorf("unsupported ext %s", ext)
 	}
 	tmpDir, err := os.MkdirTemp("", "scriggo-gc")
 	if err != nil {
@@ -549,6 +547,27 @@ func runGc(path string) (int, []byte, []byte, error) {
 		}, "\n")
 		err = os.WriteFile(filepath.Join(tmpDir, "testpkg", "go.mod"), []byte(goMod), 0664)
 		if err != nil {
+			return 0, nil, nil, err
+		}
+	}
+	// Run 'go mod tidy' in the 'testpkg' directory inside the temporary
+	// directory.
+	//
+	// This is necessary to update the "go.mod" by adding the "go" directive,
+	// which is required for some Go features (such as using "any" instead of
+	// "interface{}") which would otherwise result in a compilation error.
+	{
+		cmd := exec.Command("go", "mod", "tidy")
+		cmd.Dir = filepath.Join(tmpDir, "testpkg")
+		stdout := bytes.Buffer{}
+		stderr := bytes.Buffer{}
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err = cmd.Run()
+		if err != nil {
+			if ee, ok := err.(*exec.ExitError); ok {
+				return ee.ProcessState.ExitCode(), stdout.Bytes(), stderr.Bytes(), nil
+			}
 			return 0, nil, nil, err
 		}
 	}
@@ -624,9 +643,6 @@ func runGc(path string) (int, []byte, []byte, error) {
 // - "go1.23.0 X:rangefunc" -> "go1.23.0"
 func goBaseVersion(v string) string {
 
-	// IMPORTANT: keep in sync with the function 'goBaseVersion' in
-	// 'cmd/scriggo/util.go'.
-
 	if strings.HasPrefix(v, "devel ") {
 		v = v[len("devel "):]
 		if i := strings.Index(v, "-"); i >= 0 {
@@ -692,11 +708,10 @@ func test(src []byte, mode, filePath string, opts []string, keepTestingOnFail bo
 		if exitCode == 0 {
 			return errors.New("expected panic, got exit code == 0 (success)")
 		}
-		panicBody := bytes.Index(stderr, []byte("\n\ngoroutine "))
-		if panicBody == -1 {
+		panicHead, _, ok := bytes.Cut(stderr, []byte("\n\ngoroutine "))
+		if !ok {
 			return fmt.Errorf("expected panic on stderr, got %q", stderr)
 		}
-		panicHead := stderr[:panicBody]
 		return goldenCompare(filePath, panicHead)
 	case "run":
 		switch ext {
@@ -767,7 +782,7 @@ func unwrapStdout(exitCode int, stdout, stderr []byte) ([]byte, error) {
 		return nil, fmt.Errorf("exit code is %d, should be zero. stderr: %s", exitCode, stderr)
 	}
 	if len(stderr) > 0 {
-		return nil, errors.New("unexpected standard error: " + string(stderr))
+		return nil, fmt.Errorf("unexpected standard error: %s", stderr)
 	}
 	return stdout, nil
 }

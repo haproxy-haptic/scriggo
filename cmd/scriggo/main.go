@@ -59,7 +59,7 @@ func main() {
 	// No command provided.
 	if len(os.Args) == 1 {
 		flag.Usage()
-		exit(0)
+		exit(2)
 		return
 	}
 
@@ -100,7 +100,7 @@ func stderr(lines ...string) {
 
 // exitError prints an error message on stderr with a bold red color and exits
 // with status code 1.
-func exitError(format string, a ...interface{}) {
+func exitError(format string, a ...any) {
 	msg := fmt.Errorf(format, a...)
 	stderr(msg.Error())
 	exit(1)
@@ -174,6 +174,12 @@ var commands = map[string]func(){
 	"build": func() {
 		flag.Usage = commandsHelp["build"]
 		o := flag.String("o", "", "write the resulting files to the named directory instead of './public'.")
+		llms := flag.String("llms", "", "generate per-file HTML and Markdown outputs for LLMs.")
+		var consts []string
+		flag.Func("const", "build with global constants with the given names and values.", func(s string) error {
+			consts = append(consts, s)
+			return nil
+		})
 		flag.Parse()
 		var dir string
 		switch n := len(flag.Args()); n {
@@ -184,7 +190,7 @@ var commands = map[string]func(){
 			flag.Usage()
 			exitError(`bad number of arguments`)
 		}
-		err := build(dir, *o)
+		err := build(dir, *o, *llms, consts)
 		if err != nil {
 			exitError("%s", err)
 		}
@@ -248,10 +254,7 @@ var commands = map[string]func(){
 		asm := -2 // -2: no assembler
 		flag.Visit(func(f *flag.Flag) {
 			if f.Name == "S" {
-				asm = *s
-				if asm < -1 {
-					asm = -1
-				}
+				asm = max(*s, -1)
 			}
 		})
 		var name string
@@ -275,21 +278,23 @@ var commands = map[string]func(){
 		metrics := flag.Bool("metrics", false, "print metrics about file executions.")
 		disableLiveReload := flag.Bool("disable-livereload", false, "disable LiveReload.")
 		httpValue := flag.String("http", "", "set the listen address of the HTTP server.")
+		var consts []string
+		flag.Func("const", "serve with global constants with the given names and values.", func(s string) error {
+			consts = append(consts, s)
+			return nil
+		})
 		flag.Parse()
 		asm := -2 // -2: no assembler
 		httpFlagSet := false
 		flag.Visit(func(f *flag.Flag) {
 			switch f.Name {
 			case "S":
-				asm = *s
-				if asm < -1 {
-					asm = -1
-				}
+				asm = max(*s, -1)
 			case "http":
 				httpFlagSet = true
 			}
 		})
-		err := serve(asm, *metrics, *disableLiveReload, *httpValue, httpFlagSet)
+		err := serve(asm, *metrics, *disableLiveReload, *httpValue, httpFlagSet, consts)
 		if err != nil {
 			exitError("%s", err)
 		}
@@ -337,20 +342,16 @@ var Version string
 
 // version returns the scriggo command version.
 func version() string {
-	// First: read the version from 'runtime/debug', that holds a valid
-	// semantic version if the scriggo command is compiled through 'go
-	// install'.
-	if info, ok := debug.ReadBuildInfo(); ok {
-		if v := info.Main.Version; v != "(devel)" {
-			return v
-		}
-	}
-	// Second: read the version from the package-level variable Version, that
-	// is set passing the ldflags to 'go build'.
+	// If the Version variable has been set, take the version directly from
+	// that.
 	if Version != "" {
 		return Version
 	}
-	// None of the versions above have been set.
+	// Take the module version from 'runtime/debug', if available.
+	if info, ok := debug.ReadBuildInfo(); ok {
+		return info.Main.Version
+	}
+	// Fallback case.
 	return "unknown"
 }
 
@@ -583,7 +584,11 @@ func _init(path string, flags buildFlags) error {
 }
 
 func stdlib() (err error) {
-	for _, path := range stdLibPaths() {
+	v, err := goLanguageVersion()
+	if err != nil {
+		return err
+	}
+	for _, path := range stdLibPaths(v) {
 		_, err = fmt.Println(path)
 		if err != nil {
 			break
@@ -680,15 +685,14 @@ func execGoCommand(dir string, args ...string) (out io.Reader, err error) {
 	return stdout, nil
 }
 
-// stdLibPaths returns a copy of stdlibPaths with the packages for the runtime
-// Go version.
-func stdLibPaths() []string {
-	version := goBaseVersion(runtime.Version())
+// stdLibPaths returns a copy of stdlibPaths containing the packages available
+// in the given Go language version.
+func stdLibPaths(version string) []string {
 	paths := make([]string, 0, len(stdlibPaths))
 	for _, path := range stdlibPaths {
 		switch path {
-		case "structs", "unique":
-			if version != "go1.23" {
+		case "crypto/hpke":
+			if version != "go1.26" {
 				continue
 			}
 		}
@@ -723,13 +727,18 @@ var stdlibPaths = []string{
 	"crypto/ecdsa",
 	"crypto/ed25519",
 	"crypto/elliptic",
+	"crypto/hkdf",
 	"crypto/hmac",
+	"crypto/hpke", // Go version 1.26
 	"crypto/md5",
+	"crypto/mlkem",
+	"crypto/pbkdf2",
 	"crypto/rand",
 	"crypto/rc4",
 	"crypto/rsa",
 	"crypto/sha1",
 	"crypto/sha256",
+	"crypto/sha3",
 	"crypto/sha512",
 	"crypto/subtle",
 	"crypto/tls",
@@ -839,7 +848,7 @@ var stdlibPaths = []string{
 	"sort",
 	"strconv",
 	"strings",
-	"structs", // Go version 1.23
+	"structs",
 	"sync",
 	"sync/atomic",
 	"text/scanner",
@@ -851,5 +860,6 @@ var stdlibPaths = []string{
 	"unicode",
 	"unicode/utf16",
 	"unicode/utf8",
-	"unique", // Go version 1.23
+	"unique",
+	"weak",
 }

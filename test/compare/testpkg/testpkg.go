@@ -169,7 +169,7 @@ func F11(a string, b float64, c []string) (string, error) {
 }
 
 // Fatal calls env.Fatal(v).
-func Fatal(env native.Env, v interface{}) {
+func Fatal(env native.Env, v any) {
 	env.Fatal(v)
 }
 
@@ -259,4 +259,14 @@ type TruePtr struct {
 // IsTrue is a method used in tests.
 func (t *TruePtr) IsTrue() bool {
 	return t.T
+}
+
+type T900 struct{}
+
+func (c T900) M(args ...string) {
+	fmt.Printf("%#v (len %d)\n", args, len(args))
+}
+
+func (c T900) Len(_ string, n ...int) int {
+	return len(n)
 }

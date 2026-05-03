@@ -69,11 +69,11 @@ func (fsys formatFS) Format(name string) (ast.Format, error) {
 
 // formatTypes contains the format types added to the universe block.
 var formatTypes = map[ast.Format]reflect.Type{
-	ast.FormatHTML:     reflect.TypeOf((*native.HTML)(nil)).Elem(),
-	ast.FormatCSS:      reflect.TypeOf((*native.CSS)(nil)).Elem(),
-	ast.FormatJS:       reflect.TypeOf((*native.JS)(nil)).Elem(),
-	ast.FormatJSON:     reflect.TypeOf((*native.JSON)(nil)).Elem(),
-	ast.FormatMarkdown: reflect.TypeOf((*native.Markdown)(nil)).Elem(),
+	ast.FormatHTML:     reflect.TypeFor[native.HTML](),
+	ast.FormatCSS:      reflect.TypeFor[native.CSS](),
+	ast.FormatJS:       reflect.TypeFor[native.JS](),
+	ast.FormatJSON:     reflect.TypeFor[native.JSON](),
+	ast.FormatMarkdown: reflect.TypeFor[native.Markdown](),
 }
 
 // BuildTemplate builds the named template file rooted at the given file
@@ -103,7 +103,8 @@ func BuildTemplate(fsys fs.FS, name string, options *BuildOptions) (*Template, e
 	var conv Converter
 	if options != nil {
 		co.Globals = options.Globals
-		co.TreeTransformer = options.TreeTransformer
+		co.UnexpandedTransformer = options.UnexpandedTransformer
+		co.ExpandedTransformer = options.ExpandedTransformer
 		co.AllowGoStmt = options.AllowGoStmt
 		co.NoParseShortShowStmt = options.NoParseShortShowStmt
 		co.Importer = options.Packages
@@ -146,7 +147,7 @@ func BuildTemplate(fsys fs.FS, name string, options *BuildOptions) (*Template, e
 // If a call to out.Write returns an error, a panic occurs. If the executed
 // code does not recover the panic, Run returns the error returned by
 // out.Write.
-func (t *Template) Run(out io.Writer, vars map[string]interface{}, options *RunOptions) error {
+func (t *Template) Run(out io.Writer, vars map[string]any, options *RunOptions) error {
 	if out == nil {
 		return errors.New("invalid nil out")
 	}
@@ -214,6 +215,11 @@ func (t *Template) Disassemble(n int) []byte {
 	return assemblies["main"]
 }
 
+// Format returns the output format of the template when executed.
+func (t *Template) Format() Format {
+	return Format(t.fn.Format)
+}
+
 // UsedVars returns the names of the global variables used in the template.
 // A variable used in dead code may not be returned as used.
 func (t *Template) UsedVars() []string {
@@ -238,11 +244,11 @@ func ClearVMPool() {
 	runtime.ClearVMPool()
 }
 
-var emptyInit = map[string]interface{}{}
+var emptyInit = map[string]any{}
 
 // initGlobalVariables initializes the global variables and returns their
 // values. It panics if init is not valid.
-func initGlobalVariables(variables []compiler.Global, init map[string]interface{}) []reflect.Value {
+func initGlobalVariables(variables []compiler.Global, init map[string]any) []reflect.Value {
 	n := len(variables)
 	if n == 0 {
 		return nil
@@ -266,7 +272,7 @@ func initGlobalVariables(variables []compiler.Global, init map[string]interface{
 					v := reflect.New(variable.Type).Elem()
 					v.Set(val)
 					values[i] = v
-				} else if typ.Kind() == reflect.Ptr && types.AssignableTo(typ.Elem(), variable.Type) {
+				} else if typ.Kind() == reflect.Pointer && types.AssignableTo(typ.Elem(), variable.Type) {
 					if val.IsNil() {
 						panic(fmt.Sprintf("variable initializer %q cannot be a nil pointer", variable.Name))
 					}
