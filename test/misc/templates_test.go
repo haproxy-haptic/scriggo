@@ -30,10 +30,10 @@ func globals() native.Declarations {
 			}
 			return x
 		},
-		"sprint": func(a ...interface{}) string {
+		"sprint": func(a ...any) string {
 			return fmt.Sprint(a...)
 		},
-		"sprintf": func(format string, a ...interface{}) string {
+		"sprintf": func(format string, a ...any) string {
 			return fmt.Sprintf(format, a...)
 		},
 		"title": func(env native.Env, s string) string {
@@ -567,7 +567,7 @@ func TestRenderStatements(t *testing.T) {
 }
 
 var rendererGlobalsToScope = []struct {
-	globals interface{}
+	globals any
 	res     Vars
 }{
 	{
@@ -579,11 +579,11 @@ var rendererGlobalsToScope = []struct {
 		Vars{"a": 1, "b": "s"},
 	},
 	{
-		reflect.ValueOf(map[string]interface{}{"a": 1, "b": "s"}),
+		reflect.ValueOf(map[string]any{"a": 1, "b": "s"}),
 		Vars{"a": 1, "b": "s"},
 	},
 	{
-		map[string]interface{}{"a": 1, "b": "s"},
+		map[string]any{"a": 1, "b": "s"},
 		Vars{"a": 1, "b": "s"},
 	},
 	{
@@ -595,7 +595,7 @@ var rendererGlobalsToScope = []struct {
 		Vars{"a": 1, "b": 2},
 	},
 	{
-		reflect.ValueOf(map[string]interface{}{"a": 1, "b": "s"}),
+		reflect.ValueOf(map[string]any{"a": 1, "b": "s"}),
 		Vars{"a": 1, "b": "s"},
 	},
 	{
@@ -625,7 +625,7 @@ var rendererGlobalsToScope = []struct {
 }
 
 // refToCopy returns a reference to a copy of v (not to v itself).
-func refToCopy(v interface{}) reflect.Value {
+func refToCopy(v any) reflect.Value {
 	rv := reflect.New(reflect.TypeOf(v))
 	rv.Elem().Set(reflect.ValueOf(v))
 	return rv
@@ -1058,7 +1058,7 @@ func Test_treeTransformer(t *testing.T) {
 	stdout := &strings.Builder{}
 	fsys := fstest.Files{"index.html": `{% w := "hi, " %}{{ w }}world!`}
 	opts := &scriggo.BuildOptions{
-		TreeTransformer: func(tree *ast.Tree) error {
+		ExpandedTransformer: func(tree *ast.Tree) error {
 			assignment := tree.Nodes[0].(*ast.Assignment)
 			assignment.Rhs[0].(*ast.BasicLiteral).Value = `"hello, "`
 			text := tree.Nodes[2].(*ast.Text)
@@ -1113,7 +1113,7 @@ func TestOutError(t *testing.T) {
 	}
 	out := testErrorWriter{errors.New("out error")}
 	panicked := true
-	var rec interface{}
+	var rec any
 	func() {
 		defer func() {
 			rec = recover()
@@ -1142,7 +1142,7 @@ func TestRecoveredOutError(t *testing.T) {
 	}
 	out := testErrorWriter{errors.New("out error")}
 	panicked := true
-	var rec interface{}
+	var rec any
 	func() {
 		defer func() {
 			rec = recover()
@@ -1529,4 +1529,86 @@ func TestRangeOverInterfaceErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLimitExceededErrorInRenderedFile tests whether a 'LimitExceededError'
+// error, occurred within rendered file, returns an error message with file path
+// and position (1:1).
+func TestLimitExceededErrorInRenderedFile(t *testing.T) {
+
+	var renderedHTML strings.Builder
+	for i := range 257 {
+		_, _ = fmt.Fprintf(&renderedHTML, "{{ `string %d` }}", i)
+	}
+	fsys := fstest.Files{
+		"index.html":    `{{ render "rendered.html" }}`,
+		"rendered.html": renderedHTML.String(),
+	}
+	_, err := scriggo.BuildTemplate(fsys, "index.html", nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	be, ok := err.(*scriggo.BuildError)
+	if !ok {
+		t.Fatalf("expected *scriggo.BuildError, got %T", err)
+	}
+	const expected = "rendered.html:1:1: string values count exceeded 256"
+	if be.Error() != expected {
+		t.Fatalf("expected error %q, got %q", expected, be.Error())
+	}
+
+}
+
+// TestUsingLimitExceededError tests whether a 'LimitExceededError' error,
+// occurred within a "using" statement, contains the line and position of the
+// "using" statement that causes the limit to be exceeded.
+func TestUsingLimitExceededError(t *testing.T) {
+
+	t.Run("limit exceeded error with 'using' (identifier)", func(t *testing.T) {
+		var indexHTML strings.Builder
+		indexHTML.WriteString("\n\n\n\t\t\t\t{% show itea; using %}\n")
+		for i := range 257 {
+			_, _ = fmt.Fprintf(&indexHTML, "{{ `string %d` }}", i)
+		}
+		indexHTML.WriteString("{% end using %}")
+		fsys := fstest.Files{
+			"index.html": indexHTML.String(),
+		}
+		_, err := scriggo.BuildTemplate(fsys, "index.html", nil)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		be, ok := err.(*scriggo.BuildError)
+		if !ok {
+			t.Fatalf("expected *scriggo.BuildError, got %T", err)
+		}
+		const expected = "index.html:4:19: string values count exceeded 256"
+		if be.Error() != expected {
+			t.Fatalf("expected error %q, got %q", expected, be.Error())
+		}
+	})
+
+	t.Run("limit exceeded error with 'using' (macro)", func(t *testing.T) {
+		var indexHTML strings.Builder
+		indexHTML.WriteString("\n\n\n\t\t\t\t{% show itea(\"hello\"); using macro(name string) %}\n")
+		for i := range 257 {
+			_, _ = fmt.Fprintf(&indexHTML, "{{ `string %d` }}", i)
+		}
+		indexHTML.WriteString("{% end using %}")
+		fsys := fstest.Files{
+			"index.html": indexHTML.String(),
+		}
+		_, err := scriggo.BuildTemplate(fsys, "index.html", nil)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		be, ok := err.(*scriggo.BuildError)
+		if !ok {
+			t.Fatalf("expected *scriggo.BuildError, got %T", err)
+		}
+		const expected = "index.html:4:28: string values count exceeded 256"
+		if be.Error() != expected {
+			t.Fatalf("expected error %q, got %q", expected, be.Error())
+		}
+	})
 }

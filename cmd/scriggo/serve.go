@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path"
@@ -38,7 +39,7 @@ const (
 //	asm > 0: at most asm runes; leading and trailing white space are removed
 //	asm == 0: no text
 //	asm == -1: all text
-func serve(asm int, metrics bool, disableLiveReload bool, httpValue string, httpFlagSet bool) error {
+func serve(asm int, metrics bool, disableLiveReload bool, httpValue string, httpFlagSet bool, consts []string) error {
 
 	fsys, err := newTemplateFS(".")
 	if err != nil {
@@ -64,6 +65,15 @@ func serve(asm int, metrics bool, disableLiveReload bool, httpValue string, http
 	if metrics {
 		srv.metrics.active = true
 		srv.metrics.header = true
+	}
+	if len(consts) > 0 {
+		srv.consts = make(native.Declarations, len(consts))
+		for _, c := range consts {
+			err := parseConstants(c, srv.consts)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	go func() {
 		for {
@@ -136,6 +146,7 @@ type server struct {
 	mdConverter scriggo.Converter
 	runOptions  *scriggo.RunOptions
 	asm         int
+	consts      native.Declarations
 
 	sync.Mutex
 	templates             map[string]*scriggo.Template
@@ -302,11 +313,11 @@ func (srv *server) serveTemplate(w http.ResponseWriter, r *http.Request) {
 		opts := scriggo.BuildOptions{
 			AllowGoStmt:       true,
 			MarkdownConverter: srv.mdConverter,
-			Globals:           make(native.Declarations, len(globals)+1),
+			Globals:           make(native.Declarations, len(globals)+len(srv.consts)+1),
 		}
-		for n, v := range globals {
-			opts.Globals[n] = v
-		}
+		maps.Copy(opts.Globals, globals)
+		maps.Copy(opts.Globals, srv.consts)
+
 		opts.Globals["filepath"] = strings.TrimSuffix(name, path.Ext(name))
 		template, err = scriggo.BuildTemplate(fs, name, &opts)
 		if err != nil {
@@ -337,7 +348,7 @@ func (srv *server) serveTemplate(w http.ResponseWriter, r *http.Request) {
 		start = time.Now()
 	}
 	b := bytes.Buffer{}
-	vars := map[string]interface{}{"form": builtin.NewFormData(r, 10)}
+	vars := map[string]any{"form": builtin.NewFormData(r, 10)}
 	err = template.Run(&b, vars, srv.runOptions)
 	if err != nil {
 		switch err {
@@ -409,14 +420,14 @@ func (srv *server) serveTemplate(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func (srv *server) log(a ...interface{}) {
+func (srv *server) log(a ...any) {
 	println()
 	fmt.Fprint(os.Stderr, a...)
 	println()
 	srv.metrics.header = true
 }
 
-func (srv *server) logf(format string, a ...interface{}) {
+func (srv *server) logf(format string, a ...any) {
 	println()
 	fmt.Fprintf(os.Stderr, format, a...)
 	println()

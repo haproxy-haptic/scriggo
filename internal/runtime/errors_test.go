@@ -30,7 +30,7 @@ type myString string
 type myStruct struct{}
 
 var tests = []struct {
-	val interface{}
+	val any
 	str string
 }{
 	{myBool(true), "myBool(true)"},

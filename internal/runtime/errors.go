@@ -18,7 +18,7 @@ var errNilPointer = runtimeError("runtime error: invalid memory address or nil p
 // the running program.
 type fatalError struct {
 	env  *env
-	msg  interface{}
+	msg  any
 	pos  Position
 	path string
 }
@@ -193,7 +193,7 @@ func (vm *VM) captureStackFrames() []StackFrame {
 // newPanic returns a new *PanicError with the given error message.
 // Note: vm.pc has already been incremented past the panicked instruction,
 // so we use vm.pc-1 to get the correct position info.
-func (vm *VM) newPanic(msg interface{}) *PanicError {
+func (vm *VM) newPanic(msg any) *PanicError {
 	info := vm.fn.InstructionInfo[vm.pc-1]
 	// Capture stack trace (text format)
 	buf := make([]byte, 4096)
@@ -230,7 +230,7 @@ func (vm *VM) newReflectPanic(msg string, operandReg int8) *PanicError {
 }
 
 // convertPanic converts a panic to an error.
-func (vm *VM) convertPanic(msg interface{}) error {
+func (vm *VM) convertPanic(msg any) error {
 	switch err := msg.(type) {
 	case stopError:
 		return err
@@ -291,7 +291,7 @@ func (vm *VM) convertPanic(msg interface{}) error {
 		}
 	case OpDelete:
 		if err, ok := msg.(runtime.Error); ok {
-			if s := err.Error(); strings.HasPrefix(s, "runtime error: hash of unhashable type ") {
+			if s := err.Error(); strings.HasPrefix(s, "hash of unhashable type: ") {
 				return vm.newPanic(runtimeError(s))
 			}
 		}
@@ -397,7 +397,7 @@ type StackFrame struct {
 }
 
 type PanicError struct {
-	message     interface{}
+	message     any
 	recovered   bool
 	stackTrace  []byte
 	stackFrames []StackFrame
@@ -431,7 +431,7 @@ func (p *PanicError) Error() string {
 }
 
 // Message returns the message.
-func (p *PanicError) Message() interface{} {
+func (p *PanicError) Message() any {
 	return p.message
 }
 
@@ -470,7 +470,7 @@ func (p *PanicError) StackFrames() []StackFrame {
 	return p.stackFrames
 }
 
-func panicToString(msg interface{}) string {
+func panicToString(msg any) string {
 	switch v := msg.(type) {
 	case nil:
 		return "nil"
@@ -556,7 +556,7 @@ func panicToString(msg interface{}) string {
 // missingMethod returns a method in iface and not in typ.
 func missingMethod(typ reflect.Type, iface reflect.Type) string {
 	num := iface.NumMethod()
-	for i := 0; i < num; i++ {
+	for i := range num {
 		mi := iface.Method(i)
 		mt, ok := typ.MethodByName(mi.Name)
 		if !ok {
@@ -567,12 +567,12 @@ func missingMethod(typ reflect.Type, iface reflect.Type) string {
 		if mt.Type.NumIn()-1 != numIn || mt.Type.NumOut() != numOut {
 			return mi.Name
 		}
-		for j := 0; j < numIn; j++ {
+		for j := range numIn {
 			if mt.Type.In(j+1) != mi.Type.In(j) {
 				return mi.Name
 			}
 		}
-		for j := 0; j < numOut; j++ {
+		for j := range numOut {
 			if mt.Type.Out(j) != mi.Type.Out(j) {
 				return mi.Name
 			}

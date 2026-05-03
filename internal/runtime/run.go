@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"reflect"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"unicode"
@@ -451,7 +452,7 @@ mainLoop:
 			case reflect.Slice, reflect.Array:
 				i := int(vm.int(b))
 				vm.setGeneral(c, v.Index(i).Addr())
-			case reflect.Struct, reflect.Ptr:
+			case reflect.Struct, reflect.Pointer:
 				vm.setGeneral(c, vm.fieldByIndex(v, uint8(b)).Addr())
 			}
 
@@ -1155,7 +1156,7 @@ mainLoop:
 				n := x.Len()
 				k := x.Type().Elem().Kind()
 				if k == reflect.Interface {
-					for i := 0; i < n; i++ {
+					for i := range n {
 						if vm.equals(x.Index(i).Elem(), y) {
 							cond = true
 							break
@@ -1163,7 +1164,7 @@ mainLoop:
 					}
 				} else {
 					// Use reflect.Value.Equal() to avoid interface boxing allocation in loop
-					for i := 0; i < n; i++ {
+					for i := range n {
 						if x.Index(i).Equal(y) {
 							cond = true
 							break
@@ -1181,7 +1182,7 @@ mainLoop:
 					cond = x.MapIndex(zero).IsValid()
 				} else {
 					n := x.Len()
-					for i := 0; i < n; i++ {
+					for i := range n {
 						if x.Index(i).IsZero() {
 							cond = true
 							break
@@ -1223,11 +1224,8 @@ mainLoop:
 				x := vm.general(a)
 				if s, ok := x.Interface().([]int); ok {
 					y := int(vm.intk(c, op < 0))
-					for _, e := range s {
-						if e == y {
-							cond = true
-							break
-						}
+					if slices.Contains(s, y) {
+						cond = true
 					}
 				} else {
 					n := x.Len()
@@ -1235,21 +1233,21 @@ mainLoop:
 					switch {
 					case k == reflect.Bool:
 						y := vm.boolk(c, op < 0)
-						for i := 0; i < n; i++ {
+						for i := range n {
 							if cond = x.Index(i).Bool() == y; cond {
 								break
 							}
 						}
 					case reflect.Int <= k && k <= reflect.Int64:
 						y := vm.intk(c, op < 0)
-						for i := 0; i < n; i++ {
+						for i := range n {
 							if cond = x.Index(i).Int() == y; cond {
 								break
 							}
 						}
 					default:
 						y := uint64(vm.intk(c, op < 0))
-						for i := 0; i < n; i++ {
+						for i := range n {
 							if cond = x.Index(i).Uint() == y; cond {
 								break
 							}
@@ -1306,15 +1304,12 @@ mainLoop:
 				x := vm.general(a)
 				y := vm.floatk(c, op < 0)
 				if s, ok := x.Interface().([]float64); ok {
-					for _, e := range s {
-						if e == y {
-							cond = true
-							break
-						}
+					if slices.Contains(s, y) {
+						cond = true
 					}
 				} else {
 					n := x.Len()
-					for i := 0; i < n; i++ {
+					for i := range n {
 						if x.Index(i).Float() == y {
 							cond = true
 							break
@@ -1404,7 +1399,7 @@ mainLoop:
 				n := x.Len()
 				if n > 0 {
 					y := vm.stringk(c, op < 0)
-					for i := 0; i < n; i++ {
+					for i := range n {
 						if x.Index(i).String() == y {
 							cond = true
 							break
@@ -1720,7 +1715,7 @@ mainLoop:
 			if rv.IsValid() {
 				panic(rv.Interface())
 			} else {
-				panic(nil)
+				panic(new(goruntime.PanicNilError))
 			}
 
 		// Print
@@ -1868,7 +1863,7 @@ mainLoop:
 				vm.pc = bodyAddress
 				continue mainLoop
 
-			case []interface{}:
+			case []any:
 				if len(s) == 0 {
 					vm.ok = false
 					vm.pc = endAddress
@@ -1954,7 +1949,7 @@ mainLoop:
 				vm.ok = vm.pc != endAddress
 				vm.pc = endAddress
 
-			case map[string]interface{}:
+			case map[string]any:
 				for i, v := range s {
 					if b != 0 {
 						vm.setString(b, i)
@@ -2122,7 +2117,7 @@ mainLoop:
 					continue mainLoop
 
 				default:
-					if kind == reflect.Ptr {
+					if kind == reflect.Pointer {
 						v = v.Elem()
 					}
 					length := v.Len()
@@ -2414,7 +2409,7 @@ mainLoop:
 						if b == ReturnString {
 							out := vm.renderer.Out().(*strings.Builder)
 							vm.setString(1, out.String())
-						} else if fn.Format == ast.FormatMarkdown && ast.Format(b) == ast.FormatHTML {
+						} else if vm.fn.Format == ast.FormatMarkdown && ast.Format(b) == ast.FormatHTML {
 							out := vm.renderer.Out().(*bytes.Buffer)
 							err := vm.env.conv(out.Bytes(), call.renderer.out)
 							if err != nil {
@@ -2519,7 +2514,7 @@ mainLoop:
 				m[k] = v
 			case map[string]struct{}:
 				m[vm.string(c)] = struct{}{}
-			case map[string]interface{}:
+			case map[string]any:
 				k := vm.string(c)
 				rv := vm.generalk(a, op < 0)
 				if rv.IsValid() {
@@ -2565,7 +2560,7 @@ mainLoop:
 				s[i] = vm.floatk(a, op < 0)
 			case []string:
 				s[i] = vm.stringk(a, op < 0)
-			case []interface{}:
+			case []any:
 				rv := vm.generalk(a, op < 0)
 				if rv.IsValid() {
 					s[i] = rv.Interface()
@@ -2683,7 +2678,7 @@ mainLoop:
 			if st != nil {
 				rv = st.Wrap(rv)
 			}
-			var v interface{}
+			var v any
 			if rv.IsValid() {
 				v = rv.Interface()
 			}
@@ -2985,7 +2980,7 @@ mainLoop:
 				switch rv.Kind() {
 				case reflect.Slice, reflect.Map:
 					zero = rv.Len() == 0
-				case reflect.Ptr:
+				case reflect.Pointer:
 					if rv.Elem().Kind() != reflect.Struct {
 						break
 					}

@@ -109,7 +109,7 @@ func (l *lexer) newline() {
 
 // errorf returns a syntax error at the current lexer position with a message
 // formatted according to the format specifier.
-func (l *lexer) errorf(format string, a ...interface{}) *SyntaxError {
+func (l *lexer) errorf(format string, a ...any) *SyntaxError {
 	pos := ast.Position{
 		Line:   l.line,
 		Column: l.column,
@@ -190,6 +190,14 @@ var jsonLDMimeType = []byte("application/ld+json")
 var cssMimeType = []byte("text/css")
 var moduleType = []byte("module")
 
+type jsCommentState uint8
+
+const (
+	jsCommentNone jsCommentState = iota
+	jsCommentLine
+	jsCommentBlock
+)
+
 // scan scans the text by placing the tokens on the tokens channel. If an
 // error occurs, it puts the error in err, closes the channel and returns.
 func (l *lexer) scan() {
@@ -215,6 +223,7 @@ func (l *lexer) scan() {
 
 		var quote = byte(0)
 		var emittedURL bool
+		var jsComment jsCommentState
 
 		fileContext := l.ctx
 
@@ -501,8 +510,30 @@ func (l *lexer) scan() {
 				if isHTML && c == '<' && isEndScript(l.src[p:]) {
 					// </script>
 					l.ctx = fileContext
+					jsComment = jsCommentNone
 					p += 8
 					l.column += 8
+				} else if jsComment == jsCommentLine {
+					if c == '\n' || c == '\r' {
+						jsComment = jsCommentNone
+					}
+				} else if jsComment == jsCommentBlock {
+					if c == '*' && p+1 < len(l.src) && l.src[p+1] == '/' {
+						jsComment = jsCommentNone
+						p++
+						l.column++
+					}
+				} else if c == '/' && p+1 < len(l.src) {
+					switch l.src[p+1] {
+					case '/':
+						jsComment = jsCommentLine
+						p++
+						l.column++
+					case '*':
+						jsComment = jsCommentBlock
+						p++
+						l.column++
+					}
 				} else if c == '"' || c == '\'' {
 					l.ctx = ast.ContextJSString
 					quote = c
@@ -1618,7 +1649,7 @@ func (l *lexer) lexNumber() error {
 			base = 10
 		}
 		if base < 10 {
-			return l.errorf("%s", "invalid radix point in "+numberBaseName[base]+" literal")
+			return l.errorf("invalid radix point in %s literal", numberBaseName[base])
 		}
 		dot = true
 		p++
@@ -1674,7 +1705,7 @@ DIGITS:
 					base = 10
 				}
 				if base < 10 {
-					return l.errorf("%s", "invalid radix point in "+numberBaseName[base]+" literal")
+					return l.errorf("invalid radix point in %s literal", numberBaseName[base])
 				}
 				dot = true
 				p++
@@ -1725,7 +1756,7 @@ DIGITS:
 	switch l.src[p-1] {
 	case 'x', 'X', 'o', 'O', 'b', 'B':
 		if p == 2 {
-			return l.errorf("%s", numberBaseName[base]+" literal has no digits")
+			return l.errorf("%s literal has no digits", numberBaseName[base])
 		}
 	case '.':
 		if p == 3 && base == 16 {
@@ -1817,7 +1848,7 @@ LOOP:
 				p += 2
 				cols += 2
 			case 'x':
-				for i := 0; i < 2; i++ {
+				for i := range 2 {
 					if p+2+i == len(l.src) {
 						l.src = l.src[p:]
 						return l.errorf("string not terminated")
@@ -1831,7 +1862,7 @@ LOOP:
 				cols += 4
 			case '0', '1', '2', '3', '4', '5', '6', '7':
 				r := rune(c - '0')
-				for i := 0; i < 2; i++ {
+				for i := range 2 {
 					if p+2+i == len(l.src) {
 						l.src = l.src[p:]
 						return l.errorf("string not terminated")

@@ -8,10 +8,13 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
 	"reflect"
+	"strings"
 	"testing"
 
 	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"gitlab.com/haproxy-haptic/scriggo/ast/astutil"
 	"gitlab.com/haproxy-haptic/scriggo/internal/compiler"
 	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
 )
@@ -28,7 +31,7 @@ func TestInitGlobals(t *testing.T) {
 	global := compiler.Global{
 		Pkg:  "p",
 		Name: "a",
-		Type: reflect.TypeOf(0),
+		Type: reflect.TypeFor[int](),
 	}
 	globals = initGlobalVariables([]compiler.Global{global}, nil)
 	g := globals[0]
@@ -44,7 +47,7 @@ func TestInitGlobals(t *testing.T) {
 	global = compiler.Global{
 		Pkg:   "p",
 		Name:  "a",
-		Type:  reflect.TypeOf(n),
+		Type:  reflect.TypeFor[int](),
 		Value: reflect.ValueOf(&n).Elem(),
 	}
 	globals = initGlobalVariables([]compiler.Global{global}, nil)
@@ -62,9 +65,9 @@ func TestInitGlobals(t *testing.T) {
 	global = compiler.Global{
 		Pkg:  "main",
 		Name: "a",
-		Type: reflect.TypeOf(n),
+		Type: reflect.TypeFor[int](),
 	}
-	init := map[string]interface{}{"a": &n}
+	init := map[string]any{"a": &n}
 	globals = initGlobalVariables([]compiler.Global{global}, init)
 	if globals == nil {
 		t.Fatalf("unexpected %v, expecting nil", globals)
@@ -83,9 +86,9 @@ func TestInitGlobals(t *testing.T) {
 	global = compiler.Global{
 		Pkg:  "main",
 		Name: "a",
-		Type: reflect.TypeOf(n),
+		Type: reflect.TypeFor[int](),
 	}
-	init = map[string]interface{}{"a": n}
+	init = map[string]any{"a": n}
 	globals = initGlobalVariables([]compiler.Global{global}, init)
 	if globals == nil {
 		t.Fatalf("unexpected %v, expecting nil", globals)
@@ -120,10 +123,10 @@ func TestInitGlobalsAlreadyInitializedError(t *testing.T) {
 	global := compiler.Global{
 		Pkg:   "main",
 		Name:  "a",
-		Type:  reflect.TypeOf(n),
+		Type:  reflect.TypeFor[int](),
 		Value: reflect.ValueOf(&n).Elem(),
 	}
-	init := map[string]interface{}{"a": 5}
+	init := map[string]any{"a": 5}
 	_ = initGlobalVariables([]compiler.Global{global}, init)
 }
 
@@ -132,9 +135,9 @@ func TestInitGlobalsNilError(t *testing.T) {
 	global := compiler.Global{
 		Pkg:  "main",
 		Name: "a",
-		Type: reflect.TypeOf(0),
+		Type: reflect.TypeFor[int](),
 	}
-	init := map[string]interface{}{"a": nil}
+	init := map[string]any{"a": nil}
 	_ = initGlobalVariables([]compiler.Global{global}, init)
 }
 
@@ -143,9 +146,9 @@ func TestInitGlobalsInvalidTypeError(t *testing.T) {
 	global := compiler.Global{
 		Pkg:  "main",
 		Name: "a",
-		Type: reflect.TypeOf(0),
+		Type: reflect.TypeFor[int](),
 	}
-	init := map[string]interface{}{"a": true}
+	init := map[string]any{"a": true}
 	_ = initGlobalVariables([]compiler.Global{global}, init)
 }
 
@@ -154,9 +157,9 @@ func TestInitGlobalsNilPointerError(t *testing.T) {
 	global := compiler.Global{
 		Pkg:  "main",
 		Name: "a",
-		Type: reflect.TypeOf(0),
+		Type: reflect.TypeFor[int](),
 	}
-	init := map[string]interface{}{"a": (*int)(nil)}
+	init := map[string]any{"a": (*int)(nil)}
 	_ = initGlobalVariables([]compiler.Global{global}, init)
 }
 
@@ -242,7 +245,7 @@ func TestFormatFS(t *testing.T) {
 	for _, format := range []Format{FormatText, FormatHTML, FormatCSS, FormatJS, FormatJSON, FormatMarkdown} {
 		fsys.format = format
 		options := BuildOptions{
-			TreeTransformer: func(tree *ast.Tree) error {
+			ExpandedTransformer: func(tree *ast.Tree) error {
 				if tree.Format != ast.Format(format) {
 					return fmt.Errorf("expected format %s, got %s", format, tree.Format)
 				}
@@ -253,5 +256,118 @@ func TestFormatFS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestTemplateMainFormatWithExtends(t *testing.T) {
+	fsys := fstest.Files{
+		"index.md":    `{% extends "layout.html" %}`,
+		"layout.html": `<h1>Title</h1>`,
+	}
+	template, err := BuildTemplate(fsys, "index.md", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if template.fn.Format != ast.FormatHTML {
+		t.Fatalf("expected main format %s, got %s", ast.FormatHTML, template.fn.Format)
+	}
+}
+
+func TestTemplateFormat(t *testing.T) {
+	tests := map[string]struct {
+		fsys     fs.FS
+		name     string
+		expected Format
+	}{
+		"Text": {
+			fsys:     fstest.Files{"index.txt": `hello`},
+			name:     "index.txt",
+			expected: FormatText,
+		},
+		"HTML": {
+			fsys:     fstest.Files{"index.html": `<h1>hello</h1>`},
+			name:     "index.html",
+			expected: FormatHTML,
+		},
+		"Markdown": {
+			fsys:     fstest.Files{"index.md": `# hello`},
+			name:     "index.md",
+			expected: FormatMarkdown,
+		},
+		"MarkdownExtendsHTML": {
+			fsys: fstest.Files{
+				"index.md":    `{% extends "layout.html" %}`,
+				"layout.html": `<h1>hello</h1>`,
+			},
+			name:     "index.md",
+			expected: FormatHTML,
+		},
+		"MultipleExtendsUseFinalFormat": {
+			fsys: fstest.Files{
+				"index.md":    `{% extends "level1.html" %}`,
+				"level1.html": `{% extends "level2.html" %}`,
+				"level2.html": `<h1>hello</h1>`,
+			},
+			name:     "index.md",
+			expected: FormatHTML,
+		},
+		"FormatFS": {
+			fsys:     testFormatFS{Files: fstest.Files{"index": `hello`}, format: FormatJSON},
+			name:     "index",
+			expected: FormatJSON,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			template, err := BuildTemplate(tc.fsys, tc.name, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := template.Format(); got != tc.expected {
+				t.Fatalf("expected %s, got %s", tc.expected, got)
+			}
+		})
+	}
+}
+
+// TestUnexpandedTransformer ensures the transformer runs before expansion.
+func TestUnexpandedTransformer(t *testing.T) {
+	fsys := fstest.Files{
+		"index.html": `before {{ render "a.html" }} after`,
+		"a.html":     "A",
+		"b.html":     "B",
+	}
+	options := BuildOptions{
+		UnexpandedTransformer: func(tree *ast.Tree) error {
+			if tree.Path != "index.html" {
+				return nil
+			}
+			var render *ast.Render
+			astutil.Inspect(tree, func(node ast.Node) bool {
+				if render == nil {
+					render, _ = node.(*ast.Render)
+				}
+				return render == nil
+			})
+			if render == nil {
+				return fmt.Errorf("expected render node, got none")
+			}
+			render.Path = "b.html"
+			return nil
+		},
+	}
+	template, err := BuildTemplate(fsys, "index.html", &options)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	var out strings.Builder
+	err = template.Run(&out, nil, nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	const expected = "before B after"
+	if out.String() != expected {
+		t.Fatalf("expected %q, got %q", expected, out.String())
 	}
 }

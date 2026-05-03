@@ -12,7 +12,7 @@ import (
 	"io"
 	"math/big"
 	"os"
-	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,7 +35,11 @@ func renderPackages(w io.Writer, dir string, sf *scriggofile, goos string, flags
 	// Import the packages of the Go standard library.
 	for i, imp := range sf.imports {
 		if imp.stdlib {
-			paths := stdLibPaths()
+			v, err := goLanguageVersion()
+			if err != nil {
+				return err
+			}
+			paths := stdLibPaths(v)
 			imports := make([]*importCommand, len(sf.imports)+len(paths)-1)
 			copy(imports[:i], sf.imports[:i])
 			for j, path := range paths {
@@ -235,10 +239,15 @@ func init() {
 }
 `
 
-	pkgOutput := map[string]interface{}{
+	v, err := goLanguageVersion()
+	if err != nil {
+		return err
+	}
+
+	pkgOutput := map[string]any{
 		"GOOS":              goos,
-		"BaseVersion":       goBaseVersion(runtime.Version()),
-		"NextGoVersion":     nextGoVersion(runtime.Version()),
+		"BaseVersion":       v,
+		"NextGoVersion":     nextGoVersion(v),
 		"Name":              sf.pkgName,
 		"ExplicitImports":   explicitImports,
 		"MustImportReflect": mustImportReflect,
@@ -247,7 +256,7 @@ func init() {
 	}
 
 	t := template.Must(template.New("packages").Parse(pkgsSkeleton))
-	err := t.Execute(w, pkgOutput)
+	err = t.Execute(w, pkgOutput)
 
 	return err
 }
@@ -266,20 +275,10 @@ func loadGoPackage(path, dir, goos string, flags buildFlags, including, excludin
 
 	allowed := func(n string) bool {
 		if len(including) > 0 {
-			for _, inc := range including {
-				if inc == n {
-					return true
-				}
-			}
-			return false
+			return slices.Contains(including, n)
 		}
 		if len(excluding) > 0 {
-			for _, exc := range excluding {
-				if exc == n {
-					return false
-				}
-			}
-			return true
+			return !slices.Contains(excluding, n)
 		}
 		return true
 	}
@@ -403,7 +402,7 @@ func loadGoPackage(path, dir, goos string, flags buildFlags, including, excludin
 				decl[v.Name()] = fmt.Sprintf("&%s.%s", pkgBase, v.Name())
 			}
 		case *types.TypeName:
-			decl[v.Name()] = fmt.Sprintf("reflect.TypeOf((*%s.%s)(nil)).Elem()", pkgBase, v.Name())
+			decl[v.Name()] = fmt.Sprintf("reflect.TypeFor[%s.%s]()", pkgBase, v.Name())
 			refToReflect = true
 		}
 	}
