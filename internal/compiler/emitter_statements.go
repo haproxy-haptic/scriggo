@@ -1115,7 +1115,18 @@ func (em *emitter) emitForRange(node *ast.ForRange) {
 		name := vars[0].(*ast.Identifier).Name
 		indexType = em.typ(vars[0])
 		if node.Assignment.Type == ast.AssignmentDeclaration {
-			index = em.fb.newRegister(reflect.Int)
+			// Allocate the key register from the bank that matches the
+			// actual key type. Hardcoding reflect.Int here would only be
+			// correct for slice / array / string ranges (where the key
+			// is the int index); for map ranges the key bank can be
+			// string, float, general, etc. The OpRange runtime writes
+			// the key via the type-appropriate setter (setString /
+			// setFloat / setGeneral / …) using the same register index;
+			// allocating from the int bank for a string key would leave
+			// the runtime overwriting whatever string-bank slot
+			// happened to share that index — typically a previously
+			// declared outer variable.
+			index = em.fb.newRegister(indexType.Kind())
 			if em.varStore.mustBeDeclaredAsIndirect(vars[0].(*ast.Identifier)) {
 				indirectIndex = em.fb.newIndirectRegister()
 				em.fb.emitNew(indexType, -indirectIndex)
