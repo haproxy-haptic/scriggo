@@ -279,6 +279,48 @@ func (tc *typechecker) checkExprOrType(expr ast.Expression) *typeInfo {
 	return ti
 }
 
+// checkCaseClauseType type checks a case clause in a type switch.
+// Unlike checkExprOrType (which is also called from function-call
+// targets and similar VALUE-acceptable contexts), this path is
+// unambiguously a TYPE position — `case X` in a type switch never
+// accepts a value expression for X. It therefore extends typeof's
+// selector-chain-as-type lift to the case clause, so chart-style
+// typed-watched-resource declarations can be referenced directly:
+//
+//	{%- switch r := route.(type) %}
+//	{%- case *resources.httproutes.T %} ... typed access on r ...
+//	{%- case *resources.grpcroutes.T %} ... typed access on r ...
+//	{%- end -%}
+//
+// The lift only fires when the expression is a bare selector or
+// `*`-prefixed selector that resolves to a typed value — the same
+// safety surface checkType uses for type-declaration positions.
+// Other case-expression forms (named types, pointer types, slice
+// types, …) flow through the standard typeof path unchanged.
+func (tc *typechecker) checkCaseClauseType(expr ast.Expression) *typeInfo {
+	ti := tc.typeof(expr, true)
+	if ti.IsType() {
+		tc.compilation.typeInfos[expr] = ti
+		return ti
+	}
+	if ti.Type == nil || ti.Nil() {
+		tc.compilation.typeInfos[expr] = ti
+		return ti
+	}
+	switch e := expr.(type) {
+	case *ast.Selector:
+		ti = &typeInfo{Type: ti.Type, Properties: propertyIsType}
+	case *ast.UnaryOperator:
+		if e.Op == ast.OperatorPointer {
+			if _, isSelector := e.Expr.(*ast.Selector); isSelector {
+				ti = &typeInfo{Type: tc.types.PointerTo(ti.Type), Properties: propertyIsType}
+			}
+		}
+	}
+	tc.compilation.typeInfos[expr] = ti
+	return ti
+}
+
 // typeof type checks an expression or type and returns its type info.
 // typeExpected reports whether a type is expected; it only affects error
 // messages.

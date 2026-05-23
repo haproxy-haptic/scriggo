@@ -586,7 +586,16 @@ nodesLoop:
 				}
 				for i, ex := range cas.Expressions {
 					expr := cas.Expressions[i]
-					t := tc.checkExprOrType(expr)
+					// checkCaseClauseType is checkExprOrType + the
+					// selector-chain-as-type lift: a type-switch case
+					// clause is unambiguously a TYPE position, so
+					// `case *x.T` can lift the inner selector's value
+					// to its static type the same way `var x *x.T`
+					// does in a declaration position. The lift is
+					// gated on the expression being a bare selector
+					// or `*`-prefixed selector resolving to a typed
+					// value, matching checkType's safety surface.
+					t := tc.checkCaseClauseType(expr)
 					if t.Nil() {
 						if positionOfNil != nil {
 							panic(tc.errorf(cas, "multiple nil cases in type switch (first at %s)", positionOfNil))
