@@ -48,6 +48,13 @@ type typeInfo struct {
 	// type in binary operations. Only valid when propertyNeedsInterfaceConversion is set.
 	// The Type field holds the target type, ConvertFromType holds the source interface type.
 	ConvertFromType reflect.Type
+	// AdaptiveReturnType is set when the typeInfo represents a
+	// native.AdaptiveFunc declaration. checkCallExpression invokes it
+	// once per call site with the static types of the call's actual
+	// arguments and uses the returned reflect.Type as the call's
+	// static return type, overriding Impl's declared concrete return.
+	// Nil for non-adaptive functions.
+	AdaptiveReturnType func(argTypes []reflect.Type) (reflect.Type, error)
 	value             any          // value; for packages has type *Package.
 	valueType         reflect.Type // When value is a native type holds the original type of value.
 	replacement       ast.Node     // Replacement node.

@@ -167,3 +167,52 @@ type (
 	// UntypedNumericConst represents an untyped numeric constant.
 	UntypedNumericConst string
 )
+
+// AdaptiveFunc declares a native function whose static return type at
+// each call site is computed by a closure from the static types of the
+// call's arguments. Use this for slice-operation filters that should
+// preserve the element type of their input — without this, the
+// declared concrete return type (typically `[]any` for polymorphic
+// filters) erases useful type information at the call boundary.
+//
+// Behaviour:
+//
+//   - Argument count and concrete assignability are checked against
+//     Impl's reflect.Func signature, exactly as for a plain native
+//     function. The closure does NOT influence argument validation.
+//   - The static return type at each call site is the value returned
+//     by ReturnType(argTypes), where argTypes is the list of the
+//     call's actual argument static types. Impl's declared return
+//     type is ignored for this purpose.
+//   - At render time Impl is invoked with the call's arguments boxed
+//     in `any`. Impl should use reflection to construct a return
+//     value matching the static type ReturnType promised at type-check
+//     time. Returning a mismatched type at runtime triggers a panic
+//     in Scriggo's call-result handling.
+//   - If ReturnType returns a non-nil error, the type-check fails at
+//     the call site with that error as the diagnostic.
+//
+// Example:
+//
+//	// shard_slice — return type matches the input slice's static type.
+//	var ShardSlice = native.AdaptiveFunc{
+//	    Impl: func(items any, shardIndex, totalShards int) any { /* … */ },
+//	    ReturnType: func(argTypes []reflect.Type) (reflect.Type, error) {
+//	        return argTypes[0], nil
+//	    },
+//	}
+type AdaptiveFunc struct {
+	// Impl is the runtime implementation. Must be a reflect.Func.
+	// Argument count and concrete assignability are validated against
+	// its declared signature; its declared return type is replaced by
+	// what ReturnType produces.
+	Impl any
+
+	// ReturnType is the static-type computation. Called once per call
+	// site by the type-checker. argTypes contains the static types
+	// of the call's actual arguments, in order. The returned
+	// reflect.Type becomes the call expression's static return type.
+	// Return (nil, err) to surface err as the call site's compile
+	// diagnostic.
+	ReturnType func(argTypes []reflect.Type) (reflect.Type, error)
+}

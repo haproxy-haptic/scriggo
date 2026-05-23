@@ -2063,6 +2063,34 @@ func (tc *typechecker) checkCallExpression(expr *ast.Call) []*typeInfo {
 		resultTypes[i] = &typeInfo{Type: t.Type.Out(i)}
 	}
 
+	// AdaptiveFunc override: when the callee is a native.AdaptiveFunc
+	// declaration, replace the first declared return type with the
+	// type the closure computes from the call's actual argument
+	// types. The Impl signature's declared return is typically `any`
+	// (a placeholder); the closure overrides it with the per-call
+	// static type — e.g. for shard_slice, `argTypes[0]` so the
+	// result preserves the input slice's element type. Multi-return
+	// adaptive functions aren't supported in this phase (the use
+	// case is single-return filters); the closure result fills
+	// resultTypes[0] only.
+	if t.AdaptiveReturnType != nil && numOut >= 1 {
+		argTypes := make([]reflect.Type, len(args))
+		for i, arg := range args {
+			at := tc.compilation.typeInfos[arg]
+			if at == nil {
+				at = tc.checkExpr(arg)
+			}
+			argTypes[i] = at.Type
+		}
+		adapted, err := t.AdaptiveReturnType(argTypes)
+		if err != nil {
+			panic(tc.errorf(expr, "%s", err))
+		}
+		if adapted != nil {
+			resultTypes[0] = &typeInfo{Type: adapted}
+		}
+	}
+
 	return resultTypes
 }
 
