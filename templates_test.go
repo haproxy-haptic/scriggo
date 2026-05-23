@@ -454,6 +454,103 @@ func TestSelectorChainAsType_RejectsNonType(t *testing.T) {
 	}
 }
 
+// adaptiveTestItem is the per-element shape the AdaptiveFunc tests
+// iterate over. Two fields keep the loop body realistic without
+// growing the global's allocation footprint.
+type adaptiveTestItem struct {
+	Name  string
+	Value int
+}
+
+// TestAdaptiveFunc verifies the native.AdaptiveFunc declaration shape:
+// argument validation goes through the Impl's concrete signature, but
+// the static return type at each call site comes from the closure in
+// ReturnType. This is the engine-side support that downstream
+// schema-driven template engines use to keep filter outputs statically
+// typed — without it, polymorphic filters declared as
+// `func(any, …) []any` erase useful element-type information at the
+// call boundary, forcing downstream template code through reflection.
+//
+// Coverage:
+//
+//   - same-shape return: input slice's static type flows through to
+//     the call expression's static return type, so the loop variable
+//     is statically typed and field access stays on the typed bytecode
+//     path (the shard_slice / sort_by pattern).
+//   - error path: ReturnType's error surfaces as a compile diagnostic
+//     at the call site (the type-system contract).
+func TestAdaptiveFunc(t *testing.T) {
+	// sameShape mimics shard_slice / sort_by: return type matches the
+	// first argument's static type. Impl is identity here — the real
+	// filters partition / sort; the principle is the same: produce a
+	// value of the same static type as the input slice.
+	sameShape := native.AdaptiveFunc{
+		Impl: func(items any) any { return items },
+		ReturnType: func(argTypes []reflect.Type) (reflect.Type, error) {
+			return argTypes[0], nil
+		},
+	}
+
+	// errReturn returns an error from the closure — the type-checker
+	// must surface it as a compile diagnostic at the call site.
+	errReturn := native.AdaptiveFunc{
+		Impl: func(items any) any { return items },
+		ReturnType: func(argTypes []reflect.Type) (reflect.Type, error) {
+			return nil, fmt.Errorf("test: refusing %s", argTypes[0])
+		},
+	}
+
+	t.Run("same-shape return preserves typed slice element type", func(t *testing.T) {
+		// Input is []*adaptiveTestItem. After the adaptive call, the
+		// static return type stays []*adaptiveTestItem, so the loop
+		// variable is *adaptiveTestItem and .Name is a typed field
+		// access (the whole point of the feature).
+		items := []*adaptiveTestItem{{Name: "a", Value: 1}, {Name: "b", Value: 2}}
+		fsys := Files{"index.html": []byte(
+			`{%- for _, it := range sameShape(items) %}{{ it.Name }}={{ it.Value }};{%- end %}`,
+		)}
+		opts := &BuildOptions{
+			Globals: native.Declarations{
+				"items":     &items,
+				"sameShape": sameShape,
+			},
+		}
+		template, err := BuildTemplate(fsys, "index.html", opts)
+		if err != nil {
+			t.Fatalf("template should compile against adaptive return type, got: %v", err)
+		}
+		var out strings.Builder
+		if err := template.Run(&out, nil, nil); err != nil {
+			t.Fatalf("template should run, got: %v", err)
+		}
+		got := out.String()
+		want := "a=1;b=2;"
+		if got != want {
+			t.Fatalf("expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("ReturnType error surfaces as compile diagnostic", func(t *testing.T) {
+		items := []*adaptiveTestItem{{Name: "x"}}
+		fsys := Files{"index.html": []byte(
+			`{%- var _ = errReturn(items) %}`,
+		)}
+		opts := &BuildOptions{
+			Globals: native.Declarations{
+				"items":     &items,
+				"errReturn": errReturn,
+			},
+		}
+		_, err := BuildTemplate(fsys, "index.html", opts)
+		if err == nil {
+			t.Fatal("template should fail to compile when AdaptiveFunc ReturnType returns an error")
+		}
+		if !strings.Contains(err.Error(), "test: refusing") {
+			t.Fatalf("expected the closure's error message in the diagnostic, got: %v", err)
+		}
+	})
+}
+
 func TestUnexpandedTransformer(t *testing.T) {
 	fsys := fstest.Files{
 		"index.html": `before {{ render "a.html" }} after`,

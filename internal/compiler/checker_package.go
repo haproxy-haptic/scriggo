@@ -140,6 +140,27 @@ func toTypeCheckerScope(pkg native.ImportablePackage, mod checkingMod, global bo
 				panic(fmt.Errorf("scriggo: invalid untyped constant %q for %s.%s", v, pkg.PackageName(), ident))
 			}
 			ti.Properties |= propertyUntyped
+		case native.AdaptiveFunc:
+			// Import an adaptive native function. Impl carries the
+			// concrete runtime function (used for argument validation
+			// and runtime dispatch); ReturnType carries the closure
+			// the type-checker invokes at each call site to compute
+			// the static return type. Both are validated here so
+			// downstream code can rely on the invariants.
+			if v.Impl == nil {
+				panic(fmt.Errorf("scriggo: native.AdaptiveFunc %s.%s: Impl must not be nil", pkg.PackageName(), ident))
+			}
+			if v.ReturnType == nil {
+				panic(fmt.Errorf("scriggo: native.AdaptiveFunc %s.%s: ReturnType must not be nil", pkg.PackageName(), ident))
+			}
+			rv := reflect.ValueOf(v.Impl)
+			if rv.Kind() != reflect.Func {
+				panic(fmt.Errorf("scriggo: native.AdaptiveFunc %s.%s: Impl must be a function, got %s", pkg.PackageName(), ident, rv.Kind()))
+			}
+			ti.Type = removeEnvArg(rv.Type(), false)
+			ti.value = rv
+			ti.AdaptiveReturnType = v.ReturnType
+			ti.Properties |= propertyIsNative | propertyHasValue
 		}
 		scope[ident] = scopeName{ti: ti}
 		return nil
