@@ -3183,6 +3183,17 @@ func (tc *typechecker) checkFieldSelector(t *typeInfo, expr *ast.Selector) *type
 // with name expr.Ident. If the field does not exist, typ is nil. If the
 // field exists but is not accessible from the current package code,
 // encodingName is empty.
+//
+// Resolution order:
+//  1. Direct Go field-name match (the usual selector lookup).
+//  2. JSON-tag fallback: a field whose `json:"<name>"` tag (the portion
+//     before any comma) equals expr.Ident matches. This lets templates
+//     written against wire schemas use the lowercase JSON names instead
+//     of the Go-PascalCase'd field names. Matches the encoding/json
+//     convention for tag-based field lookup; non-Go callers of Scriggo
+//     (template authors, schema-driven configurations) often see the
+//     JSON form rather than the Go-side struct field names.
+//  3. Promoted fields from embedded anonymous struct types.
 func (tc *typechecker) findStructField(s reflect.Type, expr *ast.Selector) (typ reflect.Type, depth int, encodedName string) {
 	n := s.NumField()
 	for i := range n {
@@ -3198,6 +3209,43 @@ func (tc *typechecker) findStructField(s reflect.Type, expr *ast.Selector) (typ 
 			}
 			return
 		}
+	}
+	// JSON-tag fallback. Only consulted when the direct field-name lookup
+	// above missed; an explicit Go field-name match always wins, so
+	// existing templates keep working unchanged. Skips fields whose tag
+	// is the bare `-` (the encoding/json "do not encode" marker — no
+	// wire name to match) or empty, and stops at the first matching tag
+	// — there is no defined behaviour for duplicate JSON names within
+	// a single struct, so first-wins mirrors encoding/json's own
+	// behaviour.
+	//
+	// Note the bare-`-` check below: encoding/json distinguishes
+	// `json:"-"` (omit field) from `json:"-,opts"` (literal name `-`).
+	// The fallback honours that distinction: only the bare `-` is
+	// treated as "no name to match"; anything with options after the
+	// comma keeps `-` as its literal wire name.
+	for i := range n {
+		f := s.Field(i)
+		tag := f.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		jsonName := tag
+		if comma := strings.IndexByte(tag, ','); comma >= 0 {
+			jsonName = tag[:comma]
+		}
+		if jsonName == "" || jsonName != expr.Ident {
+			continue
+		}
+		typ = f.Type
+		if f.PkgPath == "" {
+			if tc.structDeclPkg[s] == tc.path {
+				encodedName = f.Name
+			} else if !strings.HasPrefix(f.Name, "𝗽") {
+				encodedName = f.Name
+			}
+		}
+		return
 	}
 	for i := range n {
 		f := s.Field(i)

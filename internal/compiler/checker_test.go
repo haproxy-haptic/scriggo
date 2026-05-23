@@ -64,6 +64,29 @@ var structTypeInfo = &typeInfo{Type: reflect.StructOf([]reflect.StructField{
 	{Name: "F", Type: reflect.TypeFor[int]()},
 	{Name: "f", Type: reflect.TypeFor[int](), PkgPath: "foo"},
 })}
+
+// jsonTaggedStructTypeInfo mirrors the shape of a typegen-produced
+// resource type: PascalCase Go fields with lowercase json tags. Used by
+// the json-tag selector resolution test cases below to pin the
+// findStructField fallback behaviour.
+//
+// Field layout exercises:
+//   - F / `json:"f"`           — the common case: lowercase tag matching
+//     a PascalCase Go field (typegen-style)
+//   - Renamed / `json:"taggedName"` — Go name and tag differ entirely
+//   - Hyphen / `json:"-"`      — bare "-": "do not encode", no wire name
+//   - HyphenOpts / `json:"-,omitempty"` — literal wire name "-" (per
+//     encoding/json: tag with comma options keeps the part before the
+//     comma as the literal wire name, even if that part is "-")
+//   - WithOpts / `json:"withOpts,omitempty"` — tag-with-options, name
+//     extracted as the portion before the comma
+var jsonTaggedStructTypeInfo = &typeInfo{Type: reflect.StructOf([]reflect.StructField{
+	{Name: "F", Type: reflect.TypeFor[int](), Tag: `json:"f"`},
+	{Name: "Renamed", Type: reflect.TypeFor[int](), Tag: `json:"taggedName"`},
+	{Name: "Hyphen", Type: reflect.TypeFor[int](), Tag: `json:"-"`},
+	{Name: "HyphenOpts", Type: reflect.TypeFor[int](), Tag: `json:"-,omitempty"`},
+	{Name: "WithOpts", Type: reflect.TypeFor[int](), Tag: `json:"withOpts,omitempty"`},
+})}
 var structPointerTypeInfo = &typeInfo{Type: reflect.PointerTo(structTypeInfo.Type)}
 var definedStructTypeInfo = &typeInfo{Type: reflect.TypeFor[definedStruct]()}
 var definedStructPointerTypeInfo = &typeInfo{Type: reflect.TypeFor[definedStructPointer]()}
@@ -571,6 +594,21 @@ var checkerExprs = []struct {
 	{`(struct{F int}{}).F`, tiInt(), nil},
 	{`[1]struct{ F int }{}[0].F`, tiInt(), nil},
 	{`[1]*struct{ F int }{}[0].F`, tiAddrInt(), nil},
+
+	// json-tag struct selector resolution. Direct Go field-name match
+	// always wins; the fallback path covers all the typegen-style
+	// "Go field is PascalCase, wire name is lowercase" cases.
+	//
+	//   x.F        — direct Go-name match (also tagged json:"f", same as Go name lowered)
+	//   x.f        — lowercase tag matches PascalCase Go field F (the common typegen case)
+	//   x.taggedName — Go name "Renamed" reached via its tag
+	//   x.withOpts — tag with comma options; name extracted before the comma
+	//   x.-        — literal `-` wire name on a HyphenOpts field tagged json:"-,omitempty"
+	//                (`-` alone means omit; `-,opts` means literal name `-`)
+	{`x.F`, tiInt(), map[string]*typeInfo{"x": jsonTaggedStructTypeInfo}},
+	{`x.f`, tiInt(), map[string]*typeInfo{"x": jsonTaggedStructTypeInfo}},
+	{`x.taggedName`, tiInt(), map[string]*typeInfo{"x": jsonTaggedStructTypeInfo}},
+	{`x.withOpts`, tiInt(), map[string]*typeInfo{"x": jsonTaggedStructTypeInfo}},
 }
 
 func TestCheckerExpressions(t *testing.T) {
