@@ -95,6 +95,35 @@ func generateReflectFieldAccessTemplate() []byte {
 	return []byte(`{%- for _, it := range items %}{{ reflectField(it, "Name") }}={{ reflectField(it, "Value") }};{%- end %}`)
 }
 
+// generateFilteredTypedFieldAccessTemplate produces a template that
+// passes a typed `[]*benchItem` global through an AdaptiveFunc filter
+// (here `passThrough`, an identity), then iterates the result with
+// direct typed field access. Verifies the AdaptiveFunc's ReturnType
+// closure preserves the input slice's static type so the loop
+// variable stays statically typed — the speedup mechanism the
+// AdaptiveFunc machinery enables for downstream filter pipelines.
+//
+// Expected: numbers approach TypedFieldAccess100 (the in-place typed
+// iteration baseline). A regression toward ReflectFieldAccess100
+// numbers indicates the static-type preservation broke.
+func generateFilteredTypedFieldAccessTemplate() []byte {
+	return []byte(`{%- for _, it := range passThrough(items) %}{{ it.Name }}={{ it.Value }};{%- end %}`)
+}
+
+// passThroughDecl is an AdaptiveFunc whose static return type matches
+// the first argument's static type. Models a real-world
+// type-preserving filter (shard_slice, sort_by, etc.) without pulling
+// in their full implementations.
+var passThroughDecl = native.AdaptiveFunc{
+	Impl: func(items any) any { return items },
+	ReturnType: func(argTypes []reflect.Type) (reflect.Type, error) {
+		if len(argTypes) == 0 {
+			return nil, nil
+		}
+		return argTypes[0], nil
+	},
+}
+
 // templateBenchCases defines the benchmark cases for template rendering.
 var templateBenchCases = []templateBenchCase{
 	{
@@ -211,6 +240,23 @@ var templateBenchCases = []templateBenchCase{
 		globals: native.Declarations{
 			"items":        (func() *[]any { items := make([]any, fieldAccessBenchSize); for i, it := range generateBenchItems(fieldAccessBenchSize) { items[i] = it }; return &items })(),
 			"reflectField": reflectField,
+		},
+	},
+	{
+		// AdaptiveFunc end-to-end verification. The typed slice
+		// flows through a passThrough adaptive filter; the
+		// ReturnType closure preserves the input's static type, so
+		// the loop variable inside the template stays *benchItem.
+		// Numbers should approach TypedFieldAccess100 (the
+		// direct-iteration baseline), confirming AdaptiveFunc adds
+		// no per-render overhead on the typed path.
+		name: "FilteredTypedFieldAccess100",
+		sources: scriggo.Files{
+			"index.txt": generateFilteredTypedFieldAccessTemplate(),
+		},
+		globals: native.Declarations{
+			"items":       (func() *[]*benchItem { items := generateBenchItems(fieldAccessBenchSize); return &items })(),
+			"passThrough": passThroughDecl,
 		},
 	},
 }
