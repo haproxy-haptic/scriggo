@@ -454,6 +454,105 @@ func TestSelectorChainAsType_RejectsNonType(t *testing.T) {
 	}
 }
 
+// TestTypeSwitch_CaseSelectorChainAsType verifies the case-clause
+// extension of the selector-chain-as-type lift: a type-switch case
+// like `case *x.T` (or `case x.T`) accepts a selector chain whose
+// inner field holds a typed value, lifting it to that value's
+// static type for the dispatch. Without this lift, the case
+// expression would be parsed as a value expression and the type
+// checker would emit "invalid indirect of … (type …)" rather than
+// matching the case.
+//
+// This unblocks the chart-style polymorphic dispatch where a single
+// runtime `any` carries one of several typed pointers (one per
+// watched resource Kind) and the template needs per-Kind typed
+// field access inside each branch. The classic chart shape:
+//
+//	{%- switch r := routeInfo["route"].(type) %}
+//	{%- case *resources.httproutes.T %} r.Spec.Hostnames  (typed []string)
+//	{%- case *resources.grpcroutes.T %} r.Spec.ServiceName (typed string)
+//	{%- end -%}
+//
+// Coverage:
+//
+//   - pointer wrap `*x.T` — the canonical typed-pointer chart shape
+//   - bare selector `x.T` — direct value match (no pointer wrap)
+//   - dispatch correctness — the matched case binds `r` with the
+//     typed pointer/value, so field access inside the branch resolves
+//     against the per-case static type
+func TestTypeSwitch_CaseSelectorChainAsType(t *testing.T) {
+	// Two struct shapes with distinct fields so a wrong-case dispatch
+	// would produce a different output. `T` carries the resource's
+	// generated value type (the chart's `resources.<name>.T` shape).
+	type httpStore struct {
+		T struct{ Hostname string }
+	}
+	type grpcStore struct {
+		T struct{ Service string }
+	}
+	type resources struct {
+		Httproutes httpStore
+		Grpcroutes grpcStore
+	}
+
+	const source = `{%- switch r := v.(type) -%}
+{%- case *x.Httproutes.T -%}HR:{{ r.Hostname }}
+{%- case *x.Grpcroutes.T -%}GR:{{ r.Service }}
+{%- default -%}UNKNOWN
+{%- end -%}`
+
+	tests := []struct {
+		name     string
+		value    any
+		expected string
+	}{
+		{
+			name:     "dispatch to *Httproutes.T branch",
+			value:    &struct{ Hostname string }{Hostname: "api.example.com"},
+			expected: "HR:api.example.com",
+		},
+		{
+			name:     "dispatch to *Grpcroutes.T branch",
+			value:    &struct{ Service string }{Service: "rpc.example.com"},
+			expected: "GR:rpc.example.com",
+		},
+		{
+			name:     "default branch on unrelated type",
+			value:    42,
+			expected: "UNKNOWN",
+		},
+	}
+
+	fsys := Files{"index.html": []byte(source)}
+	opts := &BuildOptions{
+		Globals: native.Declarations{
+			"x": (*resources)(nil),
+			"v": (*any)(nil),
+		},
+	}
+	template, err := BuildTemplate(fsys, "index.html", opts)
+	if err != nil {
+		t.Fatalf("template should compile with case clauses using selector chains as types, got: %v", err)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			err = template.Run(&out, map[string]any{
+				"x": &resources{},
+				"v": tc.value,
+			}, nil)
+			if err != nil {
+				t.Fatalf("template should run, got: %v", err)
+			}
+			got := strings.TrimRight(out.String(), "\n")
+			if got != tc.expected {
+				t.Fatalf("expected %q, got %q", tc.expected, got)
+			}
+		})
+	}
+}
+
 // adaptiveTestItem is the per-element shape the AdaptiveFunc tests
 // iterate over. Two fields keep the loop body realistic without
 // growing the global's allocation footprint.
