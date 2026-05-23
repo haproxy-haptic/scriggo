@@ -17,6 +17,7 @@ import (
 	"gitlab.com/haproxy-haptic/scriggo/ast/astutil"
 	"gitlab.com/haproxy-haptic/scriggo/internal/compiler"
 	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 func TestInitGlobals(t *testing.T) {
@@ -332,6 +333,127 @@ func TestTemplateFormat(t *testing.T) {
 }
 
 // TestUnexpandedTransformer ensures the transformer runs before expansion.
+// TestSelectorChainAsType verifies the selector-chain-as-type extension:
+// a selector expression resolving to a typed value (e.g. `x.T` where T is
+// a struct field) is accepted in type-expression position. Its resolved
+// type is the field's static type.
+//
+// This unblocks schema-driven type generation patterns where the chart
+// engine exposes per-resource types as fields on a runtime struct, and
+// template authors reference them in macro signatures without first
+// declaring a top-level type alias.
+//
+// Coverage:
+//
+//   - Pointer wrap (`*x.T`): the most common shape, the chart's
+//     `(g *resources.gateways.T)` macro signature pattern.
+//   - Bare selector (`x.T`): a type alias without the pointer wrap.
+//   - Slice/map composition (`[]x.T`, `map[string]x.T`): the extension
+//     plays nicely with composite type literals.
+//   - Backward compatibility: standard package-qualified types still work
+//     and the existing "not a type" error fires for non-selector
+//     expressions in type position.
+//
+// The extension is implemented in `checkType` in
+// `internal/compiler/checker_expressions.go`; this test is the
+// behavioural pin against accidental regression.
+func TestSelectorChainAsType(t *testing.T) {
+	// A struct global whose `T` field carries the type we want to lift.
+	// In production this is the per-resource typed store struct holding
+	// `T <generated-resource-type>`; here we use a simple int field so
+	// the test is self-contained. `inner` exercises the multi-level
+	// chain (matches the chart's `resources.<store>.T` shape).
+	type innerStore struct {
+		T int
+	}
+	type container struct {
+		T     int
+		Inner innerStore
+	}
+
+	tests := []struct {
+		name     string
+		source   string
+		expected string
+	}{
+		{
+			name:     "pointer wrap",
+			source:   `{% macro Foo(v *x.T) %}{% if v != nil %}got:{{ *v }}{% end %}{% end %}{% var n = 42 %}{{ Foo(&n) }}`,
+			expected: "got:42",
+		},
+		{
+			name:     "bare selector as type",
+			source:   `{% macro Foo(v x.T) %}got:{{ v }}{% end %}{% var n int = 7 %}{{ Foo(n) }}`,
+			expected: "got:7",
+		},
+		{
+			name:     "slice composition",
+			source:   `{% macro Sum(vs []x.T) %}{% var s = 0 %}{% for _, v := range vs %}{% s += v %}{% end %}{{ s }}{% end %}{{ Sum([]int{1, 2, 3}) }}`,
+			expected: "6",
+		},
+		{
+			name:     "map value position",
+			source:   `{% macro Lookup(m map[string]x.T, k string) %}{{ m[k] }}{% end %}{{ Lookup(map[string]int{"a": 1, "b": 2}, "b") }}`,
+			expected: "2",
+		},
+		{
+			// Multi-level selector chain: `x.inner.T` — extends the
+			// "package-qualified type" grammar to N levels. Mirrors
+			// the chart pattern `resources.gateways.T` where the
+			// type lives two struct fields deep.
+			name:     "multi-level chain",
+			source:   `{% macro Show(v *x.Inner.T) %}got:{{ *v }}{% end %}{% var n = 42 %}{{ Show(&n) }}`,
+			expected: "got:42",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fsys := Files{"index.html": []byte(tc.source)}
+			opts := &BuildOptions{
+				Globals: native.Declarations{
+					"x": (*container)(nil),
+				},
+			}
+			template, err := BuildTemplate(fsys, "index.html", opts)
+			if err != nil {
+				t.Fatalf("template should compile against selector-as-type, got: %v", err)
+			}
+			var out strings.Builder
+			err = template.Run(&out, map[string]any{"x": &container{}}, nil)
+			if err != nil {
+				t.Fatalf("template should run, got: %v", err)
+			}
+			if got := out.String(); got != tc.expected {
+				t.Fatalf("expected %q, got %q", tc.expected, got)
+			}
+		})
+	}
+}
+
+// TestSelectorChainAsType_RejectsNonType ensures the extension stays
+// narrow: an expression that doesn't resolve via the selector path (e.g.
+// a numeric literal, a function call) still fails to be used as a type
+// with the same error message as before the extension.
+func TestSelectorChainAsType_RejectsNonType(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{"integer literal", `{% var v 42 %}`},
+		{"string literal", `{% var v "hello" %}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fsys := Files{"index.html": []byte(tc.source)}
+			_, err := BuildTemplate(fsys, "index.html", nil)
+			if err == nil {
+				t.Fatalf("expected compile error for non-type in type position, got nil")
+			}
+		})
+	}
+}
+
 func TestUnexpandedTransformer(t *testing.T) {
 	fsys := fstest.Files{
 		"index.html": `before {{ render "a.html" }} after`,

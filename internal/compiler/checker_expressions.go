@@ -215,13 +215,60 @@ func subExpr(expr ast.Expression, left bool) ast.Expression {
 }
 
 // checkType type checks a type and returns its type info.
+//
+// Standard Go grammar accepts type expressions only in the forms an
+// identifier, a package-qualified identifier (pkg.TypeName), or a
+// composite type literal (pointer, slice, map, struct, interface,
+// channel, func). Scriggo additionally accepts a selector chain that
+// resolves to a typed VALUE: the resolved type is the value's static
+// type. This lets templates use a struct field as a stable type
+// reference without first introducing a type alias.
+//
+//	{# Given a struct field T of type Gateway exposed via a global: #}
+//	{% macro Foo(g *resources.gateways.T) string %}
+//	  {{ g.Metadata.Name }}     {# typed access, compile-time validated #}
+//	{% end %}
+//
+// The extension is backward compatible — programs that don't use
+// selector chains in type position are unaffected, and the existing
+// package-selector path matches first when applicable.
 func (tc *typechecker) checkType(expr ast.Expression) *typeInfo {
 	ti := tc.typeof(expr, true)
-	if !ti.IsType() {
-		panic(tc.errorf(expr, "%s is not a type", expr))
+	if ti.IsType() {
+		tc.compilation.typeInfos[expr] = ti
+		return ti
 	}
-	tc.compilation.typeInfos[expr] = ti
-	return ti
+	// Selector-chain-as-type extension. Accept any expression that
+	// resolves to a typed value as a type expression, lifting its
+	// static type. Restricted to ast.Selector to keep the surface
+	// narrow — accepting arbitrary expressions would shadow useful
+	// "X is not a type" errors elsewhere. Selectors are the
+	// expression form where chart-style field-chain access ends up
+	// (parser produces nested Selector nodes for `a.b.c`).
+	if _, ok := expr.(*ast.Selector); ok && ti.Type != nil {
+		// Nil-value check: a truly-nil expression (e.g., bare `nil`)
+		// has no static type to lift; reject it the same way the
+		// existing path does.
+		if ti.Nil() {
+			panic(tc.errorf(expr, "%s is not a type", expr))
+		}
+		// Only carry propertyIsType on the lifted typeInfo. The
+		// source value's properties (propertyAddressable,
+		// propertyHasValue, propertyGlobal, propertyIsNative, …)
+		// are about the original VALUE expression and don't apply
+		// to the type it's being lifted into. Mirrors the
+		// pointer-construction path in typeof's UnaryOperator case
+		// and the existing package-qualified-type path in
+		// toTypeCheckerScope, both of which set propertyIsType
+		// without OR'ing in source-side flags.
+		typeTi := &typeInfo{
+			Type:       ti.Type,
+			Properties: propertyIsType,
+		}
+		tc.compilation.typeInfos[expr] = typeTi
+		return typeTi
+	}
+	panic(tc.errorf(expr, "%s is not a type", expr))
 }
 
 // checkExprOrType type checks an expression or a type and returns its type
@@ -282,6 +329,20 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 				return &typeInfo{Properties: propertyIsType, Type: tc.types.PointerTo(t.Type)}
 			}
 			panic(tc.errorf(expr, "type %s is not an expression", t))
+		}
+		// Selector-chain-as-type extension: when the unary operator is
+		// `*` (pointer), the typed-value-expected context is `type`
+		// (typeExpected), and the inner expression is a selector chain
+		// resolving to a typed value, lift the inner to a type and
+		// build the pointer type. This makes `*x.T` (where `x.T` is a
+		// struct field) parse as "pointer to the field's static type"
+		// — the form chart authors use for typed macro signatures.
+		// See checkType for the same lift at the bare-selector entry
+		// point.
+		if typeExpected && expr.Op == ast.OperatorPointer && t.Type != nil && !t.Nil() {
+			if _, isSelector := expr.Expr.(*ast.Selector); isSelector {
+				return &typeInfo{Properties: propertyIsType, Type: tc.types.PointerTo(t.Type)}
+			}
 		}
 		ti := &typeInfo{
 			Type:       t.Type,
