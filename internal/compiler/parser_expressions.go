@@ -185,7 +185,18 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 			operand = ident
 			tok = p.next()
 			if mustBeType {
-				if tok.typ == tokenPeriod {
+				// Standard Go grammar allows one `.identifier` here
+				// (package-qualified type name `pkg.T`). The
+				// selector-chain-as-type Scriggo extension relaxes
+				// this to a chain — `a.b.c.T` — so a template that
+				// exposes types as fields on a runtime struct (e.g.
+				// `resources.<store>.T`) can reference them
+				// directly in any type-expression position. Lifting
+				// the chain to a type happens during type-checking
+				// (`checkType` and typeof's UnaryOperator case);
+				// the parser's job is just to accept the full
+				// selector chain as the type expression.
+				for tok.typ == tokenPeriod {
 					tok = p.next()
 					if tok.typ != tokenIdentifier {
 						panic(syntaxError(tok.pos, "unexpected %s, expecting name", tok.txt))
