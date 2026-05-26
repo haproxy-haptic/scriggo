@@ -1420,6 +1420,36 @@ func checkShow(t reflect.Type, ctx ast.Context) error {
 	if t == emptyInterfaceType {
 		return nil
 	}
+	// Auto-deref pointers in show context. `*T` is showable if either:
+	// (a) the pointer type itself satisfies an existing rule below (e.g.,
+	//     a Stringer method declared on `*T` makes `t.Implements(stringer)`
+	//     return true — preserve that path so we don't regress existing
+	//     code), or
+	// (b) the element type `T` is showable.
+	// The runtime mirrors this by dereferencing pointers before
+	// dispatching to the context-specific shower; see
+	// `(*renderer).Show` in internal/runtime/renderer.go.
+	//
+	// Auto-deref makes `{{ gateway.Metadata.Generation }}` work when
+	// Generation is `*int64` (typegen tristate, issue #52) without the
+	// chart having to write `tostring(deref(...))` boilerplate.
+	if t.Kind() == reflect.Ptr {
+		// Try (a) first — the existing rules below already handle
+		// pointer types that implement Stringer / error / etc.
+		if err := checkShowConcrete(t, ctx); err == nil {
+			return nil
+		}
+		// Fall back to (b) — element type.
+		return checkShow(t.Elem(), ctx)
+	}
+	return checkShowConcrete(t, ctx)
+}
+
+// checkShowConcrete applies the per-context allowability rules without
+// the auto-deref pre-pass. Split out from checkShow so the pointer case
+// can probe the pointer type itself before falling back to the element
+// type.
+func checkShowConcrete(t reflect.Type, ctx ast.Context) error {
 	kind := t.Kind()
 	switch ctx {
 	case ast.ContextText, ast.ContextTag, ast.ContextQuotedAttr, ast.ContextUnquotedAttr,
