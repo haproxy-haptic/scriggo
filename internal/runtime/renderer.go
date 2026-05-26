@@ -339,6 +339,20 @@ func toString(env *env, i any) (string, error) {
 			s = strconv.FormatFloat(i, 'f', -1, 64) + "i"
 		}
 		return s, nil
+	case reflect.Ptr:
+		// Auto-deref pointers (feat F). The checker accepts `*T` if
+		// either the pointer type itself satisfies an existing
+		// showable rule (preserves Stringer-on-pointer behavior,
+		// handled by the per-context showers' interface fast-paths
+		// before they reach toString) or the element type does. By
+		// the time toString sees a pointer, the pointer-as-interface
+		// fast-paths have all missed, so dereference and recurse.
+		// A nil pointer renders as empty — matches the chart's
+		// `dig() | fallback("")` semantic for absent fields.
+		if v.IsNil() {
+			return "", nil
+		}
+		return toString(env, v.Elem().Interface())
 	default:
 		return "", fmt.Errorf("cannot show value of type %s", env.TypeOf(reflect.ValueOf(i)))
 	}
