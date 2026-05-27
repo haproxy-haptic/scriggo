@@ -84,8 +84,83 @@ func desugarStmt(n ast.Node, comp *compilation) ast.Node {
 			v.Body.Nodes = desugarStmts(v.Body.Nodes, comp)
 		}
 		return v
+	case *ast.Render:
+		// `render "path"` carries an expanded sub-tree (filled
+		// in by the parser's expand pass). Recurse so wildcards
+		// inside rendered snippets get desugared.
+		if v.Tree != nil {
+			v.Tree.Nodes = desugarStmts(v.Tree.Nodes, comp)
+		}
+		return v
+	case *ast.Import:
+		// `import "path" for X` carries an expanded sub-tree
+		// holding the imported file's macro / var declarations.
+		// Recurse so wildcards inside imported macros get
+		// desugared.
+		if v.Tree != nil {
+			v.Tree.Nodes = desugarStmts(v.Tree.Nodes, comp)
+		}
+		return v
+	case *ast.Extends:
+		// `extends "path"` carries an expanded sub-tree of the
+		// parent layout. Recurse so wildcards in the parent's
+		// macros get desugared.
+		if v.Tree != nil {
+			v.Tree.Nodes = desugarStmts(v.Tree.Nodes, comp)
+		}
+		return v
+	case *ast.RenderGlob:
+		// render_glob expands at parse-time into a slice of
+		// Render nodes, each with its own sub-tree.
+		for _, r := range v.Renders {
+			if r != nil && r.Tree != nil {
+				r.Tree.Nodes = desugarStmts(r.Tree.Nodes, comp)
+			}
+		}
+		return v
+	case *ast.Show:
+		// `{{ render "..." }}` parses as a Show whose Expressions
+		// include Render / RenderGlob nodes. Statement-level
+		// recursion alone misses those sub-trees.
+		for _, e := range v.Expressions {
+			desugarExprSubTrees(e, comp)
+		}
+		return v
+	case *ast.Var:
+		for _, e := range v.Rhs {
+			desugarExprSubTrees(e, comp)
+		}
+		return v
+	case *ast.Assignment:
+		for _, e := range v.Rhs {
+			desugarExprSubTrees(e, comp)
+		}
+		return v
 	}
 	return n
+}
+
+// desugarExprSubTrees walks an expression looking for Render /
+// RenderGlob nodes and recurses into their sub-trees. Render is an
+// Expression node (it appears in show-statement and
+// assignment-RHS positions), so statement-level recursion alone
+// misses them.
+func desugarExprSubTrees(e ast.Node, comp *compilation) {
+	if e == nil {
+		return
+	}
+	switch v := e.(type) {
+	case *ast.Render:
+		if v.Tree != nil {
+			v.Tree.Nodes = desugarStmts(v.Tree.Nodes, comp)
+		}
+	case *ast.RenderGlob:
+		for _, r := range v.Renders {
+			if r != nil && r.Tree != nil {
+				r.Tree.Nodes = desugarStmts(r.Tree.Nodes, comp)
+			}
+		}
+	}
 }
 
 // desugarForRange handles a single ForRange. If its range
