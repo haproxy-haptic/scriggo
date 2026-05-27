@@ -137,6 +137,16 @@ func compileTemplateFile(fsys fs.FS, path string, opts Options, canonicalGlobals
 		}
 	}
 
+	// Desugar the wildcard-slice-access fork extension. Walks the
+	// tree and replaces every for-range whose range expression
+	// contains `[*]` with a chain of nested synthetic for-ranges.
+	// Uses a per-build counter (`compilation.currentWildcardIndex`)
+	// to make synthetic `$wildN` identifiers unique across the
+	// build.
+	if err := desugarWildcards(tree, &compilation{currentWildcardIndex: -1}); err != nil {
+		return nil, err
+	}
+
 	// Type check the tree.
 	checkerOpts := checkerOptions{
 		allowGoStmt: opts.AllowGoStmt,
@@ -171,6 +181,13 @@ func BuildProgram(fsys fs.FS, opts Options) (*Code, error) {
 	// Parse the source code.
 	tree, err := ParseProgram(fsys)
 	if err != nil {
+		return nil, err
+	}
+
+	// Desugar the wildcard-slice-access fork extension. See the
+	// matching call in compileTemplateFile for context — same
+	// pass applied to Go-program builds for parity.
+	if err := desugarWildcards(tree, &compilation{currentWildcardIndex: -1}); err != nil {
 		return nil, err
 	}
 

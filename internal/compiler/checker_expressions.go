@@ -711,6 +711,18 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 		}
 		return tis[0]
 
+	case *ast.WildcardIndex:
+		// Defensive fallback. The wildcard-slice-access desugar
+		// pass runs before the type checker and replaces every
+		// `[*]` in a for-range chain with a synthetic outer
+		// for-range loop. A `WildcardIndex` reaching the
+		// checker is therefore either (a) parser-rejected misuse
+		// that somehow slipped through, or (b) a user-supplied
+		// `ExpandedTransformer` that injected one outside a
+		// for-range chain. Either way, the syntax-style error
+		// here points at the wildcard's source position.
+		panic(tc.errorf(expr, "[*] only allowed in for-range expressions"))
+
 	case *ast.Index:
 		t := tc.checkExpr(expr.Expr)
 		if t.Nil() {

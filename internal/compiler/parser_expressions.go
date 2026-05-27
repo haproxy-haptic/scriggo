@@ -11,6 +11,23 @@ import (
 	"gitlab.com/haproxy-haptic/scriggo/ast"
 )
 
+// parseExprNoChain calls parseExpr with the for-range-chain flag
+// cleared, so any `[*]` inside the parsed expression is rejected as
+// "[*] only allowed in for-range expressions".
+//
+// Use for sub-expressions that break the for-range chain: call
+// arguments, index expressions, slice bounds, composite-literal
+// values, type expressions, etc. The paren-OPERAND case (which
+// parses `( e )` at the start of a chain) keeps the chain alive
+// and therefore continues to use parseExpr directly.
+func (p *parsing) parseExprNoChain(tok token, canBeSwitchGuard, canElideType, mustBeType, nextIsBlockBrace bool) (ast.Expression, token) {
+	save := p.inForRangeChain
+	p.inForRangeChain = false
+	expr, t := p.parseExpr(tok, canBeSwitchGuard, canElideType, mustBeType, nextIsBlockBrace)
+	p.inForRangeChain = save
+	return expr, t
+}
+
 // parseExpr parses an expression and returns its tree and the last read token
 // that does not belong to the expression. It panics on error.
 //
@@ -63,12 +80,12 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 				panic(syntaxError(tok.pos, "unexpected %s, expecting [", tok))
 			}
 			var typ ast.Expression
-			typ, tok = p.parseExpr(p.next(), false, false, true, false)
+			typ, tok = p.parseExprNoChain(p.next(), false, false, true, false)
 			if tok.typ != tokenRightBracket {
 				panic(syntaxError(tok.pos, "unexpected %s, expecting %s", tok, tokenRightBrace))
 			}
 			mapType.KeyType = typ
-			typ, tok = p.parseExpr(p.next(), false, false, true, false)
+			typ, tok = p.parseExprNoChain(p.next(), false, false, true, false)
 			if typ == nil {
 				panic(syntaxError(tok.pos, "unexpected %s, expecting type", tok))
 			}
@@ -142,7 +159,7 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 					tok = p.next()
 				}
 				var elemType ast.Expression
-				elemType, tok = p.parseExpr(tok, false, false, true, false)
+				elemType, tok = p.parseExprNoChain(tok, false, false, true, false)
 				if elemType == nil {
 					panic(syntaxError(tok.pos, "missing channel element type"))
 				}
@@ -219,7 +236,7 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 			case tokenRightBracket:
 			default:
 				oldTok := tok
-				expr, tok = p.parseExpr(tok, false, false, false, false)
+				expr, tok = p.parseExprNoChain(tok, false, false, false, false)
 				if expr == nil {
 					panic(syntaxError(tok.pos, "unexpected %s, expecting expression", oldTok))
 				}
@@ -229,7 +246,7 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 				panic(syntaxError(tok.pos, "unexpected %s, expecting ]", tok))
 			}
 			var typ ast.Expression
-			typ, tok = p.parseExpr(p.next(), false, false, true, false)
+			typ, tok = p.parseExprNoChain(p.next(), false, false, true, false)
 			if typ == nil {
 				panic(syntaxError(tok.pos, "unexpected %s, expecting expression", tok))
 			}
@@ -294,7 +311,7 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 			default:
 				// go MacroCall() - parse as expression and expect a call
 				var expr ast.Expression
-				expr, tok = p.parseExpr(tok, false, false, false, false)
+				expr, tok = p.parseExprNoChain(tok, false, false, false, false)
 				if expr == nil {
 					panic(syntaxError(tok.pos, "unexpected %s after go, expecting render, render_glob, or function call", tok))
 				}
@@ -387,14 +404,14 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 				var keyValues []ast.KeyValue
 				var expr ast.Expression
 				for {
-					expr, tok = p.parseExpr(p.next(), false, true, false, false)
+					expr, tok = p.parseExprNoChain(p.next(), false, true, false, false)
 					if expr == nil {
 						break
 					}
 					switch tok.typ {
 					case tokenColon:
 						var value ast.Expression
-						value, tok = p.parseExpr(p.next(), false, true, false, false)
+						value, tok = p.parseExprNoChain(p.next(), false, true, false, false)
 						if value == nil {
 							panic(syntaxError(tok.pos, "unexpected %s, expecting expression", tok))
 						}
@@ -434,19 +451,67 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 				operand = ast.NewCall(pos, operand, args, isVariadic)
 				canCompositeLiteral = false
 				tok = p.next()
-			case tokenLeftBracket: // e[...], e[.. : ..], e[.. : .. : ..],
+			case tokenLeftBracket: // e[...], e[.. : ..], e[.. : .. : ..], e[*].
 				pos := tok.pos
 				pos.Start = operand.Pos().Start
+				// Wildcard slice access (fork extension): `e[*]` is
+				// a parse-time marker that produces a synthetic
+				// outer for-range loop during desugar. Recognise it
+				// with two-token lookahead so a non-wildcard index
+				// expression starting with `*` (unary deref) still
+				// falls into the normal path below.
+				next1 := p.next()
+				if next1.typ == tokenMultiplication {
+					next2 := p.next()
+					if next2.typ == tokenRightBracket {
+						// `[*]` — build a position spanning just
+						// the brackets so error messages point at
+						// the wildcard, not the operand chain.
+						// `[` is one column / byte before the `*`.
+						wildPos := &ast.Position{
+							Line:   next1.pos.Line,
+							Column: next1.pos.Column - 1,
+							Start:  next1.pos.Start - 1,
+							End:    next2.pos.End,
+						}
+						if !p.inForRangeChain {
+							panic(syntaxError(wildPos, "[*] only allowed in for-range expressions"))
+						}
+						// Trailing-period requirement: the next
+						// token after `]` must be `.` so a
+						// `.field` accessor follows. Otherwise
+						// the wildcard would be the final step
+						// in the chain, which is rejected (the
+						// trailing `[*]` is redundant — the
+						// last accessor drives the innermost
+						// loop directly).
+						next3 := p.next()
+						if next3.typ != tokenPeriod {
+							panic(syntaxError(wildPos, "[*] must be followed by a .field accessor"))
+						}
+						p.unread(next3)
+						operand = ast.NewWildcardIndex(wildPos, operand)
+						tok = p.next()
+						continue
+					}
+					// Not `[*]` — put both tokens back and let
+					// the normal index/slice parsing handle the
+					// `*<...>` index expression.
+					p.unread(next2)
+					p.unread(next1)
+				} else {
+					p.unread(next1)
+				}
 				var index ast.Expression
-				index, tok = p.parseExpr(p.next(), false, false, false, false)
+				index, tok = p.parseExprNoChain(p.next(), false, false, false, false)
 				if tok.typ == tokenColon {
 					low := index
 					isFull := false
 					var high, max ast.Expression
-					high, tok = p.parseExpr(p.next(), false, false, false, false)
+					high, tok = p.parseExprNoChain(p.next(), false, false, false, false)
 					if tok.typ == tokenColon {
 						isFull = true
-						max, tok = p.parseExpr(p.next(), false, false, false, false)
+						max, tok = p.parseExprNoChain(p.next(), false, false, false, false)
 					}
 					if tok.typ != tokenRightBracket {
 						panic(syntaxError(tok.pos, "unexpected %s, expecting ]", tok))
@@ -491,7 +556,7 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 						}
 						fallthrough
 					default:
-						typ, tok = p.parseExpr(tok, true, false, true, false)
+						typ, tok = p.parseExprNoChain(tok, true, false, true, false)
 						if typ == nil {
 							panic(syntaxError(tok.pos, "unexpected %s, expecting type", tok))
 						}
@@ -547,7 +612,7 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 					default:
 						panic(syntaxError(operand.Pos(), "unexpected %s, expecting identifier, call or render", operand))
 					}
-					node.Expr2, tok = p.parseExpr(p.next(), false, false, false, nextIsBlockBrace)
+					node.Expr2, tok = p.parseExprNoChain(p.next(), false, false, false, nextIsBlockBrace)
 					if node.Expr2 == nil {
 						panic(syntaxError(tok.pos, "unexpected %s, expecting expression", tok))
 					}
@@ -702,7 +767,7 @@ func (p *parsing) parseExprList(tok token, allowSwitchGuard, allMustBeTypes, nex
 	var element ast.Expression
 	var elements []ast.Expression
 	for {
-		element, tok = p.parseExpr(tok, allowSwitchGuard, false, allMustBeTypes, nextIsBlockBrace)
+		element, tok = p.parseExprNoChain(tok, allowSwitchGuard, false, allMustBeTypes, nextIsBlockBrace)
 		if element == nil {
 			if elements != nil {
 				panic(syntaxError(tok.pos, "unexpected %s, expecting expression", tok))
@@ -727,7 +792,7 @@ func (p *parsing) parseExprListInParenthesis(tok token) ([]ast.Expression, token
 	var element ast.Expression
 	var elements []ast.Expression
 	for {
-		element, tok = p.parseExpr(tok, false, false, false, false)
+		element, tok = p.parseExprNoChain(tok, false, false, false, false)
 		if element == nil {
 			if elements != nil && tok.typ != tokenRightParenthesis {
 				panic(syntaxError(tok.pos, "unexpected %s, expecting expression", tok))
@@ -797,14 +862,14 @@ func (p *parsing) parseField(tok token) (*ast.Field, token) {
 				field.Idents = append(field.Idents, ast.NewIdentifier(tok.pos, string(tok.txt)))
 				tok = p.next()
 			}
-			field.Type, tok = p.parseExpr(tok, false, false, true, false)
+			field.Type, tok = p.parseExprNoChain(tok, false, false, true, false)
 			if field.Type == nil {
 				panic(syntaxError(tok.pos, "unexpected %s, expecting type", tok))
 			}
 		case tokenRawString, tokenInterpretedString:
 			field.Type = ident
 		default:
-			field.Type, tok = p.parseExpr(tok, false, false, true, false)
+			field.Type, tok = p.parseExprNoChain(tok, false, false, true, false)
 			if field.Type == nil {
 				field.Type = ident
 			} else {

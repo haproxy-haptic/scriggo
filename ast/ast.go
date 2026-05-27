@@ -1008,6 +1008,28 @@ func (n *Index) String() string {
 	return n.Expr.String() + "[" + n.Index.String() + "]"
 }
 
+// WildcardIndex node represents a wildcard slice access `[*]` in a
+// for-range expression chain (Scriggo fork extension). At parse time
+// the desugar pass replaces each `[*]` with a synthetic outer
+// for-range loop. A WildcardIndex surviving past the desugar pass is
+// a checker error: `[*]` is only legal inside a `for ... := range`
+// expression chain.
+type WildcardIndex struct {
+	*expression
+	*Position            // position in the source (spans `[*]`).
+	Expr      Expression // expression being wildcard-indexed.
+}
+
+// NewWildcardIndex returns a new WildcardIndex node.
+func NewWildcardIndex(pos *Position, expr Expression) *WildcardIndex {
+	return &WildcardIndex{&expression{}, pos, expr}
+}
+
+// String returns the string representation of n.
+func (n *WildcardIndex) String() string {
+	return n.Expr.String() + "[*]"
+}
+
 // Interface node represents an interface type.
 type Interface struct {
 	*expression
