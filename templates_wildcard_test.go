@@ -221,3 +221,90 @@ func TestWildcardForRange_ErrorLocations(t *testing.T) {
 		})
 	}
 }
+
+// TestWildcardForRange_InRenderedSubTree pins the regression that
+// uncovered the `render`-sub-tree gap in the desugar pass: the
+// pass walks the entry-point Tree's statement nodes but does NOT
+// descend into the Tree carried by each `*ast.Render` /
+// `*ast.RenderGlob` node (filled in by the parser's expand pass
+// for snippets called via `{% render "..." %}` /
+// `{{ render "..." }}` / `{{ render_glob "..." }}`).
+//
+// Without the recursion, a wildcard inside a rendered snippet
+// parses correctly, but the WildcardIndex survives past desugar
+// and triggers the type-checker's defensive panic
+// (`missing case for type *ast.WildcardIndex`) when the
+// dependency analyzer walks the AST.
+//
+// Real-world trigger: the HAPTIC chart's templateSnippets each
+// compile as separate Trees that the entry-point templates pull
+// in via `render` / `render_glob`. Migrating chart code to use
+// `[*]` exposed the gap immediately.
+func TestWildcardForRange_InRenderedSubTree(t *testing.T) {
+	type leaf struct {
+		Vals []int
+	}
+	type mid struct {
+		Leaves []leaf
+	}
+	type root struct {
+		Mids []mid
+	}
+
+	tests := []struct {
+		name     string
+		files    Files
+		expected string
+	}{
+		{
+			name: "show-render: wildcard inside rendered snippet",
+			files: Files{
+				"index.html":   []byte(`{{ render "snippet.html" }}`),
+				"snippet.html": []byte(`{% for _, v := range x.Mids[*].Leaves[*].Vals %}{{ v }};{% end %}`),
+			},
+			expected: "10;20;30;",
+		},
+		{
+			name: "nested-render: wildcard inside a snippet rendered from another snippet",
+			files: Files{
+				"index.html":   []byte(`{{ render "outer.html" }}`),
+				"outer.html":   []byte(`{{ render "inner.html" }}`),
+				"inner.html":   []byte(`{% for _, v := range x.Mids[*].Leaves[*].Vals %}{{ v }};{% end %}`),
+			},
+			expected: "10;20;30;",
+		},
+		{
+			name: "import: wildcard inside an imported macro",
+			files: Files{
+				"index.html": []byte(`{% import "lib.html" for Show %}{{ Show() }}`),
+				"lib.html":   []byte(`{% macro Show() %}{% for _, v := range x.Mids[*].Leaves[*].Vals %}{{ v }};{% end %}{% end %}`),
+			},
+			expected: "10;20;30;",
+		},
+	}
+
+	data := &root{Mids: []mid{
+		{Leaves: []leaf{{Vals: []int{10, 20}}, {Vals: []int{30}}}},
+	}}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := &BuildOptions{
+				Globals: native.Declarations{
+					"x": (*root)(nil),
+				},
+			}
+			tmpl, err := BuildTemplate(tc.files, "index.html", opts)
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			var out strings.Builder
+			if err := tmpl.Run(&out, map[string]any{"x": data}, nil); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			if got := out.String(); got != tc.expected {
+				t.Fatalf("output: got %q, want %q", got, tc.expected)
+			}
+		})
+	}
+}
