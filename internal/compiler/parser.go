@@ -142,6 +142,23 @@ type parsing struct {
 	// pendingTrimRight is set when -%} or -}} is seen; the next Text node
 	// should have all leading whitespace trimmed.
 	pendingTrimRight bool
+
+	// pushed holds tokens that have been read from the lexer and
+	// pushed back via `unread` so a later `next` call returns them
+	// before reading new ones. LIFO order — the most recently
+	// pushed token is returned first.
+	pushed []token
+
+	// inForRangeChain reports whether the parser is currently
+	// inside the top-level selector / wildcard / index chain of a
+	// `for ... := range <expr>` range expression. Set at the
+	// for-range parse site (`case tokenRange`) and propagated only
+	// through chain operators (`.`, `[*]`, parens) — cleared on
+	// descent into any sub-expression that breaks the chain (call
+	// args, slice bounds, type assertions, composite-literal
+	// values, etc.). The wildcard-slice-access extension consults
+	// this flag to reject `[*]` outside legal positions.
+	inForRangeChain bool
 }
 
 // addToAncestors adds node to the ancestors.
@@ -169,9 +186,22 @@ func (p *parsing) inFunction() bool {
 	return false
 }
 
+// unread pushes a token back onto the parser's lookahead buffer so the
+// next call to `next` returns it. Used by the wildcard-slice-access
+// (`[*]`) lookahead, which needs to peek up to two tokens ahead before
+// deciding whether to consume them.
+func (p *parsing) unread(tok token) {
+	p.pushed = append(p.pushed, tok)
+}
+
 // next returns the next token from the lexer. Panics if the lexer channel is
 // closed.
 func (p *parsing) next() token {
+	if n := len(p.pushed); n > 0 {
+		tok := p.pushed[n-1]
+		p.pushed = p.pushed[:n-1]
+		return tok
+	}
 	tok, ok := <-p.lex.Tokens()
 	if !ok {
 		if p.lex.err == nil {
@@ -660,7 +690,14 @@ LABEL:
 				}
 			}
 			var expr ast.Expression
+			// Mark that we're inside a for-range chain so the
+			// wildcard-slice-access extension (`[*]`) accepts the
+			// shape. parseExpr clears the flag on descent into
+			// sub-expressions that break the chain.
+			prevInRange := p.inForRangeChain
+			p.inForRangeChain = true
 			expr, tok = p.parseExpr(p.next(), false, false, false, true)
+			p.inForRangeChain = prevInRange
 			if expr == nil {
 				panic(syntaxError(tok.pos, "unexpected %s, expecting expression", tok))
 			}
@@ -670,6 +707,17 @@ LABEL:
 			node = ast.NewForRange(pos, assignment, nil, nil)
 		case tokenIn:
 			// Parse: {% for id in expr %}
+			//
+			// Note: inForRangeChain is intentionally NOT set here.
+			// The wildcard-slice-access fork extension (`[*]`)
+			// targets the `for ... := range expr` form (ast.ForRange)
+			// — the desugar pass only rewrites ForRange nodes.
+			// Permitting `[*]` in `for x in expr` would leave a
+			// WildcardIndex in the tree past desugar, which the
+			// type checker would then reject with a confusing
+			// message. Rejecting at parse time produces the same
+			// "[*] only allowed in for-range expressions" error
+			// users get from any other invalid context.
 			if init == nil {
 				panic(syntaxError(tok.pos, "unexpected in, expecting expression"))
 			}

@@ -5,3 +5,6 @@ default.pgo
 
 # Benchmark results
 test/bench/results/
+
+# Local test-runner wrapper
+.run-tests.sh

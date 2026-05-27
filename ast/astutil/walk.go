@@ -181,6 +181,9 @@ func Walk(v Visitor, node ast.Node) {
 		Walk(v, n.Expr)
 		Walk(v, n.Index)
 
+	case *ast.WildcardIndex:
+		Walk(v, n.Expr)
+
 	case *ast.Label:
 		Walk(v, n.Ident)
 		Walk(v, n.Statement)
