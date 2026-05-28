@@ -457,3 +457,48 @@ func TestDesugarWildcard_NestedForRange_BothHaveWildcards(t *testing.T) {
 		t.Fatalf("nesting depth: got %d, want 4 (2 synthetic + 2 user)", depth)
 	}
 }
+
+// TestDesugarWildcard_InsideStatements asserts wildcards inside a
+// `{%% ... %%}` (ast.Statements) block are desugared. Without this
+// the type checker panics with "missing case for type *ast.WildcardIndex"
+// when the dependency walker visits the surviving wildcard node.
+//
+// Regression for: chart's BackendTLSPolicy ancestor-resolution pass,
+// which wrote
+//
+//	for _, br := range route.Spec.Rules[*].BackendRefs { ... }
+//
+// inside a {%% %%} block.
+func TestDesugarWildcard_InsideStatements(t *testing.T) {
+	wild := ast.NewWildcardIndex(wildcardPos(), ast.NewIdentifier(outerPos(), "a"))
+	fr := ast.NewForRange(outerPos(),
+		ast.NewAssignment(outerPos(),
+			[]ast.Expression{ast.NewIdentifier(outerPos(), "z")},
+			ast.AssignmentDeclaration,
+			[]ast.Expression{ast.NewSelector(outerPos(), wild, "B")}),
+		[]ast.Node{ast.NewIdentifier(outerPos(), "body")}, nil)
+	stmts := ast.NewStatements(outerPos(), []ast.Node{fr})
+	tree := ast.NewTree("", []ast.Node{stmts}, ast.FormatText)
+
+	if err := desugarWildcards(tree, newComp()); err != nil {
+		t.Fatalf("desugar: %v", err)
+	}
+	gotStmts, ok := tree.Nodes[0].(*ast.Statements)
+	if !ok {
+		t.Fatalf("top-level node: got %T, want *ast.Statements", tree.Nodes[0])
+	}
+	if len(gotStmts.Nodes) != 1 {
+		t.Fatalf("Statements.Nodes len: got %d, want 1", len(gotStmts.Nodes))
+	}
+	outer, ok := gotStmts.Nodes[0].(*ast.ForRange)
+	if !ok {
+		t.Fatalf("Statements.Nodes[0]: got %T, want *ast.ForRange", gotStmts.Nodes[0])
+	}
+	// The wildcard should have produced a synthetic outer ForRange
+	// (different identity from the original inner) — verify by
+	// checking the inner LHS uses the user's `z`, not the synthetic
+	// `$wild0`.
+	if rangeIdentName(outer) != "a" {
+		t.Fatalf("outer RHS root: got %q, want %q (the wildcard's Expr)", rangeIdentName(outer), "a")
+	}
+}

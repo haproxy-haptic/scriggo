@@ -56,6 +56,12 @@ func desugarStmt(n ast.Node, comp *compilation) ast.Node {
 	case *ast.Block:
 		v.Nodes = desugarStmts(v.Nodes, comp)
 		return v
+	case *ast.Statements:
+		// `{%% ... %%}` multi-line statement blocks. Parser nests
+		// for-range / for / etc. statements inside the Nodes slice;
+		// recurse so wildcards inside survive into the type checker.
+		v.Nodes = desugarStmts(v.Nodes, comp)
+		return v
 	case *ast.If:
 		if v.Then != nil {
 			v.Then.Nodes = desugarStmts(v.Then.Nodes, comp)
