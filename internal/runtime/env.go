@@ -27,10 +27,11 @@ type env struct {
 	doneChan <-chan struct{}
 	doneCase reflect.SelectCase
 
-	// Only the callPath field can be changed after the vm has been started
-	// and access to this field must be done with this mutex.
+	// Only the callPath and callLine fields can be changed after the vm has
+	// been started and access to them must be done with this mutex.
 	mu       sync.Mutex
 	callPath string // path of the file where the main goroutine is in.
+	callLine int    // line within callPath of the current call site (0 if unknown).
 }
 
 func (env *env) CallPath() string {
@@ -38,6 +39,13 @@ func (env *env) CallPath() string {
 	callPath := env.callPath
 	env.mu.Unlock()
 	return callPath
+}
+
+func (env *env) CallLine() int {
+	env.mu.Lock()
+	callLine := env.callLine
+	env.mu.Unlock()
+	return callLine
 }
 
 func (env *env) Context() context.Context {

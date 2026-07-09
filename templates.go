@@ -164,11 +164,26 @@ func (t *Template) Run(out io.Writer, vars map[string]any, options *RunOptions) 
 	if options != nil && options.MaxParallelRenders != 0 {
 		vm.SetMaxParallelRenders(options.MaxParallelRenders)
 	}
+	if options != nil && options.CollectSourceMap {
+		vm.SetCollectSourceMap(true)
+	}
 	// Enable profiling if it was enabled at build time.
 	if t.profilingEnabled {
 		vm.SetProfiling(true)
 	}
 	err := vm.Run(t.fn, t.typeof, initGlobalVariables(t.globals, vars))
+	// Collect the source map if requested, converting runtime frames to public ones.
+	if options != nil && options.CollectSourceMap {
+		spans := vm.SourceSpans()
+		options.SourceSpans = make([]SourceSpan, len(spans))
+		for i, s := range spans {
+			frames := make([]SourceFrame, len(s.Frames))
+			for j, f := range s.Frames {
+				frames[j] = SourceFrame{Path: f.Path, Line: f.Line}
+			}
+			options.SourceSpans[i] = SourceSpan{Frames: frames, Length: s.Length, IsText: s.IsText}
+		}
+	}
 	// Collect profiling data if profiling was enabled and Profile was provided.
 	if t.profilingEnabled && options != nil && options.Profile != nil {
 		if data := vm.GetProfileData(); data != nil {

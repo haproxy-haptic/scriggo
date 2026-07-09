@@ -178,6 +178,12 @@ type functionBuilder struct {
 		addr  runtime.Addr
 		txt   [][]byte
 		inURL bool
+		// endLine is the source line immediately after the accumulated text
+		// (its start line + newline count). Used to avoid coalescing text
+		// across a source-line gap (e.g. a multi-line comment produces no
+		// instruction), which would make the source map advance line numbers
+		// through lines that don't exist in the output. 0 = unknown.
+		endLine int
 	}
 
 	// path of the current file. For example, when emitting a "render <path>"

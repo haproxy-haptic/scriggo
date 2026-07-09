@@ -5,6 +5,7 @@
 package compiler
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"slices"
@@ -871,9 +872,12 @@ func (fb *functionBuilder) emitShl(k bool, x, y, z int8, kind reflect.Kind) {
 // emitShow appends a new "Show" instruction to the function body.
 //
 //	show(type, value, ctx)
-func (fb *functionBuilder) emitShow(typ reflect.Type, v int8, ctx ast.Context, inURL, isURLSet bool) {
+func (fb *functionBuilder) emitShow(typ reflect.Type, v int8, ctx ast.Context, pos *ast.Position, inURL, isURLSet bool) {
 	t := fb.addType(typ, true)
 	c := encodeRenderContext(ctx, inURL, isURLSet)
+	// Record the source position so the runtime can attribute this show's
+	// output to its template line (RunOptions.CollectSourceMap).
+	fb.addPosAndPath(pos)
 	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpShow, A: int8(t), B: v, C: int8(c)})
 }
 
@@ -984,12 +988,22 @@ func (fb *functionBuilder) emitSubInv(k bool, x, y, z int8, kind reflect.Kind) {
 // emitText appends a new "Text" instruction to the function body.
 //
 //	text(txt, ctx)
-func (fb *functionBuilder) emitText(txt []byte, inURL, isURLSet bool) {
+func (fb *functionBuilder) emitText(txt []byte, pos *ast.Position, inURL, isURLSet bool) {
 	if len(fb.text.txt) > 0 {
 		addr := fb.currentAddr()
-		if addr == fb.text.addr+1 && inURL == fb.text.inURL {
+		// Only coalesce when the new run is source-contiguous with the accumulated
+		// one (its start line is exactly where the previous text ended). A gap —
+		// e.g. a multi-line {# comment #} that emits no instruction — must break
+		// the run so the source map doesn't count line numbers through the gap.
+		contiguous := pos == nil || fb.text.endLine == 0 || pos.Line == fb.text.endLine
+		if addr == fb.text.addr+1 && inURL == fb.text.inURL && contiguous {
 			if !slices.Contains(fb.labelAddrs, addr) {
+				// Coalesced into the previous OpText; keep its start position and
+				// advance the accumulated end line by this run's newline count.
 				fb.text.txt = append(fb.text.txt, txt)
+				if fb.text.endLine != 0 {
+					fb.text.endLine += bytes.Count(txt, []byte{'\n'})
+				}
 				return
 			}
 		}
@@ -998,6 +1012,11 @@ func (fb *functionBuilder) emitText(txt []byte, inURL, isURLSet bool) {
 	fb.text.addr = fb.currentAddr()
 	fb.text.txt = append(fb.text.txt, txt)
 	fb.text.inURL = inURL
+	if pos != nil {
+		fb.text.endLine = pos.Line + bytes.Count(txt, []byte{'\n'})
+	} else {
+		fb.text.endLine = 0
+	}
 	a, b := encodeUint16(uint16(len(fb.fn.Text)))
 	var c int8
 	if inURL {
@@ -1006,6 +1025,9 @@ func (fb *functionBuilder) emitText(txt []byte, inURL, isURLSet bool) {
 			c = 2
 		}
 	}
+	// Record the source position of this run's start so the runtime can
+	// attribute the (possibly multi-line) text to its template lines.
+	fb.addPosAndPath(pos)
 	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpText, A: a, B: b, C: c})
 }
 

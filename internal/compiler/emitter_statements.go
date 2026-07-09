@@ -5,11 +5,25 @@
 package compiler
 
 import (
+	"bytes"
 	"reflect"
 
 	"gitlab.com/haproxy-haptic/scriggo/ast"
 	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
+
+// textStartPos returns the source position of the first rendered byte of a Text
+// node, accounting for the left cut (whitespace trimmed by "{%- ... -%}", which
+// may span newlines). Used for the output-to-source map (CollectSourceMap).
+func textStartPos(node *ast.Text, cutLeft int) *ast.Position {
+	p := node.Pos()
+	if p == nil || cutLeft <= 0 {
+		return p
+	}
+	np := *p
+	np.Line += bytes.Count(node.Text[:cutLeft], []byte{'\n'})
+	return &np
+}
 
 // emitNodes emits instructions for nodes.
 func (em *emitter) emitNodes(nodes []ast.Node) {
@@ -222,7 +236,7 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 				if start < end {
 					txt := text.Text[start:end]
 					if len(txt) != 0 {
-						em.fb.emitText(txt, em.inURL, em.isURLSet)
+						em.fb.emitText(txt, textStartPos(text, start), em.inURL, em.isURLSet)
 					}
 				}
 			}
@@ -321,7 +335,7 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 					ti := em.ti(expr)
 					em.fb.enterStack()
 					r := em.emitExpr(expr, ti.Type)
-					em.fb.emitShow(ti.Type, r, ctx, em.inURL, em.isURLSet)
+					em.fb.emitShow(ti.Type, r, ctx, expr.Pos(), em.inURL, em.isURLSet)
 					em.fb.exitStack()
 				}
 			}
@@ -344,7 +358,7 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 			if start < end {
 				txt := node.Text[start:end]
 				if len(txt) != 0 {
-					em.fb.emitText(txt, em.inURL, em.isURLSet)
+					em.fb.emitText(txt, textStartPos(node, start), em.inURL, em.isURLSet)
 				}
 			}
 

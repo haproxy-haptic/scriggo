@@ -621,6 +621,83 @@ func (vm *VM) SetMaxParallelRenders(n int) {
 	}
 }
 
+// SetCollectSourceMap enables recording of the output-to-source line map.
+// Must be called after SetRenderer and before vm has been started.
+func (vm *VM) SetCollectSourceMap(on bool) {
+	if vm.renderer != nil {
+		vm.renderer.collectSrc = on
+	}
+}
+
+// SourceSpans returns the output-ordered source map collected during the run,
+// or nil if collection was not enabled.
+func (vm *VM) SourceSpans() []SourceSpan {
+	if vm.renderer == nil {
+		return nil
+	}
+	return vm.renderer.collectSpans()
+}
+
+// setSrcCtx records, for the instruction currently executing (at pc-1), the
+// template include stack of the output it is about to write (innermost first:
+// the current template, then each render/include caller). isText marks literal
+// template text. A no-op unless source-map collection is enabled.
+func (vm *VM) setSrcCtx(isText bool) {
+	if !vm.renderer.collectSrc {
+		return
+	}
+	vm.renderer.curFrames = vm.captureFrames(vm.pc - 1)
+	vm.renderer.curIsText = isText
+	vm.renderer.consumeNext = false // only a show consumes a pending value source
+}
+
+// setSrcCtxShow is setSrcCtx for a show opcode: it also flags the next write to
+// consume a pending rendered-to-string value's per-line source, if any.
+func (vm *VM) setSrcCtxShow() {
+	if !vm.renderer.collectSrc {
+		return
+	}
+	vm.renderer.curFrames = vm.captureFrames(vm.pc - 1)
+	vm.renderer.curIsText = false
+	vm.renderer.consumeNext = len(vm.renderer.pendingValueSources) > 0
+}
+
+// captureFrames walks the call stack (current frame at instruction ppc, then its
+// callers) and returns the include stack, innermost first. Mirrors the frame
+// walk in Stack. Frames whose template path is empty/internal are kept as-is;
+// the consumer filters to known templates.
+func (vm *VM) captureFrames(ppc Addr) []SourceFrame {
+	frames := make([]SourceFrame, 0, len(vm.calls)+1)
+	if info, ok := vm.fn.InstructionInfo[ppc]; ok {
+		frames = append(frames, SourceFrame{Path: info.Path, Line: info.Position.Line})
+	} else {
+		frames = append(frames, SourceFrame{})
+	}
+	for i := len(vm.calls) - 1; i >= 0; i-- {
+		call := vm.calls[i]
+		var cppc Addr
+		if call.status == tailed {
+			cppc = call.pc - 1
+		} else {
+			cppc = call.pc - 2
+		}
+		if info, ok := call.cl.fn.InstructionInfo[cppc]; ok {
+			frames = append(frames, SourceFrame{Path: info.Path, Line: info.Position.Line})
+		}
+	}
+	return frames
+}
+
+// stashValueSource records, on the parent renderer, the per-line include stack of
+// a just-completed rendered-to-string value so the show that outputs it can
+// attribute per line. buf is the value string; r is the sub-render's renderer.
+func (vm *VM) stashValueSource(parent *renderer, r *renderer, buf string) {
+	if parent == nil || !parent.collectSrc {
+		return
+	}
+	parent.pendingValueSources = append(parent.pendingValueSources, perLineFrames(buf, r.collectSpans()))
+}
+
 // SetPrint sets the "print" builtin function.
 //
 // SetPrint must not be called after vm has been started.
@@ -725,6 +802,7 @@ func (vm *VM) prepareEnvCallPath() {
 	if vm.main {
 		vm.env.mu.Lock()
 		vm.env.callPath = vm.fn.InstructionInfo[vm.pc-1].Path
+		vm.env.callLine = vm.fn.InstructionInfo[vm.pc-1].Position.Line
 		vm.env.mu.Unlock()
 	}
 }
@@ -1097,11 +1175,12 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 		for i := range nunIn {
 			if i < lastNonVariadic {
 				if i < 2 && typ.In(i) == envType {
-					// Set the path of the file that contains the call.
+					// Set the path and line of the file that contains the call.
 					if vm.main {
 						env := vm.env
 						env.mu.Lock()
 						env.callPath = vm.fn.InstructionInfo[vm.pc-1].Path
+						env.callLine = vm.fn.InstructionInfo[vm.pc-1].Position.Line
 						env.mu.Unlock()
 					}
 					args[i].Set(vm.envArg)

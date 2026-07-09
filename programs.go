@@ -94,6 +94,45 @@ type RunOptions struct {
 	//
 	// Used for templates only. Ignored for programs.
 	MaxParallelRenders int
+
+	// CollectSourceMap requests an output-to-source line map: after Run,
+	// SourceSpans holds one span per contiguous run of rendered output,
+	// attributing it to the template source position that produced it. This
+	// is pure observation and does not change the rendered bytes, but adds
+	// per-write bookkeeping, so leave it false for production rendering.
+	//
+	// Used for templates only. Ignored for programs.
+	CollectSourceMap bool
+
+	// SourceSpans is populated after Run when CollectSourceMap is true. The
+	// spans are in output order and their Length fields sum to the output
+	// size, so a caller can walk the rendered bytes and attribute each output
+	// line to (Path, Line). Output produced by a parallel "{{ go … }}" render
+	// is attributed as one span to the go-render call site.
+	SourceSpans []SourceSpan
+}
+
+// SourceFrame is one level of a template include stack: the template registry
+// key (e.g. "haproxy.cfg" for the main template, or a snippet/map/file name) and
+// the 1-based source line active in it.
+type SourceFrame struct {
+	Path string
+	Line int
+}
+
+// SourceSpan attributes a contiguous run of rendered output to the template
+// include stack that produced it. See RunOptions.CollectSourceMap.
+type SourceSpan struct {
+	// Frames is the include stack, innermost first: Frames[0] is where the text
+	// literally is, followed by the render/include callers up to the entry
+	// template. Piped renders ("{{ render \"x\" | indent }}") resolve into x's
+	// own source when the filter is line-preserving.
+	Frames []SourceFrame
+	// Length is the number of output bytes this span covers.
+	Length int
+	// IsText reports whether the span is literal template text (so Frames[0].Line
+	// advances with each '\n' in the output) rather than a show-expression value.
+	IsText bool
 }
 
 // Program is a program compiled with the [Build] function.

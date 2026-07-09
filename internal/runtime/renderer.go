@@ -33,12 +33,49 @@ var stringBuilderPool = newChanPool(256, func() *strings.Builder {
 	return &strings.Builder{}
 })
 
+// SourceFrame is one level of the template include stack: the template path and
+// the source line active in it.
+type SourceFrame struct {
+	Path string
+	Line int
+}
+
+// SourceSpan attributes a contiguous run of rendered output to the template
+// include stack that produced it (see renderer.collectSrc). Frames is innermost
+// first: Frames[0] is where the text literally is, and the rest are the render /
+// include callers up to the entry template. Length is the number of output
+// bytes; IsText distinguishes literal template text (Frames[0].Line advances per
+// '\n') from a show-expression value (all its lines map to the same frames).
+type SourceSpan struct {
+	Frames []SourceFrame
+	Length int
+	IsText bool
+}
+
+// valueSource is the per-output-line include stack of a rendered-to-string value
+// ("{{ render \"x\" | filter }}"), captured while the sub-render ran and consumed
+// by the show that outputs the (whitespace-filtered) value. Each entry keeps the
+// buffer line's text so the show can align by trimmed content even when the
+// filter drops or indents lines (strip / indent), and so an unrelated value
+// won't match.
+type valueLine struct {
+	frames []SourceFrame
+	text   string
+}
+
+type valueSource []valueLine
+
 // outputSegment represents a segment of output in the renderer.
 // It can either be a literal string or a future waiting for a parallel render.
 type outputSegment struct {
 	isLiteral bool
 	literal   string
 	future    *renderFuture
+	// srcSpans holds the source-map spans for a literal segment (nil unless
+	// collectSrc). For a future segment, goFrames attributes its whole output to
+	// the "{{ go … }}" render call site (innermost first).
+	srcSpans []SourceSpan
+	goFrames []SourceFrame
 }
 
 // defaultMaxParallelRenders returns the default maximum number of concurrent go render operations.
@@ -108,16 +145,247 @@ type renderer struct {
 	// maxParallelDepth is the maximum nesting depth for parallel renders.
 	// If zero, defaults to 100.
 	maxParallelDepth int32
+
+	// --- source-map collection (opt-in via CollectSourceMap) ---
+	// collectSrc enables recording of SourceSpans. When false (production) the
+	// added code is a single branch per write and carries no overhead.
+	collectSrc bool
+	// curFrames is the include stack (innermost first) of the output currently
+	// being written; curIsText marks literal template text. Set by the VM.
+	curFrames []SourceFrame
+	curIsText bool
+	// pendingSpans mirror writes into the current out/pendingBuf region;
+	// finalSpans is the reassembled result (prefix + segments) after futures.
+	pendingSpans []SourceSpan
+	finalSpans   []SourceSpan
+	// recW records each write's span, then forwards to out/pendingBuf.
+	recW recordingWriter
+	// pendingValueSources is a LIFO stack of per-line include stacks for
+	// rendered-to-string values ("{{ render \"x\" | filter }}") awaiting their
+	// show. consumeNext is set by a show opcode so the next write attributes the
+	// value's output per line instead of to the show's single frame.
+	pendingValueSources []valueSource
+	consumeNext         bool
 }
 
 // newRenderer returns a new renderer.
 func newRenderer(out io.Writer) *renderer {
-	return &renderer{out: out}
+	r := &renderer{out: out}
+	r.recW = recordingWriter{r}
+	return r
+}
+
+// recordingWriter records a SourceSpan for each write (attributed to the
+// renderer's current curPath/curLine/curIsText) and forwards to the underlying
+// out/pendingBuf. Used only while collectSrc is true.
+type recordingWriter struct{ r *renderer }
+
+func (w recordingWriter) Write(p []byte) (int, error) {
+	n, err := w.r.rawWrite(p)
+	if n > 0 {
+		w.r.record(string(p[:n]))
+	}
+	return n, err
+}
+
+func (w recordingWriter) WriteString(s string) (int, error) {
+	n, err := w.r.rawWriteString(s)
+	if n > 0 {
+		w.r.record(s[:n])
+	}
+	return n, err
+}
+
+// record appends span(s) for one write. Normally one span attributed to the
+// current include stack; but when a show has flagged consumeNext and a
+// rendered-to-string value is pending that this write derives from, the value's
+// per-line include stacks are used instead (so a "{{ render \"x\" | indent }}"
+// line resolves to x's own source, not the show line).
+func (r *renderer) record(content string) {
+	n := len(content)
+	if n == 0 {
+		return
+	}
+	if r.consumeNext {
+		r.consumeNext = false // one-shot: only the first write of the show consumes
+		if r.consumeValueSources(content) {
+			return
+		}
+	}
+	r.pendingSpans = append(r.pendingSpans, SourceSpan{Frames: r.curFrames, Length: n, IsText: r.curIsText})
+}
+
+// consumeValueSources attributes content per output line from the pending value
+// sources. It first tries the whole pending group concatenated in render order (a
+// "render_glob \"x-*\" | filter" that matched several snippets, whose outputs are
+// concatenated then filtered), then just the most recent (a single
+// "render \"x\" | filter"). On success it records per-line spans and drops the
+// used sources; returns false if content doesn't derive from them (then the
+// caller records a single fallback span). Each source line carries its own text +
+// frames, and recordValue requires an exact trimmed-content match per non-blank
+// line, so a wrong concatenation simply fails to match and falls back.
+func (r *renderer) consumeValueSources(content string) bool {
+	k := len(r.pendingValueSources)
+	if k == 0 {
+		return false
+	}
+	// Grow a top-suffix of the source stack until its concatenation matches the
+	// content, then consume exactly that suffix. A single "render x | filter"
+	// matches the top source (n=1); a "render_glob | filter" matching several
+	// snippets matches the top n sources concatenated. Earlier orphaned sources —
+	// from value-renders in the same renderer whose result was never filtered —
+	// stay below the matched suffix and don't interfere, and empty sources between
+	// real ones contribute no lines so a suffix spanning them still matches. This
+	// is why we grow from the top rather than trying the whole stack at once.
+	combined := valueSource{}
+	for n := 1; n <= k; n++ {
+		src := r.pendingValueSources[k-n]
+		grown := make(valueSource, 0, len(src)+len(combined))
+		grown = append(grown, src...)
+		grown = append(grown, combined...)
+		combined = grown
+		if r.recordValue(content, combined) {
+			r.pendingValueSources = r.pendingValueSources[:k-n]
+			return true
+		}
+	}
+	return false
+}
+
+// recordValue attributes a filtered rendered-to-string value per output line,
+// aligning each non-blank output line to the next non-blank source line by
+// trimmed content (blank lines skipped on both sides). This survives
+// whitespace-only filters that drop or indent lines (strip, indent), and rejects
+// unrelated values: if any non-blank output line doesn't match the next source
+// line, it records nothing and returns false so the caller falls back.
+func (r *renderer) recordValue(content string, src valueSource) bool {
+	segs := splitKeepNL(content)
+	assigned := make([][]SourceFrame, len(segs))
+	si := 0
+	for ci, seg := range segs {
+		if strings.TrimSpace(seg) == "" {
+			continue
+		}
+		for si < len(src) && strings.TrimSpace(src[si].text) == "" {
+			si++
+		}
+		if si >= len(src) || strings.TrimSpace(src[si].text) != strings.TrimSpace(seg) {
+			return false // not a whitespace-only transform of this value
+		}
+		assigned[ci] = src[si].frames
+		si++
+	}
+	for i, seg := range segs {
+		r.pendingSpans = append(r.pendingSpans, SourceSpan{Frames: assigned[i], Length: len(seg), IsText: true})
+	}
+	return true
+}
+
+// splitKeepNL splits s into lines, each retaining its trailing '\n' (the last
+// has none if s doesn't end in '\n').
+func splitKeepNL(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			out = append(out, s[start:i+1])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		out = append(out, s[start:])
+	}
+	return out
+}
+
+// perLineFrames converts a rendered string and its spans into one include stack
+// per output line (innermost line advanced within multi-line text spans), keeping
+// each line's text for later trimmed-content alignment.
+func perLineFrames(raw string, spans []SourceSpan) valueSource {
+	segs := splitKeepNL(raw)
+	out := make(valueSource, len(segs))
+	for i, seg := range segs {
+		out[i].text = seg
+	}
+	line, pos := 0, 0
+	for _, sp := range spans {
+		end := pos + sp.Length
+		if end > len(raw) {
+			end = len(raw)
+		}
+		sub := 0
+		for i := pos; i < end; i++ {
+			if line < len(out) && out[line].frames == nil {
+				out[line].frames = adjustFrames(sp.Frames, sp.IsText, sub)
+			}
+			if raw[i] == '\n' {
+				line++
+				if sp.IsText {
+					sub++
+				}
+			}
+		}
+		pos = end
+	}
+	return out
+}
+
+// adjustFrames copies frames, advancing the innermost line by sub for text spans.
+func adjustFrames(frames []SourceFrame, isText bool, sub int) []SourceFrame {
+	if len(frames) == 0 {
+		return nil
+	}
+	cp := make([]SourceFrame, len(frames))
+	copy(cp, frames)
+	if isText && sub > 0 {
+		cp[0].Line += sub
+	}
+	return cp
+}
+
+// rawWrite / rawWriteString write to the pending buffer (parallel active) or
+// directly to out, without recording.
+func (r *renderer) rawWrite(p []byte) (int, error) {
+	if r.pendingBuf != nil {
+		return r.pendingBuf.Write(p)
+	}
+	return r.out.Write(p)
+}
+
+func (r *renderer) rawWriteString(s string) (int, error) {
+	if r.pendingBuf != nil {
+		return r.pendingBuf.WriteString(s)
+	}
+	return io.WriteString(r.out, s)
+}
+
+// takePendingSpans returns and clears the accumulated pending spans.
+func (r *renderer) takePendingSpans() []SourceSpan {
+	if !r.collectSrc {
+		return nil
+	}
+	s := r.pendingSpans
+	r.pendingSpans = nil
+	return s
+}
+
+// collectSpans returns the final output-ordered source map after a run.
+func (r *renderer) collectSpans() []SourceSpan {
+	if len(r.finalSpans) == 0 {
+		return r.pendingSpans // no parallel render: everything is sequential
+	}
+	if len(r.pendingSpans) == 0 {
+		return r.finalSpans
+	}
+	return append(r.finalSpans, r.pendingSpans...)
 }
 
 // outputWriter returns the writer to use for output - either the pending
 // buffer for parallel rendering or the main output writer.
 func (r *renderer) outputWriter() io.Writer {
+	if r.collectSrc {
+		return r.recW
+	}
 	if r.pendingBuf != nil {
 		return r.pendingBuf
 	}
@@ -1188,19 +1456,24 @@ func (r *renderer) addFutureSlot(future *renderFuture) (*errgroup.Group, error) 
 	if r.pendingBuf == nil {
 		r.pendingBuf = stringBuilderPool.get()
 		r.pendingBuf.Reset()
+		// The prefix written before any future went straight to out, so its
+		// spans open finalSpans; segments (below) are appended after it.
+		r.finalSpans = append(r.finalSpans, r.takePendingSpans()...)
 	} else if r.pendingBuf.Len() > 0 {
 		// Flush pending output to a literal segment
 		r.segments = append(r.segments, outputSegment{
 			isLiteral: true,
 			literal:   r.pendingBuf.String(),
+			srcSpans:  r.takePendingSpans(),
 		})
 		r.pendingBuf.Reset()
 	}
 
-	// Add the future slot
+	// Add the future slot, attributing its whole output to the go-render site.
 	r.segments = append(r.segments, outputSegment{
 		isLiteral: false,
 		future:    future,
+		goFrames:  r.curFrames,
 	})
 
 	// Return the errgroup for the caller to spawn work on
@@ -1240,6 +1513,7 @@ func (r *renderer) flushWithFutures() error {
 		r.segments = append(r.segments, outputSegment{
 			isLiteral: true,
 			literal:   r.pendingBuf.String(),
+			srcSpans:  r.takePendingSpans(),
 		})
 	}
 
@@ -1287,6 +1561,7 @@ func (r *renderer) flushWithFutures() error {
 	for i, seg := range segments {
 		if seg.isLiteral {
 			results[i] = seg.literal
+			r.finalSpans = append(r.finalSpans, seg.srcSpans...)
 		} else {
 			// Work has completed, so exactly one channel has a value
 			select {
@@ -1295,6 +1570,11 @@ func (r *renderer) flushWithFutures() error {
 				return err
 			case result := <-seg.future.result:
 				results[i] = result
+				// Attribute the whole parallel-rendered block to its go-render
+				// call site (one span; per-line within is not tracked).
+				if r.collectSrc {
+					r.finalSpans = append(r.finalSpans, SourceSpan{Frames: seg.goFrames, Length: len(result), IsText: false})
+				}
 			}
 		}
 	}
@@ -1314,6 +1594,9 @@ func (r *renderer) flushWithFutures() error {
 // writeForParallel writes to either the pending buffer (if parallel rendering
 // is active) or directly to out.
 func (r *renderer) writeForParallel(p []byte) (int, error) {
+	if r.collectSrc {
+		return r.recW.Write(p)
+	}
 	if r.pendingBuf != nil {
 		return r.pendingBuf.Write(p)
 	}
@@ -1323,6 +1606,9 @@ func (r *renderer) writeForParallel(p []byte) (int, error) {
 // writeStringForParallel writes a string to either the pending buffer (if
 // parallel rendering is active) or directly to out.
 func (r *renderer) writeStringForParallel(s string) (int, error) {
+	if r.collectSrc {
+		return r.recW.WriteString(s)
+	}
 	if r.pendingBuf != nil {
 		return r.pendingBuf.WriteString(s)
 	}

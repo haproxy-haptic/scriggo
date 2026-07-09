@@ -46,6 +46,11 @@ type Env interface {
 	// returned value is not significant.
 	CallPath() string
 
+	// CallLine returns the 1-based line, within CallPath's file, of the call
+	// site of the caller function, or 0 if unknown. Like CallPath, it is only
+	// significant when called by the main goroutine.
+	CallLine() int
+
 	// Context returns the context of the execution.
 	// It is the context passed as an option for execution.
 	Context() context.Context

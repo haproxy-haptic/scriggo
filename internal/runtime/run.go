@@ -368,7 +368,11 @@ func (vm *VM) executeMacro(fn *Function, format int8) {
 		vm.moreGeneralStack()
 	}
 	if format == ReturnString {
-		vm.renderer = newRenderer(&strings.Builder{})
+		nr := newRenderer(&strings.Builder{})
+		if call.renderer != nil {
+			nr.collectSrc = call.renderer.collectSrc // collect the value's source too
+		}
+		vm.renderer = nr
 	} else if ast.Format(format) != fn.Format {
 		if fn.Format == ast.FormatMarkdown && ast.Format(format) == ast.FormatHTML {
 			if vm.env.conv == nil {
@@ -633,7 +637,11 @@ mainLoop:
 				if fn.Macro {
 					call.renderer = vm.renderer
 					if b == ReturnString {
-						vm.renderer = newRenderer(&strings.Builder{})
+						nr := newRenderer(&strings.Builder{})
+						if call.renderer != nil {
+							nr.collectSrc = call.renderer.collectSrc // collect the value's source too
+						}
+						vm.renderer = nr
 					} else if ast.Format(b) != fn.Format {
 						if fn.Format == ast.FormatMarkdown && ast.Format(b) == ast.FormatHTML {
 							if vm.env.conv == nil {
@@ -1061,6 +1069,7 @@ mainLoop:
 
 		// GoRender - spawn a parallel render operation
 		case OpGoRender:
+			vm.setSrcCtx(false) // attribute the parallel block to this go-render site
 			fn := vm.fn.Functions[uint8(a)]
 			off := vm.fn.Body[vm.pc]
 			vm.pc++
@@ -1083,6 +1092,7 @@ mainLoop:
 
 		// GoRenderIndirect - spawn a parallel render operation for an indirect function call
 		case OpGoRenderIndirect:
+			vm.setSrcCtx(false) // attribute the parallel block to this go-render site
 			f := vm.general(a).Interface().(*callable)
 			off := vm.fn.Body[vm.pc]
 			vm.pc++
@@ -2408,7 +2418,9 @@ mainLoop:
 						b := fn.Body[call.pc-2].B
 						if b == ReturnString {
 							out := vm.renderer.Out().(*strings.Builder)
-							vm.setString(1, out.String())
+							s := out.String()
+							vm.stashValueSource(call.renderer, vm.renderer, s)
+							vm.setString(1, s)
 						} else if vm.fn.Format == ast.FormatMarkdown && ast.Format(b) == ast.FormatHTML {
 							out := vm.renderer.Out().(*bytes.Buffer)
 							err := vm.env.conv(out.Bytes(), call.renderer.out)
@@ -2616,6 +2628,7 @@ mainLoop:
 
 		// Show
 		case OpShow:
+			vm.setSrcCtxShow()
 			t := vm.fn.Types[uint8(a)]
 			st, ok := t.(ScriggoType)
 			if ok {
@@ -2691,6 +2704,7 @@ mainLoop:
 		// Encoding: Op=OpFieldShow, A=struct_reg, B=field_index, C=context
 		// Next instruction word: Op=type_index (other fields unused)
 		case OpFieldShow:
+			vm.setSrcCtxShow()
 			v := vm.general(a)
 			// Fast path for single-level field access (same optimization as OpField)
 			fieldIndexes := vm.fn.FieldIndexes[uint8(b)]
@@ -2725,6 +2739,7 @@ mainLoop:
 		// Encoding: Op=OpMapIndexShow, A=map_reg, B=key_reg, C=context
 		// Next instruction word: Op=type_index (other fields unused)
 		case OpMapIndexShow, -OpMapIndexShow:
+			vm.setSrcCtxShow()
 			m := vm.general(a)
 			t := m.Type()
 			k := reflect.New(t.Key()).Elem()
@@ -2931,6 +2946,7 @@ mainLoop:
 
 		// Text
 		case OpText:
+			vm.setSrcCtx(true)
 			txt := vm.fn.Text[decodeUint16(a, b)]
 			inURL, isSet := c > 0, c == 2
 			err := vm.renderer.Text(txt, inURL, isSet)
