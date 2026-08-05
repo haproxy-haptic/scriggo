@@ -168,6 +168,39 @@ func TestJinja2WhitespaceControl(t *testing.T) {
 			want:     `a`,
 		},
 
+		// ===== Standalone Comment Lines =====
+		// A comment alone on its line vanishes with the whole line — the
+		// single-line and multi-line forms must behave identically. The
+		// multi-line form used to leave its leading indentation fused into
+		// the following line, because the token's lin (the lexer's line at
+		// emission, i.e. the comment's END line) made the parser end the
+		// line and reset the standalone-cut state.
+		{
+			name:     "single-line standalone comment removes its whole line",
+			template: "sources:\n  {# a comment #}\n  key:\n    field: 1\n",
+			want:     "sources:\n  key:\n    field: 1\n",
+		},
+		{
+			name:     "multi-line standalone comment removes its whole lines",
+			template: "sources:\n  {# a comment\n     spanning lines #}\n  key:\n    field: 1\n",
+			want:     "sources:\n  key:\n    field: 1\n",
+		},
+		{
+			name:     "multi-line standalone comment mid-file",
+			template: "a:\n  {# c\n     d #}\n  b: 1\nc: 2\n",
+			want:     "a:\n  b: 1\nc: 2\n",
+		},
+		{
+			name:     "multi-line comment with text before it is not standalone",
+			template: "a: 1 {# c\n   d #}\n  b: 2\n",
+			want:     "a: 1 \n  b: 2\n",
+		},
+		{
+			name:     "multi-line comment with text after it is not standalone",
+			template: "a:\n  {# c\n     d #} tail\n  b: 2\n",
+			want:     "a:\n   tail\n  b: 2\n",
+		},
+
 		// ===== Nested Control Flow Tests =====
 		// Nested if with show
 		{
