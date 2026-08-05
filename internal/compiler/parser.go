@@ -350,7 +350,7 @@ func ParseTemplateSource(src []byte, format ast.Format, imported, noParseShow bo
 		}
 		if line < tokLin || tok.pos.End == lastIndex {
 			if p.cutSpacesToken && numTokenInLine == 1 {
-				cutSpaces(firstText, text)
+				cutSpaces(firstText, text, p.pendingTrimRight)
 			}
 			line = tokLin
 			firstText = text
@@ -2052,7 +2052,13 @@ func (p *parsing) addNode(node ast.Node) {
 
 // cutSpaces cuts the leading and trailing spaces from a line. first and last
 // are respectively the initial and the final Text node of the line.
-func cutSpaces(first, last *ast.Text) {
+func cutSpaces(first, last *ast.Text, pendingTrimRight bool) {
+	// An explicit -%} / -#} marker trims last's left side — either already
+	// applied (Cut.Left > 0) or still pending (the marker's trim lands on the
+	// text node only when it is added, after this runs). Recorded before the
+	// implicit cuts below, because they also write Cut.Left and would make
+	// the two indistinguishable.
+	lastExplicitlyTrimmed := pendingTrimRight || (last != nil && last.Cut.Left > 0)
 	var firstCut int
 	if first != nil {
 		// So that spaces can be cut, first.Text must only contain '', '\t' and '\r',
@@ -2095,8 +2101,13 @@ func cutSpaces(first, last *ast.Text) {
 		}
 	}
 	if first != nil {
-		// Only set if not already trimmed by explicit Jinja2-style markers
-		if first.Cut.Right == 0 {
+		// Only set if not already trimmed by explicit Jinja2-style markers.
+		// Also skip when the following text (last) was explicitly trimmed by
+		// -%} / -#}: the author chose "keep my left side, eat the right", so
+		// the line's leading whitespace is content — it becomes the indent of
+		// whatever the explicit right-trim pulled up. The mirrored rule for
+		// {%- already exists in the last-side cut above.
+		if first.Cut.Right == 0 && !lastExplicitlyTrimmed {
 			first.Cut.Right = len(first.Text) - firstCut
 		}
 	}

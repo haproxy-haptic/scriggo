@@ -200,6 +200,20 @@ func TestJinja2WhitespaceControl(t *testing.T) {
 			template: "a:\n  {# c\n     d #} tail\n  b: 2\n",
 			want:     "a:\n   tail\n  b: 2\n",
 		},
+		// An explicit right-trim keeps the comment line's leading whitespace:
+		// the author chose "keep my left, eat the right", so that whitespace
+		// becomes the indentation of the pulled-up following content. The
+		// standalone-line cut must not remove it.
+		{
+			name:     "standalone comment with explicit right trim keeps its indent",
+			template: "spec:\n      {# c -#}\n      dnsConfig:\n",
+			want:     "spec:\n      dnsConfig:\n",
+		},
+		{
+			name:     "multi-line standalone comment with explicit right trim keeps its indent",
+			template: "spec:\n      {# c\n         d -#}\n      dnsConfig:\n",
+			want:     "spec:\n      dnsConfig:\n",
+		},
 
 		// ===== Nested Control Flow Tests =====
 		// Nested if with show
