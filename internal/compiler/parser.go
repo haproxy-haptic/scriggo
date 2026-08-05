@@ -339,11 +339,20 @@ func ParseTemplateSource(src []byte, format ast.Format, imported, noParseShow bo
 			text = ast.NewText(tok.pos, tok.txt, ast.Cut{})
 		}
 
-		if line < tok.lin || tok.pos.End == lastIndex {
+		// A token's lin is the lexer's line at emission — the END line of the
+		// token. For a multi-line comment that would end the current line here,
+		// resetting firstText before the standalone-line cut below could use
+		// it, so the comment's leading indentation survived and fused into the
+		// following line. A comment belongs to the line it STARTS on.
+		tokLin := tok.lin
+		if tok.typ == tokenComment {
+			tokLin = tok.pos.Line
+		}
+		if line < tokLin || tok.pos.End == lastIndex {
 			if p.cutSpacesToken && numTokenInLine == 1 {
 				cutSpaces(firstText, text)
 			}
-			line = tok.lin
+			line = tokLin
 			firstText = text
 			p.cutSpacesToken = false
 			numTokenInLine = 0
