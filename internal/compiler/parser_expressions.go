@@ -75,9 +75,25 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 		case tokenMap: // map
 			canCompositeLiteral = true
 			mapType := ast.NewMapType(tok.pos, nil, nil)
+			mapPos := tok.pos
 			tok = p.next()
 			if tok.typ != tokenLeftBracket {
-				panic(syntaxError(tok.pos, "unexpected %s, expecting [", tok))
+				// `map` not followed by `[` is not a map type. The Go
+				// grammar has no other production for it, so this
+				// position was previously an unconditional syntax
+				// error — resolving `map` as an ordinary identifier
+				// here only accepts programs that did not compile
+				// before, and cannot change the meaning of any that
+				// did. Templates need it so a collection helper can
+				// carry the name every other language gives it.
+				// Matches `case tokenIdentifier`, which leaves this
+				// false: a `{` after a plain identifier opens a block,
+				// not a composite literal.
+				canCompositeLiteral = false
+				p.unread(tok)
+				operand = ast.NewIdentifier(mapPos, "map")
+				tok = p.next()
+				break
 			}
 			var typ ast.Expression
 			typ, tok = p.parseExprNoChain(p.next(), false, false, true, false)
