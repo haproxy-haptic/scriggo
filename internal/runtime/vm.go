@@ -1862,7 +1862,17 @@ func (c *callable) Value(env *env) reflect.Value {
 	fn := c.fn
 	vars := c.vars
 	c.value = reflect.MakeFunc(fn.Type, func(args []reflect.Value) []reflect.Value {
-		nvm := create(env)
+		// Pooled, not create(): a fresh VM allocates four register banks of
+		// stackSize entries (~28 KB), and this path runs once per call from
+		// native code. A native helper that invokes a template closure per
+		// slice element therefore paid that on every element — measured at
+		// ~32 KB and ~5.6 µs per call, which made an element-wise pipeline
+		// ~9x slower and ~100x hungrier than the equivalent template loop.
+		// The deferred put must survive a panic: runFunc panics to propagate
+		// template errors, and leaking the VM would defeat the pool exactly
+		// when a render is already failing.
+		nvm := getPooledVM(env)
+		defer putPooledVM(nvm)
 		if fn.Macro {
 			nvm.renderer = newRenderer(&strings.Builder{})
 		}
