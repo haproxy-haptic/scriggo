@@ -63,6 +63,10 @@ type compilation struct {
 	// build so $wildN identifiers are unique across the whole tree.
 	currentWildcardIndex int
 
+	// currentPipelineIndex counts synthetic names for the pipeline
+	// lowering pass (see desugar_pipeline.go).
+	currentPipelineIndex int
+
 	// currentIteaIndex is the index used to generate the name of the current
 	// 'itea' identifier.
 	// After initialization, it should be accessed exclusively by the method
@@ -107,6 +111,7 @@ func newCompilation(globalScope map[string]scopeName) *compilation {
 		renderInheritContextMacro: map[*ast.Render]renderIR{},
 		currentIteaIndex:          -1,
 		currentWildcardIndex:      -1,
+		currentPipelineIndex:      -1,
 		globalScope:               globalScope,
 		extendingTrees:            map[string]bool{},
 		extendedTrees:             map[string]bool{},
@@ -174,4 +179,14 @@ func (compilation *compilation) finalizeUsingStatements(tc *typechecker) error {
 		}
 	}
 	return nil
+}
+
+// generatePipelineName generates a fresh synthetic identifier prefix for the
+// collection-pipeline lowering pass. One lowered chain uses several names
+// (source, hoisted closures, per-stage element), all sharing this prefix. The
+// `$` prefix mirrors the `$itea` and `$wild` conventions — unparseable as a
+// user identifier, so collisions are impossible.
+func (compilation *compilation) generatePipelineName() string {
+	compilation.currentPipelineIndex++
+	return "$pipe" + strconv.Itoa(compilation.currentPipelineIndex)
 }
