@@ -108,6 +108,11 @@ func putPooledVM(vm *VM) {
 	if vm.ranges != nil {
 		vm.ranges = vm.ranges[:0]
 	}
+	// rangesBase indexes into vm.ranges, which was just truncated. Leaving it
+	// set makes the next user of this VM address the range stack from a base
+	// that no longer exists. A run that unwinds normally resets it itself, so
+	// only a run that ends early — a panicking render — puts a VM back dirty.
+	vm.rangesBase = 0
 
 	vmPool.put(vm)
 }
