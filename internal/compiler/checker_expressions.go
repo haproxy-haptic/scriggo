@@ -1562,10 +1562,13 @@ func (tc *typechecker) checkBuiltinCall(expr *ast.Call) []*typeInfo {
 				expr.IR.AppendArg1 = conversion
 				tc.checkExpr(expr.IR.AppendArg1)
 			} else {
-				elemType := slice.Type.Elem()
+				// Go requires the spread operand to be assignable to the
+				// destination SLICE type, not merely element-to-element:
+				// []*T does not satisfy []any, and letting it through here
+				// reaches reflect.AppendSlice, which panics mid-run.
 				if t.Type.Kind() != reflect.Slice ||
-					tc.isAssignableTo(&typeInfo{Type: t.Type.Elem()}, arg1, elemType) != nil {
-					panic(tc.errorf(expr, "cannot use %s (type %s) as type []%s in append", arg1, t, elemType))
+					tc.isAssignableTo(&typeInfo{Type: t.Type}, arg1, slice.Type) != nil {
+					panic(tc.errorf(expr, "cannot use %s (type %s) as type %s in append", arg1, t, slice.Type))
 				}
 			}
 		} else if len(expr.Args) > 1 {
