@@ -48,6 +48,9 @@ type typeInfo struct {
 	// type in binary operations. Only valid when propertyNeedsInterfaceConversion is set.
 	// The Type field holds the target type, ConvertFromType holds the source interface type.
 	ConvertFromType reflect.Type
+	// AdaptiveLambdaParams mirrors native.AdaptiveFunc.LambdaParams and types
+	// a lambda argument from the arguments to its left.
+	AdaptiveLambdaParams func(int, []reflect.Type) []reflect.Type
 	// AdaptiveReturnType is set when the typeInfo represents a
 	// native.AdaptiveFunc declaration. checkCallExpression invokes it
 	// once per call site with the static types of the call's actual
@@ -55,9 +58,9 @@ type typeInfo struct {
 	// static return type, overriding Impl's declared concrete return.
 	// Nil for non-adaptive functions.
 	AdaptiveReturnType func(argTypes []reflect.Type) (reflect.Type, error)
-	value             any          // value; for packages has type *Package.
-	valueType         reflect.Type // When value is a native type holds the original type of value.
-	replacement       ast.Node     // Replacement node.
+	value              any          // value; for packages has type *Package.
+	valueType          reflect.Type // When value is a native type holds the original type of value.
+	replacement        ast.Node     // Replacement node.
 }
 
 // methodType represents the type of a method, intended as a combination of a

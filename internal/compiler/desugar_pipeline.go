@@ -252,7 +252,9 @@ func literalClosureArg(call *ast.Call, piped bool) *ast.Func {
 	if len(fn.Type.Parameters) != 1 || len(fn.Type.Result) != 1 {
 		return nil
 	}
-	if fn.Type.Parameters[0].Ident == nil || fn.Type.Result[0].Type == nil {
+	// The result type need not be written: accumulatorInit derives it by
+	// calling the stage's own native on an empty slice.
+	if fn.Type.Parameters[0].Ident == nil {
 		return nil
 	}
 	return fn

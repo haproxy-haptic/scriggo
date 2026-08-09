@@ -1069,12 +1069,19 @@ LOOP:
 			}
 			endLineAsSemicolon = true
 		case '=':
-			if len(l.src) == 1 || l.src[1] != '=' {
-				l.emit(tokenSimpleAssignment, 1)
-				l.column++
-			} else {
+			switch {
+			case len(l.src) > 1 && l.src[1] == '=':
 				l.emit(tokenEqual, 2)
 				l.column += 2
+			case len(l.src) > 1 && l.src[1] == '>':
+				// The lambda arrow. '=>' has no other meaning in the grammar:
+				// an assignment cannot be followed by '>', so this cannot
+				// change how any program that compiled before is read.
+				l.emit(tokenLambda, 2)
+				l.column += 2
+			default:
+				l.emit(tokenSimpleAssignment, 1)
+				l.column++
 			}
 			endLineAsSemicolon = false
 		case '+':

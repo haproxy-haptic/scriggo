@@ -217,6 +217,13 @@ func (p *parsing) parseExpr(tok token, canBeSwitchGuard, canElideType, mustBeTyp
 			ident := p.parseIdentifierNode(tok)
 			operand = ident
 			tok = p.next()
+			if tok.typ == tokenLambda && !mustBeType {
+				operand = p.parseLambda(ident.Position, []*ast.Parameter{
+					ast.NewParameter(ident, nil),
+				})
+				tok = p.next()
+				break
+			}
 			if mustBeType {
 				// Standard Go grammar allows one `.identifier` here
 				// (package-qualified type name `pkg.T`). The
@@ -1086,4 +1093,24 @@ func parseEscapedRune(s []byte) (rune, int) {
 		return rune(r), 3
 	}
 	panic("unexpected escaped rune")
+}
+
+// parseLambda parses the body of a `params => expr` lambda, given the already
+// parsed parameters, and returns it as an ordinary function literal with a
+// single unnamed result.
+//
+// The result type is left nil: the type checker infers it from the returned
+// expression. A lambda is therefore only usable where that inference can run,
+// which is every expression position — the alternative would be making authors
+// write the one type the compiler is best placed to work out.
+func (p *parsing) parseLambda(pos *ast.Position, params []*ast.Parameter) ast.Expression {
+	body, tok := p.parseExpr(p.next(), false, false, false, false)
+	if body == nil {
+		panic(syntaxError(tok.pos, "unexpected %s, expecting expression after =>", tok))
+	}
+	p.unread(tok)
+	ret := ast.NewReturn(body.Pos(), []ast.Expression{body})
+	typ := ast.NewFuncType(pos, false, params, []*ast.Parameter{ast.NewParameter(nil, nil)}, false)
+	block := ast.NewBlock(body.Pos(), []ast.Node{ret})
+	return ast.NewFunc(pos, nil, typ, block, false, ast.Format(0))
 }

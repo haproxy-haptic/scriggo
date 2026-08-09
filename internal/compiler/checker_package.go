@@ -160,6 +160,7 @@ func toTypeCheckerScope(pkg native.ImportablePackage, mod checkingMod, global bo
 			ti.Type = removeEnvArg(rv.Type(), false)
 			ti.value = rv
 			ti.AdaptiveReturnType = v.ReturnType
+			ti.AdaptiveLambdaParams = v.LambdaParams
 			ti.Properties |= propertyIsNative | propertyHasValue
 		}
 		scope[ident] = scopeName{ti: ti}

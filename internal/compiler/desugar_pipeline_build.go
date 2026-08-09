@@ -34,11 +34,23 @@ func buildLoweredPipeline(target *ast.Identifier, source ast.Expression, stages 
 	fnIdents := make([]*ast.Identifier, len(stages))
 	for i, st := range stages {
 		fnIdents[i] = ast.NewIdentifier(st.callPos, prefix+"fn"+strconv.Itoa(i))
+		// A lambda took its parameter type from the call this hoist removes it
+		// from, so point it at the values the stage receives instead.
+		if st.fn.Type.Parameters[0].Type == nil {
+			origin := &ast.LambdaOrigin{Source: ast.NewIdentifier(st.callPos, prefix)}
+			if i > 0 {
+				origin = &ast.LambdaOrigin{
+					Prev:     ast.NewIdentifier(st.callPos, prefix+"fn"+strconv.Itoa(i-1)),
+					PrevKind: stages[i-1].kind,
+				}
+			}
+			st.fn.LambdaOrigin = origin
+		}
 		nodes = append(nodes, ast.NewVar(st.callPos, []*ast.Identifier{fnIdents[i]}, nil, []ast.Expression{st.fn}))
 	}
 
 	nodes = append(nodes, ast.NewVar(pos, []*ast.Identifier{target}, nil,
-		[]ast.Expression{accumulatorInit(pos, srcIdent, stages)}))
+		[]ast.Expression{accumulatorInit(pos, srcIdent, stages, fnIdents)}))
 
 	elem := ast.NewIdentifier(pos, prefix+"e0")
 	body := buildStageBody(target, elem, stages, fnIdents, prefix, 0, 1)
@@ -59,17 +71,26 @@ func buildLoweredPipeline(target *ast.Identifier, source ast.Expression, stages 
 // filter the element type is the source's, which has no name at this point —
 // `src[:0:0]` expresses "same type, empty, no shared backing array" without
 // needing one.
-func accumulatorInit(pos *ast.Position, src *ast.Identifier, stages []pipelineStage) ast.Expression {
+func accumulatorInit(pos *ast.Position, src *ast.Identifier, stages []pipelineStage, fns []*ast.Identifier) ast.Expression {
+	zero := ast.NewBasicLiteral(pos, ast.IntLiteral, "0")
+	empty := ast.NewSlicing(pos, src, nil, zero, zero, true)
 	for i := len(stages) - 1; i >= 0; i-- {
 		switch stages[i].kind {
-		case "map":
-			return ast.NewCompositeLiteral(pos, ast.NewSliceType(pos, stages[i].fn.Type.Result[0].Type), nil)
-		case "flat_map":
-			return ast.NewCompositeLiteral(pos, stages[i].fn.Type.Result[0].Type, nil)
+		case "map", "flat_map":
+			// Call the stage's own native on an empty slice. Its AdaptiveFunc
+			// computes []U from the closure's result type at check time, so
+			// the accumulator gets the right type without this pass naming it
+			// — which it cannot do anyway: a nested resource type produced by
+			// reflect.StructOf has no name, and an inferred closure has no
+			// written result type at all.
+			//
+			// Cost is one native call per pipeline over a zero-length slice,
+			// not one per element.
+			return ast.NewCall(pos, ast.NewIdentifier(pos, stages[i].kind),
+				[]ast.Expression{empty, fns[i]}, false)
 		}
 	}
-	zero := ast.NewBasicLiteral(pos, ast.IntLiteral, "0")
-	return ast.NewSlicing(pos, src, nil, zero, zero, true)
+	return empty
 }
 
 // buildStageBody builds the fused loop body from stage index i onward. elem

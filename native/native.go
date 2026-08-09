@@ -213,6 +213,20 @@ type AdaptiveFunc struct {
 	// what ReturnType produces.
 	Impl any
 
+	// LambdaParams supplies the parameter types of a lambda argument, so a
+	// caller can write `filter(items, e => e.Ready)` and have `e` typed from
+	// what `items` is.
+	//
+	// It is called once per call site, for each argument that is a lambda with
+	// no declared parameter types, with the static types of the arguments
+	// already resolved to its left (later ones are nil). Return nil to leave
+	// the lambda uninferable, which surfaces as a "cannot infer" diagnostic at
+	// the lambda rather than a confusing error inside its body.
+	//
+	// The lambda's RESULT type is never supplied here — the checker infers it
+	// from the returned expression.
+	LambdaParams func(argIndex int, resolved []reflect.Type) []reflect.Type
+
 	// ReturnType is the static-type computation. Called once per call
 	// site by the type-checker. argTypes contains the static types
 	// of the call's actual arguments, in order. The returned
