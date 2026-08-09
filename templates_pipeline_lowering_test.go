@@ -15,12 +15,13 @@ import (
 // pipelineNatives are stand-ins for the collection helpers a host registers.
 // A lowered chain must never reach them; an unlowerable one must, and must
 // still produce the same answer. Each records that it ran.
-type pipelineNatives struct{ calls int }
+type pipelineNatives struct{ calls, elems int }
 
 func (p *pipelineNatives) decls() native.Declarations {
 	return native.Declarations{
 		"filter": func(s []int, f func(int) bool) []int {
 			p.calls++
+			p.elems += len(s)
 			out := []int{}
 			for _, v := range s {
 				if f(v) {
@@ -31,6 +32,7 @@ func (p *pipelineNatives) decls() native.Declarations {
 		},
 		"reject": func(s []int, f func(int) bool) []int {
 			p.calls++
+			p.elems += len(s)
 			out := []int{}
 			for _, v := range s {
 				if !f(v) {
@@ -41,6 +43,7 @@ func (p *pipelineNatives) decls() native.Declarations {
 		},
 		"map": func(s []int, f func(int) string) []string {
 			p.calls++
+			p.elems += len(s)
 			out := []string{}
 			for _, v := range s {
 				out = append(out, f(v))
@@ -49,6 +52,7 @@ func (p *pipelineNatives) decls() native.Declarations {
 		},
 		"flat_map": func(s []int, f func(int) []int) []int {
 			p.calls++
+			p.elems += len(s)
 			out := []int{}
 			for _, v := range s {
 				out = append(out, f(v)...)
@@ -57,6 +61,7 @@ func (p *pipelineNatives) decls() native.Declarations {
 		},
 		"unique": func(s []int) []int {
 			p.calls++
+			p.elems += len(s)
 			seen := map[int]bool{}
 			out := []int{}
 			for _, v := range s {
@@ -70,7 +75,7 @@ func (p *pipelineNatives) decls() native.Declarations {
 		// sorted mirrors a host helper that returns (value, error) — the shape
 		// that only type-checks in a pipe, never as a direct call in a
 		// single-value context.
-		"sorted": func(s []int) ([]int, error) { p.calls++; return s, nil },
+		"sorted": func(s []int) ([]int, error) { p.calls++; p.elems += len(s); return s, nil },
 		"join":   strings.Join,
 		"join_ints": func(s []int) string {
 			parts := make([]string, 0, len(s))
@@ -87,7 +92,7 @@ func TestPipelineLowering(t *testing.T) {
 		name       string
 		source     string
 		want       string
-		wantNative int // native calls that must still happen
+		wantNative int // elements that must still flow through a native helper
 	}{
 		{
 			name:   "filter alone",
@@ -126,14 +131,14 @@ func TestPipelineLowering(t *testing.T) {
 			source: `{% var src = []int{1,2,3,4,5,6} %}{% var dup = src | flat_map(func(v int) []int { return []int{v, v} }) %}` +
 				`{% var out = unique(dup) %}{{ len(out) }}`,
 			want:       "6",
-			wantNative: 1, // unique only
+			wantNative: 12, // unique() sees all 12 expanded elements
 		},
 		{
 			name: "a non-literal function argument is not lowered",
 			source: `{% var src = []int{1,2,3,4,5,6} %}{% var pred = func(v int) bool { return v > 4 } %}` +
 				`{% var out = src | filter(pred) %}{{ len(out) }}`,
 			want:       "2",
-			wantNative: 1,
+			wantNative: 6, // filter(pred): a variable, not a literal, so not lowered
 		},
 		{
 			// Re-applying an unlowered tail must keep the pipe spelling: the
@@ -145,7 +150,7 @@ func TestPipelineLowering(t *testing.T) {
 			source: `{% var src = []int{1,2,3,4,5,6} %}{% var out = src | filter(func(v int) bool { return v > 2 }) | ` +
 				`sorted() %}{{ len(out) }}`,
 			want:       "4",
-			wantNative: 1,
+			wantNative: 4, // sorted() is a two-result tail, never lowered
 		},
 		{
 			// The position a chain sits in must not decide whether it is
@@ -178,7 +183,7 @@ func TestPipelineLowering(t *testing.T) {
 			source: `{% var src = []int{1,2,3,4,5,6} %}` +
 				`{{ len(filter(src, func(v int) bool { return v > 4 })) }}`,
 			want:       "2",
-			wantNative: 1,
+			wantNative: 6, // nested in a call argument, so left native
 		},
 		{
 			name:   "empty source yields empty output",
@@ -202,10 +207,12 @@ func TestPipelineLowering(t *testing.T) {
 			if got := out.String(); got != tc.want {
 				t.Fatalf("output: got %q, want %q", got, tc.want)
 			}
-			if natives.calls != tc.wantNative {
-				t.Fatalf("native helper calls: got %d, want %d — a lowered stage must not "+
-					"reach the native helper, and an unlowerable one must",
-					natives.calls, tc.wantNative)
+			if natives.elems != tc.wantNative {
+				t.Fatalf("elements through a native helper: got %d, want %d — a lowered "+
+					"stage feeds none, an unlowered one feeds every element. (Seeding a "+
+					"map/flat_map accumulator does call the native, but on an empty "+
+					"slice, so it moves no elements.)",
+					natives.elems, tc.wantNative)
 			}
 		})
 	}

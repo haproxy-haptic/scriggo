@@ -822,11 +822,29 @@ type Func struct {
 	DistFree bool        // reports whether it is distraction free.
 	Upvars   []Upvar     // Upvars of func.
 	Format   Format      // macro format.
+
+	// LambdaParams carries the parameter types the type checker inferred for
+	// a `params => expr` lambda from the call it is an argument to. Nil for
+	// an ordinary function literal, whose parameters are written out.
+	LambdaParams []reflect.Type
+
+	// LambdaOrigin names where the parameter type comes from once pipeline
+	// lowering has hoisted the lambda out of its call. Nil everywhere else.
+	LambdaOrigin *LambdaOrigin
+}
+
+// LambdaOrigin locates the values a hoisted lambda is applied to: the elements
+// of Source for the first stage of a chain, otherwise whatever the stage
+// hoisted into Prev produces — which PrevKind says how to read.
+type LambdaOrigin struct {
+	Source   Expression
+	Prev     Expression
+	PrevKind string
 }
 
 // NewFunc returns a new [Func] node.
 func NewFunc(pos *Position, name *Identifier, typ *FuncType, body *Block, distFree bool, format Format) *Func {
-	return &Func{expression{}, pos, name, typ, body, distFree, nil, format}
+	return &Func{expression{}, pos, name, typ, body, distFree, nil, format, nil, nil}
 }
 
 // String returns the string representation of n.
@@ -1173,11 +1191,11 @@ func NewRaw(pos *Position, marker, tag string, text *Text) *Raw {
 // Render node represents a "render <path>" expression.
 type Render struct {
 	expression
-	*Position              // position in the source.
-	Path           string  // path of the file to render.
-	Tree           *Tree   // expanded tree of <path>.
-	InheritContext bool    // if true, inherit local variables from call site.
-	Parallel       bool    // if true, execute in parallel (go render).
+	*Position             // position in the source.
+	Path           string // path of the file to render.
+	Tree           *Tree  // expanded tree of <path>.
+	InheritContext bool   // if true, inherit local variables from call site.
+	Parallel       bool   // if true, execute in parallel (go render).
 
 	// IR holds the internal representation. The type checker transforms the
 	// 'render' expression into a macro call, where the macro body is the
@@ -1214,10 +1232,10 @@ func (n *Render) String() string {
 // files matching the glob pattern.
 type RenderGlob struct {
 	expression
-	*Position              // position in the source.
-	Pattern        string  // glob pattern for files to render.
-	InheritContext bool    // if true, inherit local variables from call site.
-	Parallel       bool    // if true, execute in parallel (go render_glob).
+	*Position                // position in the source.
+	Pattern        string    // glob pattern for files to render.
+	InheritContext bool      // if true, inherit local variables from call site.
+	Parallel       bool      // if true, execute in parallel (go render_glob).
 	Renders        []*Render // expanded render nodes (filled during parsing).
 }
 

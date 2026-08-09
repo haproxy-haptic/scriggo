@@ -1249,7 +1249,13 @@ func (tc *typechecker) checkReturn(node *ast.Return) ast.Node {
 	}
 
 	var expectedTypes []reflect.Type
-	for _, exp := range expected {
+	for i, exp := range expected {
+		// A lambda's result carries no type node — checkLambda inferred it
+		// from this very expression and recorded it on the signature.
+		if exp.Type == nil && fn.Type.Reflect != nil {
+			expectedTypes = append(expectedTypes, fn.Type.Reflect.Out(i))
+			continue
+		}
 		ti := tc.checkType(exp.Type)
 		expectedTypes = append(expectedTypes, ti.Type)
 	}

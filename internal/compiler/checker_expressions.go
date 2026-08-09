@@ -691,6 +691,9 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 		return &typeInfo{Type: expr.Reflect, Properties: propertyIsType}
 
 	case *ast.Func:
+		if isLambda(expr) {
+			return tc.checkLambda(expr)
+		}
 		if expr.Type.Macro && len(expr.Type.Result) == 0 {
 			tc.makeMacroResultExplicit(expr)
 		}
@@ -2063,13 +2066,34 @@ func (tc *typechecker) checkCallExpression(expr *ast.Call) []*typeInfo {
 	var in reflect.Type
 	var lastIn = numIn - 1
 
+	// Arguments are checked left to right, so a lambda can be typed from what
+	// precedes it — `filter(items, e => e.Ready)` types `e` from `items`.
+	// Native declarations opt in by supplying LambdaParams; anything else
+	// leaves the lambda uninferable and checkLambda reports it.
+	var resolved []reflect.Type
+	if t.AdaptiveLambdaParams != nil {
+		resolved = make([]reflect.Type, len(args))
+	}
+
 	for i, arg := range args {
 		if i < lastIn || callIsVariadic || !funcIsVariadic {
 			in = t.Type.In(i)
 		} else if i == lastIn {
 			in = t.Type.In(i).Elem()
 		}
+		if fn, ok := arg.(*ast.Func); ok && isLambda(fn) && fn.LambdaParams == nil {
+			// A declared parameter type states the lambda's types outright;
+			// only a callee whose signature says `any` needs the hook.
+			if in != nil && in.Kind() == reflect.Func && in.NumIn() == len(fn.Type.Parameters) {
+				fn.LambdaParams = paramTypes(in)
+			} else if resolved != nil {
+				fn.LambdaParams = t.AdaptiveLambdaParams(i, resolved)
+			}
+		}
 		a := tc.checkExpr(arg)
+		if resolved != nil {
+			resolved[i] = a.Type
+		}
 		if err := tc.isAssignableTo(a, arg, in); err != nil {
 			if _, ok := err.(invalidTypeInAssignment); ok {
 				if special {
@@ -3516,4 +3540,101 @@ func (tc *typechecker) makeStructOf(fields []reflect.StructField, astFields []*a
 		}
 	}()
 	return tc.types.StructOf(fields)
+}
+
+// isLambda reports whether node came from `params => expr`: a function literal
+// whose parameters and single result carry no written type.
+func isLambda(node *ast.Func) bool {
+	if node.Type == nil || node.Type.Macro || len(node.Type.Result) != 1 {
+		return false
+	}
+	if node.Type.Result[0].Type != nil {
+		return false
+	}
+	for _, param := range node.Type.Parameters {
+		if param.Type != nil || param.Ident == nil {
+			return false
+		}
+	}
+	return true
+}
+
+// checkLambda types a lambda, whose parameters come from the call it is an
+// argument to and whose result comes from the expression it returns.
+//
+// The parameter types must already be on the node: checkCallExpression puts
+// them there before checking the argument, using the callee's LambdaParams
+// hook, and pipeline lowering leaves an origin behind when it hoists a lambda
+// out of that call. A lambda anywhere else has nothing to infer from and is
+// rejected here, where the error can point at the lambda rather than at
+// something confusing inside its body.
+func (tc *typechecker) checkLambda(node *ast.Func) *typeInfo {
+	params := node.LambdaParams
+	if params == nil && node.LambdaOrigin != nil {
+		params = tc.lambdaParamsFromOrigin(node.LambdaOrigin)
+	}
+	if len(params) != len(node.Type.Parameters) {
+		panic(tc.errorf(node, "cannot infer the parameter types of this lambda here; "+
+			"write them out as a function literal, or use it directly as a call argument"))
+	}
+
+	// The result is not known until the returned expression is checked, and
+	// that expression cannot be checked until the parameters are in scope. So
+	// check it once in a throwaway scope to learn the type, then let checkFunc
+	// run normally against the completed signature.
+	//
+	// checkFunc therefore checks the body a second time. Every check it repeats
+	// must stay idempotent — upvar registration already de-duplicates, which is
+	// what makes a capturing lambda work; TestLambda covers both positions.
+	ret := node.Body.Nodes[0].(*ast.Return)
+	tc.scopes.Enter(node)
+	for i, param := range node.Type.Parameters {
+		if !isBlankIdentifier(param.Ident) {
+			tc.scopes.Declare(param.Ident.Name, &typeInfo{Type: params[i], Properties: propertyAddressable}, param.Ident, nil)
+			tc.scopes.Use(param.Ident.Name)
+		}
+	}
+	result := tc.checkExpr(ret.Values[0]).Type
+	tc.scopes.Exit()
+
+	node.Type.Reflect = reflect.FuncOf(params, []reflect.Type{result}, false)
+	tc.checkFunc(node)
+	return &typeInfo{Type: node.Type.Reflect}
+}
+
+// paramTypes returns a function type's parameter types.
+func paramTypes(fn reflect.Type) []reflect.Type {
+	params := make([]reflect.Type, fn.NumIn())
+	for i := range params {
+		params[i] = fn.In(i)
+	}
+	return params
+}
+
+// lambdaParamsFromOrigin types a lambda that pipeline lowering hoisted into a
+// variable, from the stage feeding it. The declarations it reads precede the
+// hoist, so they are already checked.
+func (tc *typechecker) lambdaParamsFromOrigin(o *ast.LambdaOrigin) []reflect.Type {
+	if o.Prev == nil {
+		t := tc.checkExpr(o.Source).Type
+		if t == nil || t.Kind() != reflect.Slice {
+			return nil
+		}
+		return []reflect.Type{t.Elem()}
+	}
+	prev := tc.checkExpr(o.Prev).Type
+	if prev == nil || prev.Kind() != reflect.Func || prev.NumIn() != 1 || prev.NumOut() != 1 {
+		return nil
+	}
+	switch o.PrevKind {
+	case "map":
+		return []reflect.Type{prev.Out(0)}
+	case "flat_map":
+		if prev.Out(0).Kind() != reflect.Slice {
+			return nil
+		}
+		return []reflect.Type{prev.Out(0).Elem()}
+	}
+	// filter and reject pass their element through untouched.
+	return []reflect.Type{prev.In(0)}
 }

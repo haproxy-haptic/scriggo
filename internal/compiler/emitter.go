@@ -497,9 +497,19 @@ func (em *emitter) prepareCallParameters(fType reflect.Type, fArgs []ast.Express
 // function, if necessary.
 func (em *emitter) prepareFunctionBodyParameters(fn *ast.Func) {
 
+	// A lambda's parameters and result carry no type nodes — the checker
+	// inferred them onto the signature — so read the kind from there when the
+	// node is absent.
+	paramType := func(node ast.Expression, fallback reflect.Type) reflect.Type {
+		if node == nil {
+			return fallback
+		}
+		return em.typ(node)
+	}
+
 	// Reserve space for the return parameters and eventually bind them.
-	for _, out := range fn.Type.Result {
-		kind := em.typ(out.Type).Kind()
+	for i, out := range fn.Type.Result {
+		kind := paramType(out.Type, fn.Type.Reflect.Out(i)).Kind()
 		reg := em.fb.newRegister(kind)
 		if out.Ident != nil && !isBlankIdentifier(out.Ident) {
 			em.fb.bindVarReg(out.Ident.Name, reg)
@@ -508,7 +518,7 @@ func (em *emitter) prepareFunctionBodyParameters(fn *ast.Func) {
 
 	// Reserve space for the input parameters and eventually bind them.
 	for i, inParam := range fn.Type.Parameters {
-		kind := em.typ(inParam.Type).Kind()
+		kind := paramType(inParam.Type, fn.Type.Reflect.In(i)).Kind()
 		if fn.Type.IsVariadic && i == len(fn.Type.Parameters)-1 {
 			kind = reflect.Slice
 		}

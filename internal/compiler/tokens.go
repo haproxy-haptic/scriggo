@@ -50,6 +50,7 @@ const (
 	tokenSelect                            // select
 	tokenType                              // type
 	tokenInterface                         // interface
+	tokenLambda                            // => (lambda)
 	tokenMap                               // map
 	tokenChan                              // chan
 	tokenIf                                // if
@@ -158,6 +159,7 @@ var tokenString = map[tokenTyp]string{
 	tokenSelect:                   "select",
 	tokenType:                     "type",
 	tokenInterface:                "interface",
+	tokenLambda:                   "=>",
 	tokenMap:                      "map",
 	tokenChan:                     "chan",
 	tokenIf:                       "if",
