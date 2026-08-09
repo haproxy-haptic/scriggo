@@ -57,7 +57,7 @@ type parallelRenderArgs struct {
 
 // parallelRenderArgsPool is a pool for parallelRenderArgs to reduce allocations.
 // Slices are allocated at maxRegisterIndex capacity since captureArgs needs up to that size.
-var parallelRenderArgsPool = newChanPool(256, func() *parallelRenderArgs {
+var parallelRenderArgsPool = newRetainedPool(256, func() *parallelRenderArgs {
 	return &parallelRenderArgs{
 		ints:     make([]int64, 0, maxRegisterIndex),
 		floats:   make([]float64, 0, maxRegisterIndex),

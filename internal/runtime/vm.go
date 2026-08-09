@@ -37,7 +37,7 @@ var emptyInterfaceNil = reflect.ValueOf(&[]any{nil}[0]).Elem()
 // vmPool is a pool of VMs for reuse in parallel render operations.
 // Uses chanPool instead of sync.Pool to survive GC eviction cycles.
 // Capacity 128 covers peak usage (~114 VMs per render: 6 sharded ops × 19 shards).
-var vmPool = newChanPool(128, func() *VM {
+var vmPool = newRetainedPool(128, func() *VM {
 	return create(nil)
 })
 
@@ -139,7 +139,7 @@ func ClearVMPool() {
 // The channels are buffered with size 1 to allow non-blocking sends from
 // the parallel render goroutine, ensuring the goroutine can complete and
 // return to the pool without blocking on the receiver.
-var renderFuturePool = newChanPool(256, func() *renderFuture {
+var renderFuturePool = newRetainedPool(256, func() *renderFuture {
 	return &renderFuture{
 		result: make(chan string, 1), // Buffered for non-blocking send
 		err:    make(chan error, 1),  // Buffered for non-blocking send

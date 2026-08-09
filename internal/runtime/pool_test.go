@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-func TestChanPool_GetPut(t *testing.T) {
-	p := newChanPool(4, func() *int {
+func TestRetainedPool_GetPut(t *testing.T) {
+	p := newRetainedPool(4, func() *int {
 		v := 42
 		return &v
 	})
@@ -29,9 +29,9 @@ func TestChanPool_GetPut(t *testing.T) {
 	}
 }
 
-func TestChanPool_NewOnEmpty(t *testing.T) {
+func TestRetainedPool_NewOnEmpty(t *testing.T) {
 	calls := 0
-	p := newChanPool(4, func() int {
+	p := newRetainedPool(4, func() int {
 		calls++
 		return calls
 	})
@@ -47,8 +47,8 @@ func TestChanPool_NewOnEmpty(t *testing.T) {
 	}
 }
 
-func TestChanPool_DiscardOnFull(t *testing.T) {
-	p := newChanPool(2, func() int { return 0 })
+func TestRetainedPool_DiscardOnFull(t *testing.T) {
+	p := newRetainedPool(2, func() int { return 0 })
 
 	// Fill the pool.
 	p.put(1)
@@ -56,16 +56,22 @@ func TestChanPool_DiscardOnFull(t *testing.T) {
 	// This should not block — excess is discarded.
 	p.put(3)
 
-	// Should get back 1 and 2 (FIFO from channel).
-	v1 := p.get()
-	v2 := p.get()
-	if v1 != 1 || v2 != 2 {
-		t.Errorf("expected 1, 2 from full pool, got %d, %d", v1, v2)
+	// The two retained objects come back; the third was discarded. Retrieval
+	// order is deliberately not part of the contract — the pool hands out
+	// interchangeable objects, and the slice backing returns the most
+	// recently released one first, which is warmer in cache than the oldest.
+	got := map[int]bool{p.get(): true, p.get(): true}
+	if !got[1] || !got[2] {
+		t.Errorf("expected the two retained objects 1 and 2 back, got %v", got)
+	}
+	// The pool is now empty, so the next get constructs.
+	if v := p.get(); v != 0 {
+		t.Errorf("expected a fresh object from the empty pool, got %d", v)
 	}
 }
 
-func TestChanPool_Drain(t *testing.T) {
-	p := newChanPool(10, func() int { return 0 })
+func TestRetainedPool_Drain(t *testing.T) {
+	p := newRetainedPool(10, func() int { return 0 })
 
 	for i := 0; i < 5; i++ {
 		p.put(i)
@@ -74,21 +80,37 @@ func TestChanPool_Drain(t *testing.T) {
 
 	// After drain, pool should be empty — next get uses newF.
 	calls := 0
-	p2 := newChanPool(10, func() int {
+	p2 := newRetainedPool(10, func() int {
 		calls++
 		return -1
 	})
 	// Drain an already-empty pool (should not panic).
 	p2.drain()
 
-	// Verify original pool is empty by checking channel length.
-	if len(p.ch) != 0 {
-		t.Errorf("expected empty pool after drain, got %d items", len(p.ch))
+	// Verify the original pool is empty, and that drain dropped its
+	// references rather than merely resetting the length — a retained
+	// reference in the backing array is exactly what ClearVMPool exists to
+	// release.
+	p.mu.Lock()
+	n, held := len(p.buf), cap(p.buf)
+	var zero int
+	var stale int
+	for _, v := range p.buf[:held] {
+		if v != zero {
+			stale++
+		}
+	}
+	p.mu.Unlock()
+	if n != 0 {
+		t.Errorf("expected empty pool after drain, got %d items", n)
+	}
+	if stale != 0 {
+		t.Errorf("drain left %d references reachable in the backing array", stale)
 	}
 }
 
-func TestChanPool_Concurrent(t *testing.T) {
-	p := newChanPool(64, func() *int {
+func TestRetainedPool_Concurrent(t *testing.T) {
+	p := newRetainedPool(64, func() *int {
 		v := 0
 		return &v
 	})
@@ -111,9 +133,9 @@ func TestChanPool_Concurrent(t *testing.T) {
 	wg.Wait()
 }
 
-// BenchmarkPool_ChanPool benchmarks chanPool get/put throughput.
-func BenchmarkPool_ChanPool(b *testing.B) {
-	p := newChanPool(128, func() *int {
+// BenchmarkPool_Retained benchmarks chanPool get/put throughput.
+func BenchmarkPool_Retained(b *testing.B) {
+	p := newRetainedPool(128, func() *int {
 		v := 0
 		return &v
 	})
@@ -149,9 +171,9 @@ func BenchmarkPool_SyncPool(b *testing.B) {
 	}
 }
 
-// BenchmarkPool_ChanPool_Parallel benchmarks chanPool under parallel load.
-func BenchmarkPool_ChanPool_Parallel(b *testing.B) {
-	p := newChanPool(runtime.GOMAXPROCS(0)*2, func() *int {
+// BenchmarkPool_Retained_Parallel benchmarks chanPool under parallel load.
+func BenchmarkPool_Retained_Parallel(b *testing.B) {
+	p := newRetainedPool(runtime.GOMAXPROCS(0)*2, func() *int {
 		v := 0
 		return &v
 	})
@@ -185,10 +207,10 @@ func BenchmarkPool_SyncPool_Parallel(b *testing.B) {
 	})
 }
 
-// BenchmarkPool_ChanPool_AfterGC benchmarks chanPool after a GC cycle.
+// BenchmarkPool_Retained_AfterGC benchmarks chanPool after a GC cycle.
 // This is the key scenario: chanPool should retain objects while sync.Pool loses them.
-func BenchmarkPool_ChanPool_AfterGC(b *testing.B) {
-	p := newChanPool(128, func() *int {
+func BenchmarkPool_Retained_AfterGC(b *testing.B) {
+	p := newRetainedPool(128, func() *int {
 		v := 0
 		return &v
 	})
