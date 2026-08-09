@@ -147,6 +147,13 @@ func compileTemplateFile(fsys fs.FS, path string, opts Options, canonicalGlobals
 		return nil, err
 	}
 
+	// Lower collection pipelines whose stages take literal closures into
+	// fused loops, so the closures are called from inside the VM instead of
+	// across the native boundary once per element.
+	if err := desugarPipelines(tree, &compilation{currentPipelineIndex: -1}); err != nil {
+		return nil, err
+	}
+
 	// Type check the tree.
 	checkerOpts := checkerOptions{
 		allowGoStmt: opts.AllowGoStmt,
