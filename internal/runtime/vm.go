@@ -55,6 +55,22 @@ func getPooledVM(env *env) *VM {
 const maxPooledStackSize = 2 * stackSize
 
 // putPooledVM returns a VM to the pool after resetting it.
+//
+// Only registers up to the high-water mark are cleared. Clearing whole banks
+// cost ~20 KB of writes per release — 43% of the cost of a native call into a
+// template closure, which borrows a pooled VM per call and touches a handful
+// of registers.
+//
+// The invariant that makes the partial clear sound: **a bank is always zero
+// above its high-water mark.** A fresh bank is zero from make; a grown bank
+// copies the old contents and zeroes the new tail; and every release clears
+// exactly the range this VM wrote. So the next user finds zeros wherever it
+// has not written itself, inductively.
+//
+// That holds only while every writer to the banks maintains vm.high. There are
+// three — setString, setGeneral and swapStack — and TestPooledVMClearsEveryWrittenRegister
+// fails if one stops. Adding a fourth without updating it retains references
+// silently, which is why the test asserts the whole bank rather than sampling.
 func putPooledVM(vm *VM) {
 	// Cap oversized stacks to prevent a single deep-recursion call from
 	// permanently inflating all pooled VMs.
@@ -67,18 +83,12 @@ func putPooledVM(vm *VM) {
 	if len(vm.regs.string) > maxPooledStackSize {
 		vm.regs.string = make([]string, stackSize)
 	} else {
-		// Clear string registers to allow GC
-		for i := range vm.regs.string {
-			vm.regs.string[i] = ""
-		}
+		clear(vm.regs.string[:min(int(vm.high[2])+1, len(vm.regs.string))])
 	}
 	if len(vm.regs.general) > maxPooledStackSize {
 		vm.regs.general = make([]reflect.Value, stackSize)
 	} else {
-		// Clear general registers to allow GC
-		for i := range vm.regs.general {
-			vm.regs.general[i] = reflect.Value{}
-		}
+		clear(vm.regs.general[:min(int(vm.high[3])+1, len(vm.regs.general))])
 	}
 
 	// Clear other references
@@ -95,6 +105,7 @@ func putPooledVM(vm *VM) {
 	vm.st[2] = Addr(len(vm.regs.string))
 	vm.st[3] = Addr(len(vm.regs.general))
 	vm.fp = [4]Addr{0, 0, 0, 0}
+	vm.high = [4]Addr{0, 0, 0, 0}
 	vm.pc = 0
 	vm.ok = false
 
@@ -300,6 +311,7 @@ type VM struct {
 	calls          []callFrame          // call stack frame.
 	cases          []reflect.SelectCase // select cases.
 	ranges         []rangeState         // inline range loop state stack.
+	high           [4]Addr              // highest register index written; see putPooledVM.
 	rangesBase     int                  // base index for current function's ranges.
 	panic          *PanicError          // panic.
 	main           bool                 // reports whether this VM is executing the main goroutine.
@@ -1584,6 +1596,7 @@ func (vm *VM) swapStack(a, b *[4]Addr, bSize StackShift) {
 		if a[2]+tot+bs > vm.st[2] {
 			vm.moreStringStack()
 		}
+		vm.noteHigh(2, a[2]+tot+bs)
 		s := vm.regs.string[a[2]+1:]
 		copy(s[bs:], s[:tot])
 		copy(s, s[tot:tot+bs])
@@ -1599,6 +1612,7 @@ func (vm *VM) swapStack(a, b *[4]Addr, bSize StackShift) {
 		if a[3]+tot+bs > vm.st[3] {
 			vm.moreGeneralStack()
 		}
+		vm.noteHigh(3, a[3]+tot+bs)
 		s := vm.regs.general[a[3]+1:]
 		copy(s[bs:], s[:tot])
 		copy(s, s[tot:tot+bs])

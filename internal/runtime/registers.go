@@ -196,7 +196,9 @@ func (vm *VM) stringIndirect(r int8) string {
 
 func (vm *VM) setString(r int8, s string) {
 	if r > 0 {
-		vm.regs.string[vm.fp[2]+Addr(r)] = s
+		i := vm.fp[2] + Addr(r)
+		vm.regs.string[i] = s
+		vm.noteHigh(2, i)
 		return
 	}
 	vm.setStringIndirect(-r, s)
@@ -238,7 +240,9 @@ func (vm *VM) generalIndirect(r int8) reflect.Value {
 
 func (vm *VM) setGeneral(r int8, v reflect.Value) {
 	if r > 0 {
-		vm.regs.general[vm.fp[3]+Addr(r)] = v
+		i := vm.fp[3] + Addr(r)
+		vm.regs.general[i] = v
+		vm.noteHigh(3, i)
 		return
 	}
 	vm.setGeneralIndirect(-r, v)
@@ -470,5 +474,15 @@ func (vm *VM) appendSlice(first int8, length int, slice reflect.Value) reflect.V
 			}
 		}
 		return slice
+	}
+}
+
+// noteHigh records that register i of bank b has been written, so
+// putPooledVM knows how much of the bank to clear. Indirect writes go through
+// a pointer already held in a register, which setGeneral recorded when it put
+// the pointer there.
+func (vm *VM) noteHigh(b int, i Addr) {
+	if i > vm.high[b] {
+		vm.high[b] = i
 	}
 }
