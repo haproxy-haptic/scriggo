@@ -290,12 +290,18 @@ func (vm *VM) runFunc(fn *Function, vars []reflect.Value) error {
 	vm.vars = vars
 	var stop chan struct{}
 	if vm.env.doneChan != nil {
+		// Capture env rather than reading vm.env inside the goroutine. A
+		// pooled VM is reset — including vm.env = nil — as soon as the call
+		// that borrowed it returns, and this watchdog can still be racing to
+		// enter its select at that moment. Reading vm.env there dereferences
+		// nil and takes the process down.
+		env := vm.env
 		stop = make(chan struct{})
 		go func() {
 			select {
 			case <-stop:
-			case <-vm.env.ctx.Done():
-				atomic.StoreInt32(&vm.env.done, 1)
+			case <-env.ctx.Done():
+				atomic.StoreInt32(&env.done, 1)
 			}
 		}()
 	}
