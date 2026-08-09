@@ -29,7 +29,7 @@ import (
 var byteSliceType = reflect.TypeFor[[]byte]()
 
 // stringBuilderPool is a pool of strings.Builder for reuse in rendering operations.
-var stringBuilderPool = newChanPool(256, func() *strings.Builder {
+var stringBuilderPool = newRetainedPool(256, func() *strings.Builder {
 	return &strings.Builder{}
 })
 
