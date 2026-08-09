@@ -86,6 +86,18 @@ func desugarPipelineStmt(n ast.Node, comp *compilation) []ast.Node {
 		if v.Else != nil {
 			v.Else.Nodes = desugarPipelineStmts(v.Else.Nodes, comp)
 		}
+		// A chain in the range head is the shape chart code reaches for most
+		// — `for _, x := range src | flat_map(…) | reject(…)`. Lowering only
+		// var declarations would silently leave it on the native path, which
+		// is exactly the sort of "works, but only if you spell it the other
+		// way" trap this pass exists to remove. Go evaluates a range
+		// expression once, so hoisting it ahead of the loop is equivalent.
+		if v.Assignment != nil && len(v.Assignment.Rhs) == 1 {
+			if pre, replacement := lowerChainToTemp(v.Assignment.Rhs[0], comp); pre != nil {
+				v.Assignment.Rhs[0] = replacement
+				return append(pre, v)
+			}
+		}
 	case *ast.ForIn:
 		v.Body = desugarPipelineStmts(v.Body, comp)
 		if v.Else != nil {
@@ -98,6 +110,27 @@ func desugarPipelineStmt(n ast.Node, comp *compilation) []ast.Node {
 		if v.Else != nil {
 			if els := desugarPipelineStmt(v.Else, comp); len(els) == 1 {
 				v.Else = els[0]
+			}
+		}
+	case *ast.Show:
+		// `{{ src | filter(…) }}`. Hoisting one show expression can emit
+		// several statements, which is why this walker returns a slice.
+		var pre []ast.Node
+		for i, e := range v.Expressions {
+			if nodes, replacement := lowerChainToTemp(e, comp); nodes != nil {
+				pre = append(pre, nodes...)
+				v.Expressions[i] = replacement
+			}
+		}
+		if pre != nil {
+			return append(pre, v)
+		}
+	case *ast.Assignment:
+		// `x = src | filter(…)` on an already-declared variable.
+		if len(v.Lhs) == 1 && len(v.Rhs) == 1 && v.Type == ast.AssignmentSimple {
+			if pre, replacement := lowerChainToTemp(v.Rhs[0], comp); pre != nil {
+				v.Rhs[0] = replacement
+				return append(pre, v)
 			}
 		}
 	case *ast.Func:
@@ -241,4 +274,37 @@ func reapplyStage(st pipelineStage, source ast.Expression) ast.Expression {
 	args = append(args, source)
 	args = append(args, st.call.Args[1:]...)
 	return ast.NewCall(st.callPos, st.call.Func, args, st.call.IsVariadic)
+}
+
+// lowerChainToTemp lowers the lowerable prefix of expr into statements that
+// leave the result in a fresh temporary, returning those statements and the
+// expression to use in place of expr. Reports nil when nothing is lowerable.
+//
+// Every position that can hold a chain — a var initialiser, an assignment, a
+// range head — goes through this, so which one an author picked never decides
+// whether the chain is lowered.
+func lowerChainToTemp(expr ast.Expression, comp *compilation) ([]ast.Node, ast.Expression) {
+	source, stages := splitPipeline(expr)
+	n := 0
+	for n < len(stages) && stages[n].fn != nil {
+		n++
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	tmp := ast.NewIdentifier(exprPos(expr), comp.generatePipelineName()+"t")
+	nodes := buildLoweredPipeline(tmp, source, stages[:n], comp)
+	rest := ast.Expression(tmp)
+	for _, st := range stages[n:] {
+		rest = reapplyStage(st, rest)
+	}
+	return nodes, rest
+}
+
+// exprPos returns a position for a synthetic node derived from expr.
+func exprPos(expr ast.Expression) *ast.Position {
+	if p := expr.Pos(); p != nil {
+		return p
+	}
+	return &ast.Position{}
 }

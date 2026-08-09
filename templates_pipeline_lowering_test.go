@@ -5,6 +5,7 @@
 package scriggo
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -71,6 +72,13 @@ func (p *pipelineNatives) decls() native.Declarations {
 		// single-value context.
 		"sorted": func(s []int) ([]int, error) { p.calls++; return s, nil },
 		"join":   strings.Join,
+		"join_ints": func(s []int) string {
+			parts := make([]string, 0, len(s))
+			for _, v := range s {
+				parts = append(parts, strconv.Itoa(v))
+			}
+			return strings.Join(parts, ",")
+		},
 	}
 }
 
@@ -137,6 +145,39 @@ func TestPipelineLowering(t *testing.T) {
 			source: `{% var src = []int{1,2,3,4,5,6} %}{% var out = src | filter(func(v int) bool { return v > 2 }) | ` +
 				`sorted() %}{{ len(out) }}`,
 			want:       "4",
+			wantNative: 1,
+		},
+		{
+			// The position a chain sits in must not decide whether it is
+			// lowered. A range head is what chart code reaches for most, and
+			// lowering only var initialisers left it silently on the native
+			// path — a "works, but only if you spell it the other way" trap.
+			name: "a chain in a for-range head is lowered",
+			source: `{% var src = []int{1,2,3,4,5,6} %}{% var n = 0 %}` +
+				`{% for _, v := range src | filter(func(v int) bool { return v > 4 }) %}{% n = n + v %}{% end %}{{ n }}`,
+			want: "11",
+		},
+		{
+			name: "a chain assigned to an existing variable is lowered",
+			source: `{% var src = []int{1,2,3,4,5,6} %}{% var out []int %}` +
+				`{% out = src | filter(func(v int) bool { return v > 4 }) %}{{ len(out) }}`,
+			want: "2",
+		},
+		{
+			name: "a chain shown directly is lowered",
+			source: `{% var src = []int{1,2,3,4,5,6} %}` +
+				`{{ src | filter(func(v int) bool { return v > 4 }) | join_ints() }}`,
+			want: "5,6",
+		},
+		{
+			// Deliberately NOT lowered. Hoisting a chain out of an argument
+			// list would evaluate it before the other arguments, which is a
+			// semantic change this pass has no way to prove safe. The stage
+			// falls back to the native helper — correct, just not fused.
+			name: "a chain nested in a call argument stays native",
+			source: `{% var src = []int{1,2,3,4,5,6} %}` +
+				`{{ len(filter(src, func(v int) bool { return v > 4 })) }}`,
+			want:       "2",
 			wantNative: 1,
 		},
 		{
