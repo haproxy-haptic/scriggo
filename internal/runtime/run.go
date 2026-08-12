@@ -247,7 +247,7 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args *paralle
 
 	defer func() {
 		putPooledVM(nvm)
-		stringBuilderPool.put(buf)
+		putStringBuilder(buf)
 		if r := recover(); r != nil {
 			if pe, ok := r.(*PanicError); ok {
 				future.err <- pe

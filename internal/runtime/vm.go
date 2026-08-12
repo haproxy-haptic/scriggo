@@ -71,6 +71,24 @@ const maxPooledStackSize = 2 * stackSize
 // three — setString, setGeneral and swapStack — and TestPooledVMClearsEveryWrittenRegister
 // fails if one stops. Adding a fourth without updating it retains references
 // silently, which is why the test asserts the whole bank rather than sampling.
+// maxPooledFrames bounds the frame slices a pooled VM may carry: small ones are
+// cleared and kept, oversized ones dropped, so a VM that once ran a deep render
+// does not pay a large memclr for every shallow call it later serves.
+const maxPooledFrames = 32
+
+// releaseFrames drops every reference a frame slice holds, keeping the
+// allocation only while it is small enough to be worth keeping.
+func releaseFrames[T any](s []T) []T {
+	if s == nil {
+		return nil
+	}
+	if cap(s) > maxPooledFrames {
+		return nil
+	}
+	clear(s[:cap(s)])
+	return s[:0]
+}
+
 func putPooledVM(vm *VM) {
 	// Cap oversized stacks to prevent a single deep-recursion call from
 	// permanently inflating all pooled VMs.
@@ -80,15 +98,19 @@ func putPooledVM(vm *VM) {
 	if len(vm.regs.float) > maxPooledStackSize {
 		vm.regs.float = make([]float64, stackSize)
 	}
+	// Clear the whole bank rather than up to the high-water mark. The mark only
+	// covers registers written through paths that call noteHigh; a bulk copy
+	// into a pooled VM's banks does not, so the tail keeps reflect.Values from
+	// the previous render — and one of those is the render's globals.
 	if len(vm.regs.string) > maxPooledStackSize {
 		vm.regs.string = make([]string, stackSize)
 	} else {
-		clear(vm.regs.string[:min(int(vm.high[2])+1, len(vm.regs.string))])
+		clear(vm.regs.string)
 	}
 	if len(vm.regs.general) > maxPooledStackSize {
 		vm.regs.general = make([]reflect.Value, stackSize)
 	} else {
-		clear(vm.regs.general[:min(int(vm.high[3])+1, len(vm.regs.general))])
+		clear(vm.regs.general)
 	}
 
 	// Clear other references
@@ -109,16 +131,14 @@ func putPooledVM(vm *VM) {
 	vm.pc = 0
 	vm.ok = false
 
-	// Reset call/range stacks (keep capacity for reuse)
-	if vm.calls != nil {
-		vm.calls = vm.calls[:0]
-	}
-	if vm.cases != nil {
-		vm.cases = vm.cases[:0]
-	}
-	if vm.ranges != nil {
-		vm.ranges = vm.ranges[:0]
-	}
+	// Release, don't just truncate. A rangeState pins the collection it was
+	// iterating and a callFrame pins that render's globals and renderer, so an
+	// element left inside a truncated slice's capacity keeps a whole render's
+	// object graph reachable for as long as the VM sits in the pool — which is
+	// forever, since the pool is deliberately not GC-evictable.
+	vm.calls = releaseFrames(vm.calls)
+	vm.cases = releaseFrames(vm.cases)
+	vm.ranges = releaseFrames(vm.ranges)
 	// rangesBase indexes into vm.ranges, which was just truncated. Leaving it
 	// set makes the next user of this VM address the range stack from a base
 	// that no longer exists. A run that unwinds normally resets it itself, so
@@ -246,8 +266,8 @@ type rangeState struct {
 	elemReg  int8 // register for element (0 if unused)
 
 	// Collection type info
-	kind     reflect.Kind
-	elemKind reflect.Kind
+	kind      reflect.Kind
+	elemKind  reflect.Kind
 	rangeType rangeType
 }
 
@@ -298,24 +318,24 @@ type renderFuture struct {
 
 // VM represents a Scriggo virtual machine.
 type VM struct {
-	fp             [4]Addr              // frame pointers.
-	st             [4]Addr              // stack tops.
-	pc             Addr                 // program counter.
-	ok             bool                 // ok flag.
-	regs           registers            // registers.
-	fn             *Function            // running function.
-	vars           []reflect.Value      // global and closure variables.
-	env            *env                 // execution environment.
-	envArg         reflect.Value        // execution environment as argument.
-	renderer       *renderer            // renderer
-	calls          []callFrame          // call stack frame.
-	cases          []reflect.SelectCase // select cases.
-	ranges         []rangeState         // inline range loop state stack.
-	high           [4]Addr              // highest register index written; see putPooledVM.
-	rangesBase     int                  // base index for current function's ranges.
-	panic          *PanicError          // panic.
-	main           bool                 // reports whether this VM is executing the main goroutine.
-	profiler       *profiler            // profiler for execution timing (nil when disabled).
+	fp         [4]Addr              // frame pointers.
+	st         [4]Addr              // stack tops.
+	pc         Addr                 // program counter.
+	ok         bool                 // ok flag.
+	regs       registers            // registers.
+	fn         *Function            // running function.
+	vars       []reflect.Value      // global and closure variables.
+	env        *env                 // execution environment.
+	envArg     reflect.Value        // execution environment as argument.
+	renderer   *renderer            // renderer
+	calls      []callFrame          // call stack frame.
+	cases      []reflect.SelectCase // select cases.
+	ranges     []rangeState         // inline range loop state stack.
+	high       [4]Addr              // highest register index written; see putPooledVM.
+	rangesBase int                  // base index for current function's ranges.
+	panic      *PanicError          // panic.
+	main       bool                 // reports whether this VM is executing the main goroutine.
+	profiler   *profiler            // profiler for execution timing (nil when disabled).
 }
 
 // NewVM returns a new virtual machine.
