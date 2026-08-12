@@ -33,6 +33,19 @@ var stringBuilderPool = newRetainedPool(256, func() *strings.Builder {
 	return &strings.Builder{}
 })
 
+// putStringBuilder returns a builder to the pool holding nothing.
+//
+// Builder.Reset nils the buffer rather than truncating it, so the array is
+// dropped on the next get either way and resetting here costs no extra
+// allocation. What it changes is who holds the array in between: this pool is
+// deliberately not GC-evictable, so a builder parked with its contents keeps a
+// whole render's output reachable for the process lifetime. String() aliases
+// the array, so any result already taken from the builder stays valid.
+func putStringBuilder(b *strings.Builder) {
+	b.Reset()
+	stringBuilderPool.put(b)
+}
+
 // SourceFrame is one level of the template include stack: the template path and
 // the source line active in it.
 type SourceFrame struct {
@@ -497,12 +510,12 @@ func (r *renderer) showInURL(env *env, v any, ctx ast.Context) error {
 	b.Reset()
 	err := showInHTML(env, b, v)
 	if err != nil {
-		stringBuilderPool.put(b)
+		putStringBuilder(b)
 		return err
 	}
 
 	s := html.UnescapeString(b.String())
-	stringBuilderPool.put(b)
+	putStringBuilder(b)
 	out := newStringWriter(r.outputWriter())
 
 	if r.query {
@@ -1549,7 +1562,7 @@ func (r *renderer) flushWithFutures() error {
 	// Cleanup function to return resources to pools
 	cleanup := func() {
 		if pendingBuf != nil {
-			stringBuilderPool.put(pendingBuf)
+			putStringBuilder(pendingBuf)
 		}
 		for _, f := range futures {
 			putRenderFuture(f)
