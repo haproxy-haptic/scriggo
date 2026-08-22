@@ -71,8 +71,7 @@ func (fs *functionStore) scriggoFnIndex(fn *runtime.Function) int8 {
 	if index, ok := fs.scriggoFuncIndexes[currFn][fn]; ok {
 		return index
 	}
-	index := int8(len(currFn.Functions))
-	currFn.Functions = append(currFn.Functions, fn)
+	index := fs.emitter.fb.addFunction(fn)
 	fs.scriggoFuncIndexes[currFn][fn] = index
 	return index
 }
@@ -117,11 +116,7 @@ func (fs *functionStore) predefFunc(fn ast.Expression, allowMethod bool) (int8, 
 		return index, true
 	}
 	f := newNativeFunction(ti.NativePackageName, name, fnRv.Interface())
-	index := int8(len(currFn.NativeFunctions))
-	currFn.NativeFunctions = append(currFn.NativeFunctions, f)
-	if fs.predefFuncIndexes[currFn] == nil {
-		fs.predefFuncIndexes[currFn] = map[reflect.Value]int8{}
-	}
+	index := fs.emitter.fb.addNativeFunction(f)
 	fs.predefFuncIndexes[currFn][fnRv] = index
 	return index, true
 
