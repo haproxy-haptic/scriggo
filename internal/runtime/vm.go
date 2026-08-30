@@ -1548,6 +1548,40 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 			case func(native.Env, string) string:
 				vm.prepareEnvCallPathFor(callEnv)
 				vm.setString(1, f(callEnv, vm.string(2)))
+			// The four signatures below are the template helpers a
+			// resource-agnostic chart calls on essentially every field access,
+			// measured at 109k of 128k reflect calls in one render.
+			case func(native.Env, interface{}) string:
+				vm.prepareEnvCallPathFor(callEnv)
+				vm.setString(1, f(callEnv, generalToInterface(vm.general(1))))
+			case func(native.Env, interface{}) int:
+				vm.prepareEnvCallPathFor(callEnv)
+				vm.setInt(1, int64(f(callEnv, generalToInterface(vm.general(1)))))
+			case func(native.Env, interface{}, ...string) interface{}:
+				vm.prepareEnvCallPathFor(callEnv)
+				obj := generalToInterface(vm.general(2))
+				if numVariadic == NoVariadicArgs || numVariadic == 0 {
+					vm.setGeneral(1, reflect.ValueOf(f(callEnv, obj)))
+				} else {
+					strs := make([]string, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						strs[j] = vm.string(int8(j + 1))
+					}
+					vm.setGeneral(1, reflect.ValueOf(f(callEnv, obj, strs...)))
+				}
+			case func(native.Env, interface{}, string, ...string) string:
+				vm.prepareEnvCallPathFor(callEnv)
+				obj := generalToInterface(vm.general(1))
+				first := vm.string(2)
+				if numVariadic == NoVariadicArgs || numVariadic == 0 {
+					vm.setString(1, f(callEnv, obj, first))
+				} else {
+					strs := make([]string, int(numVariadic))
+					for j := 0; j < int(numVariadic); j++ {
+						strs[j] = vm.string(int8(j + 3))
+					}
+					vm.setString(1, f(callEnv, obj, first, strs...))
+				}
 			case func(native.Env, interface{}, interface{}) bool:
 				vm.prepareEnvCallPathFor(callEnv)
 				vm.setBool(1, f(callEnv, generalToInterface(vm.general(1)), generalToInterface(vm.general(2))))
@@ -2291,7 +2325,11 @@ func NativeFunctionUsesReflection(typ reflect.Type) bool {
 		reflect.TypeFor[func([]interface{}, []string) ([]interface{}, error)](),
 		reflect.TypeFor[func(native.Env, ...interface{}) bool](),
 		reflect.TypeFor[func(native.Env, string) string](),
-		reflect.TypeFor[func(native.Env, interface{}, interface{}) bool]():
+		reflect.TypeFor[func(native.Env, interface{}, interface{}) bool](),
+		reflect.TypeFor[func(native.Env, interface{}) string](),
+		reflect.TypeFor[func(native.Env, interface{}) int](),
+		reflect.TypeFor[func(native.Env, interface{}, ...string) interface{}](),
+		reflect.TypeFor[func(native.Env, interface{}, string, ...string) string]():
 		return false
 	}
 	return true
