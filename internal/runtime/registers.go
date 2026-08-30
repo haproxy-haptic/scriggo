@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"context"
 	"reflect"
 )
 
@@ -69,7 +70,9 @@ func (vm *VM) intIndirect(r int8) int64 {
 
 func (vm *VM) setInt(r int8, i int64) {
 	if r > 0 {
-		vm.regs.int[vm.fp[0]+Addr(r)] = i
+		index := vm.fp[0] + Addr(r)
+		vm.regs.int[index] = i
+		vm.noteHigh(0, index)
 		return
 	}
 	vm.setIntIndirect(-r, i)
@@ -77,6 +80,7 @@ func (vm *VM) setInt(r int8, i int64) {
 
 func (vm *VM) setIntIndirect(r int8, i int64) {
 	v := vm.regs.general[vm.fp[3]+Addr(r)]
+	vm.observeMutation(MutationSetPointer, v)
 	elem := v.Elem()
 	k := elem.Kind()
 	switch {
@@ -120,7 +124,9 @@ func (vm *VM) setBool(r int8, b bool) {
 		if b {
 			v = 1
 		}
-		vm.regs.int[vm.fp[0]+Addr(r)] = v
+		index := vm.fp[0] + Addr(r)
+		vm.regs.int[index] = v
+		vm.noteHigh(0, index)
 		return
 	}
 	vm.setBoolIndirect(-r, b)
@@ -128,6 +134,7 @@ func (vm *VM) setBool(r int8, b bool) {
 
 func (vm *VM) setBoolIndirect(r int8, b bool) {
 	v := vm.regs.general[vm.fp[3]+Addr(r)]
+	vm.observeMutation(MutationSetPointer, v)
 	v.Elem().SetBool(b)
 }
 
@@ -158,7 +165,9 @@ func (vm *VM) floatIndirect(r int8) float64 {
 
 func (vm *VM) setFloat(r int8, f float64) {
 	if r > 0 {
-		vm.regs.float[vm.fp[1]+Addr(r)] = f
+		index := vm.fp[1] + Addr(r)
+		vm.regs.float[index] = f
+		vm.noteHigh(1, index)
 		return
 	}
 	vm.setFloatIndirect(-r, f)
@@ -166,6 +175,7 @@ func (vm *VM) setFloat(r int8, f float64) {
 
 func (vm *VM) setFloatIndirect(r int8, f float64) {
 	v := vm.regs.general[vm.fp[3]+Addr(r)]
+	vm.observeMutation(MutationSetPointer, v)
 	v.Elem().SetFloat(f)
 }
 
@@ -206,6 +216,7 @@ func (vm *VM) setString(r int8, s string) {
 
 func (vm *VM) setStringIndirect(r int8, s string) {
 	v := vm.regs.general[vm.fp[3]+Addr(r)]
+	vm.observeMutation(MutationSetPointer, v)
 	v.Elem().SetString(s)
 }
 
@@ -233,7 +244,7 @@ func (vm *VM) generalIndirect(r int8) reflect.Value {
 	}
 	elem := v.Elem()
 	if elem.Kind() == reflect.Func {
-		return reflect.ValueOf(&callable{native: NewNativeFunction("", "", elem)})
+		return reflect.ValueOf(newNativeCallable(elem))
 	}
 	return elem
 }
@@ -249,10 +260,16 @@ func (vm *VM) setGeneral(r int8, v reflect.Value) {
 }
 
 func (vm *VM) setGeneralIndirect(r int8, v reflect.Value) {
-	vm.regs.general[vm.fp[3]+Addr(r)].Elem().Set(v)
+	ptr := vm.regs.general[vm.fp[3]+Addr(r)]
+	vm.observeMutation(MutationSetPointer, ptr)
+	ptr.Elem().Set(v)
 }
 
 func (vm *VM) getIntoReflectValue(r int8, v reflect.Value, k bool) registerType {
+	return vm.getIntoReflectValueInContext(r, v, k, vm.nativeEnv.ctx)
+}
+
+func (vm *VM) getIntoReflectValueInContext(r int8, v reflect.Value, k bool, parentContext context.Context) registerType {
 	switch v.Kind() {
 	case reflect.Bool:
 		v.SetBool(vm.boolk(r, k))
@@ -270,7 +287,8 @@ func (vm *VM) getIntoReflectValue(r int8, v reflect.Value, k bool) registerType 
 		v.SetString(vm.stringk(r, k))
 		return stringRegister
 	case reflect.Func:
-		v.Set(vm.generalk(r, k).Interface().(*callable).Value(vm.env))
+		vm.markBatchGlobalsEscaped()
+		v.Set(vm.generalk(r, k).Interface().(*callable).Value(vm.env, parentContext))
 		return generalRegister
 	case reflect.Interface:
 		if g := vm.generalk(r, k); !g.IsValid() { // TODO: check if it is correct.
@@ -280,12 +298,81 @@ func (vm *VM) getIntoReflectValue(r int8, v reflect.Value, k bool) registerType 
 				v.Set(reflect.Zero(t))
 			}
 		} else {
+			vm.markBatchValueEscaped(g)
 			v.Set(g)
 		}
 		return generalRegister
 	default:
-		v.Set(vm.generalk(r, k))
+		value := vm.generalk(r, k)
+		vm.markBatchValueEscaped(value)
+		v.Set(value)
 		return generalRegister
+	}
+}
+
+func (vm *VM) reflectValueInContext(r int8, typ reflect.Type, k bool, parentContext context.Context) (reflect.Value, registerType) {
+	var value reflect.Value
+	var register registerType
+	switch typ.Kind() {
+	case reflect.Bool:
+		value = reflect.ValueOf(vm.boolk(r, k))
+		register = intRegister
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		value = reflect.ValueOf(vm.intk(r, k))
+		register = intRegister
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		value = reflect.ValueOf(uint64(vm.intk(r, k)))
+		register = intRegister
+	case reflect.Float32, reflect.Float64:
+		value = reflect.ValueOf(vm.floatk(r, k))
+		register = floatRegister
+	case reflect.String:
+		value = reflect.ValueOf(vm.stringk(r, k))
+		register = stringRegister
+	case reflect.Func:
+		vm.markBatchGlobalsEscaped()
+		value = vm.generalk(r, k).Interface().(*callable).Value(vm.env, parentContext)
+		register = generalRegister
+	case reflect.Interface:
+		value = vm.generalk(r, k)
+		if !value.IsValid() {
+			value = reflect.Zero(typ)
+		} else {
+			vm.markBatchValueEscaped(value)
+		}
+		return value, generalRegister
+	default:
+		value = vm.generalk(r, k)
+		vm.markBatchValueEscaped(value)
+		return value, generalRegister
+	}
+	if value.Type() != typ {
+		value = value.Convert(typ)
+	}
+	return value, register
+}
+
+func (vm *VM) markBatchValueEscaped(value reflect.Value) {
+	for value.IsValid() && value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return
+		}
+		value = value.Elem()
+	}
+	if !value.IsValid() {
+		return
+	}
+	switch value.Kind() {
+	case reflect.Func:
+		vm.markBatchGlobalsEscaped()
+	case reflect.Pointer:
+		if callable, ok := value.Interface().(*callable); ok && callable.fn != nil {
+			vm.markBatchGlobalsEscaped()
+			return
+		}
+		if vm.state != nil {
+			vm.state.globalsEscaped.Store(true)
+		}
 	}
 }
 
@@ -307,8 +394,7 @@ func (vm *VM) setFromReflectValue(r int8, v reflect.Value) registerType {
 		vm.setString(r, v.String())
 		return stringRegister
 	case reflect.Func:
-		c := &callable{native: NewNativeFunction("", "", v)}
-		vm.setGeneral(r, reflect.ValueOf(c))
+		vm.setGeneral(r, reflect.ValueOf(newNativeCallable(v)))
 		return generalRegister
 	case reflect.Interface:
 		vm.setGeneral(r, v.Elem())
@@ -477,12 +563,18 @@ func (vm *VM) appendSlice(first int8, length int, slice reflect.Value) reflect.V
 	}
 }
 
-// noteHigh records that register i of bank b has been written, so
-// putPooledVM knows how much of the bank to clear. Indirect writes go through
+// noteHigh records that register i of bank b has been written, so Reset knows
+// how much of the bank to clear. Indirect writes go through
 // a pointer already held in a register, which setGeneral recorded when it put
 // the pointer there.
 func (vm *VM) noteHigh(b int, i Addr) {
 	if i > vm.high[b] {
 		vm.high[b] = i
+	}
+}
+
+func (vm *VM) noteCopiedRegisters(bank, count int) {
+	if count > 0 {
+		vm.noteHigh(bank, Addr(count-1))
 	}
 }

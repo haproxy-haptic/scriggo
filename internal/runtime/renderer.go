@@ -28,6 +28,8 @@ import (
 
 var byteSliceType = reflect.TypeFor[[]byte]()
 
+var errInvalidTextFragmentWriteCount = errors.New("text fragment returned an invalid write count")
+
 // stringBuilderPool is a pool of strings.Builder for reuse in rendering operations.
 var stringBuilderPool = newRetainedPool(256, func() *strings.Builder {
 	return &strings.Builder{}
@@ -78,15 +80,22 @@ type valueLine struct {
 
 type valueSource []valueLine
 
-// outputSegment represents a segment of output in the renderer.
-// It can either be a literal string or a future waiting for a parallel render.
+type outputSegmentKind uint8
+
+const (
+	outputSegmentLiteral outputSegmentKind = iota
+	outputSegmentFuture
+	outputSegmentTextFragment
+)
+
+// outputSegment represents ordered output held while parallel renders finish.
 type outputSegment struct {
-	isLiteral bool
-	literal   string
-	future    *renderFuture
-	// srcSpans holds the source-map spans for a literal segment (nil unless
-	// collectSrc). For a future segment, goFrames attributes its whole output to
-	// the "{{ go … }}" render call site (innermost first).
+	kind     outputSegmentKind
+	literal  string
+	future   *renderFuture
+	fragment native.TextFragment
+	// srcSpans holds the source-map spans for a literal segment. For a future,
+	// goFrames attributes its output to the "{{ go … }}" call site.
 	srcSpans []SourceSpan
 	goFrames []SourceFrame
 }
@@ -159,6 +168,8 @@ type renderer struct {
 	// If zero, defaults to 100.
 	maxParallelDepth int32
 
+	retainTextFragments bool
+
 	// --- source-map collection (opt-in via CollectSourceMap) ---
 	// collectSrc enables recording of SourceSpans. When false (production) the
 	// added code is a single branch per write and carries no overhead.
@@ -186,6 +197,29 @@ func newRenderer(out io.Writer) *renderer {
 	r := &renderer{out: out}
 	r.recW = recordingWriter{r}
 	return r
+}
+
+func (r *renderer) reset(out io.Writer) {
+	r.out = out
+	r.inURL = false
+	r.query = false
+	r.addAmpersand = false
+	r.removeQuestionMark = false
+	r.segments = nil
+	r.pendingBuf = nil
+	r.eg = nil
+	atomic.StoreInt32(&r.parallelDepth, 0)
+	r.maxParallelRenders = 0
+	r.maxParallelDepth = 0
+	r.retainTextFragments = false
+	r.collectSrc = false
+	r.curFrames = nil
+	r.curIsText = false
+	r.pendingSpans = nil
+	r.finalSpans = nil
+	r.recW = recordingWriter{r}
+	r.pendingValueSources = nil
+	r.consumeNext = false
 }
 
 // recordingWriter records a SourceSpan for each write (attributed to the
@@ -406,9 +440,14 @@ func (r *renderer) outputWriter() io.Writer {
 }
 
 // Show shows v in the given context.
-func (r *renderer) Show(env *env, v any, context Context) error {
+func (r *renderer) Show(env *nativeEnv, v any, context Context) error {
 
 	ctx, inURL, _ := decodeRenderContext(context)
+	if ctx != ast.ContextText {
+		if _, ok := v.(native.TextFragment); ok {
+			return fmt.Errorf("cannot show type %T as %s", v, ctx)
+		}
+	}
 
 	// Check and eventually change the URL state.
 	if r.inURL != inURL {
@@ -427,7 +466,11 @@ func (r *renderer) Show(env *env, v any, context Context) error {
 
 	switch ctx {
 	case ast.ContextText:
-		err = showInText(env, out, v)
+		if fragment, ok := v.(native.TextFragment); ok {
+			err = r.showTextFragment(fragment)
+		} else {
+			err = showInText(env, out, v)
+		}
 	case ast.ContextHTML:
 		err = showInHTML(env, out, v)
 	case ast.ContextTag:
@@ -504,7 +547,7 @@ func (r *renderer) Text(txt []byte, inURL, isSet bool) error {
 }
 
 // showInURL shows v in a URL in the given context.
-func (r *renderer) showInURL(env *env, v any, ctx ast.Context) error {
+func (r *renderer) showInURL(env *nativeEnv, v any, ctx ast.Context) error {
 
 	b := stringBuilderPool.get()
 	b.Reset()
@@ -568,7 +611,7 @@ func newStringWriter(wr io.Writer) strWriter {
 	return strWriterWrapper{wr}
 }
 
-func toString(env *env, i any) (string, error) {
+func toString(env *nativeEnv, i any) (string, error) {
 	v := valueOf(env, i)
 	switch v.Kind() {
 	case reflect.Invalid:
@@ -640,7 +683,7 @@ func toString(env *env, i any) (string, error) {
 }
 
 // showInText shows value in the Text context.
-func showInText(env *env, out io.Writer, value any) error {
+func showInText(env *nativeEnv, out io.Writer, value any) error {
 	var s string
 	switch v := value.(type) {
 	case fmt.Stringer:
@@ -661,8 +704,100 @@ func showInText(env *env, out io.Writer, value any) error {
 	return err
 }
 
+type textFragmentCountingWriter struct {
+	out     io.Writer
+	written int64
+	err     error
+}
+
+func (w *textFragmentCountingWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	n, err := w.out.Write(p)
+	return w.record(len(p), n, err)
+}
+
+func (w *textFragmentCountingWriter) WriteString(s string) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	var n int
+	var err error
+	if out, ok := w.out.(io.StringWriter); ok {
+		n, err = out.WriteString(s)
+	} else {
+		n, err = w.out.Write([]byte(s))
+	}
+	return w.record(len(s), n, err)
+}
+
+func (w *textFragmentCountingWriter) record(length, n int, err error) (int, error) {
+	if n < 0 || n > length {
+		w.err = fmt.Errorf("%w: writer returned %d for %d bytes", errInvalidTextFragmentWriteCount, n, length)
+		return 0, w.err
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if w.written > maxInt64-int64(n) {
+		w.err = fmt.Errorf("%w: byte count overflow", errInvalidTextFragmentWriteCount)
+		return 0, w.err
+	}
+	w.written += int64(n)
+	if err == nil && n != length {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.err = err
+	}
+	return n, err
+}
+
+func writeTextFragment(out io.Writer, fragment native.TextFragment) error {
+	counter := &textFragmentCountingWriter{out: out}
+	reported, err := fragment.WriteTo(counter)
+	if reported < 0 || reported != counter.written {
+		return fmt.Errorf(
+			"%w: fragment reported %d for %d bytes",
+			errInvalidTextFragmentWriteCount,
+			reported,
+			counter.written,
+		)
+	}
+	if counter.err != nil {
+		return counter.err
+	}
+	return err
+}
+
+func emitTextFragment(out io.Writer, fragment native.TextFragment) error {
+	if writer, ok := out.(native.TextFragmentWriter); ok {
+		return writer.WriteTextFragment(fragment)
+	}
+	return writeTextFragment(out, fragment)
+}
+
+func (r *renderer) showTextFragment(fragment native.TextFragment) error {
+	if r.collectSrc || !r.retainTextFragments {
+		return writeTextFragment(r.outputWriter(), fragment)
+	}
+
+	r.segmentsMu.Lock()
+	if r.pendingBuf != nil {
+		r.flushPendingLiteralLocked()
+		r.segments = append(r.segments, outputSegment{
+			kind:     outputSegmentTextFragment,
+			fragment: fragment,
+		})
+		r.segmentsMu.Unlock()
+		return nil
+	}
+	out := r.out
+	r.segmentsMu.Unlock()
+	return emitTextFragment(out, fragment)
+}
+
 // showInHTML shows value in HTML context.
-func showInHTML(env *env, out io.Writer, value any) error {
+func showInHTML(env *nativeEnv, out io.Writer, value any) error {
 	w := newStringWriter(out)
 	switch v := value.(type) {
 	// Fast paths for basic types - avoid reflection in toString()
@@ -709,8 +844,8 @@ func showInHTML(env *env, out io.Writer, value any) error {
 	case error:
 		return htmlEscape(w, v.Error())
 	case native.Markdown:
-		if env.conv != nil {
-			return env.conv([]byte(v), out)
+		if env.env.conv != nil {
+			return env.env.conv([]byte(v), out)
 		}
 	}
 	s, err := toString(env, value)
@@ -721,7 +856,7 @@ func showInHTML(env *env, out io.Writer, value any) error {
 }
 
 // showInTag show value in Tag context.
-func showInTag(env *env, out io.Writer, value any) error {
+func showInTag(env *nativeEnv, out io.Writer, value any) error {
 	var s string
 	switch v := value.(type) {
 	case fmt.Stringer:
@@ -763,7 +898,7 @@ func showInTag(env *env, out io.Writer, value any) error {
 
 // showInAttribute shows value in the attribute context quoted or unquoted
 // depending on quoted value.
-func showInAttribute(env *env, out io.Writer, value any, quoted bool) error {
+func showInAttribute(env *nativeEnv, out io.Writer, value any, quoted bool) error {
 	var s string
 	var escapeEntities bool
 	switch v := value.(type) {
@@ -794,7 +929,7 @@ func showInAttribute(env *env, out io.Writer, value any, quoted bool) error {
 }
 
 // showInCSS shows value in CSS context.
-func showInCSS(env *env, out io.Writer, value any) error {
+func showInCSS(env *nativeEnv, out io.Writer, value any) error {
 	w := newStringWriter(out)
 	switch v := value.(type) {
 	case native.CSS:
@@ -837,7 +972,7 @@ func showInCSS(env *env, out io.Writer, value any) error {
 }
 
 // showInCSSString shows value in CSSString context.
-func showInCSSString(env *env, out io.Writer, value any) error {
+func showInCSSString(env *nativeEnv, out io.Writer, value any) error {
 	var s string
 	switch value := value.(type) {
 	case fmt.Stringer:
@@ -862,7 +997,7 @@ func showInCSSString(env *env, out io.Writer, value any) error {
 }
 
 // showInJS shows value in JavaScript context.
-func showInJS(env *env, out io.Writer, value any) error {
+func showInJS(env *nativeEnv, out io.Writer, value any) error {
 
 	w := newStringWriter(out)
 
@@ -1059,7 +1194,7 @@ func showInJS(env *env, out io.Writer, value any) error {
 }
 
 // showInJSON shows value in JSON context.
-func showInJSON(env *env, out io.Writer, value any) error {
+func showInJSON(env *nativeEnv, out io.Writer, value any) error {
 
 	w := newStringWriter(out)
 
@@ -1261,7 +1396,7 @@ func showInJSON(env *env, out io.Writer, value any) error {
 }
 
 // showInJSString shows value in JSString context.
-func showInJSString(env *env, out io.Writer, value any) error {
+func showInJSString(env *nativeEnv, out io.Writer, value any) error {
 	var s string
 	switch v := value.(type) {
 	case fmt.Stringer:
@@ -1281,12 +1416,12 @@ func showInJSString(env *env, out io.Writer, value any) error {
 }
 
 // showInJSONString shows value in JSONString context.
-func showInJSONString(env *env, out io.Writer, value any) error {
+func showInJSONString(env *nativeEnv, out io.Writer, value any) error {
 	return showInJSString(env, out, value)
 }
 
 // showInMarkdown shows value in the Markdown context.
-func showInMarkdown(env *env, out io.Writer, value any) error {
+func showInMarkdown(env *nativeEnv, out io.Writer, value any) error {
 	w := newStringWriter(out)
 	switch v := value.(type) {
 	case native.Markdown:
@@ -1320,7 +1455,7 @@ func showInMarkdown(env *env, out io.Writer, value any) error {
 }
 
 // showInMarkdownCodeBlock shows value in the Markdown code block context.
-func showInMarkdownCodeBlock(env *env, out io.Writer, value any, spaces bool) error {
+func showInMarkdownCodeBlock(env *nativeEnv, out io.Writer, value any, spaces bool) error {
 	var s string
 	switch v := value.(type) {
 	case fmt.Stringer:
@@ -1409,7 +1544,7 @@ func isEmptyValue(v reflect.Value) (empty bool) {
 
 // valueOf returns the reflect value of i. If i is a proxy, it returns the
 // underlying value.
-func valueOf(env *env, i any) reflect.Value {
+func valueOf(env *nativeEnv, i any) reflect.Value {
 	if i == nil {
 		return reflect.Value{}
 	}
@@ -1431,6 +1566,18 @@ func decodeRenderContext(c Context) (ast.Context, bool, bool) {
 		isURLSet = c&0b01000000 != 0
 	}
 	return ctx, inURL, isURLSet
+}
+
+func (r *renderer) flushPendingLiteralLocked() {
+	if r.pendingBuf == nil || r.pendingBuf.Len() == 0 {
+		return
+	}
+	r.segments = append(r.segments, outputSegment{
+		kind:     outputSegmentLiteral,
+		literal:  r.pendingBuf.String(),
+		srcSpans: r.takePendingSpans(),
+	})
+	r.pendingBuf.Reset()
 }
 
 // addFutureSlot adds a placeholder for a parallel render's output.
@@ -1472,21 +1619,15 @@ func (r *renderer) addFutureSlot(future *renderFuture) (*errgroup.Group, error) 
 		// The prefix written before any future went straight to out, so its
 		// spans open finalSpans; segments (below) are appended after it.
 		r.finalSpans = append(r.finalSpans, r.takePendingSpans()...)
-	} else if r.pendingBuf.Len() > 0 {
-		// Flush pending output to a literal segment
-		r.segments = append(r.segments, outputSegment{
-			isLiteral: true,
-			literal:   r.pendingBuf.String(),
-			srcSpans:  r.takePendingSpans(),
-		})
-		r.pendingBuf.Reset()
+	} else {
+		r.flushPendingLiteralLocked()
 	}
 
 	// Add the future slot, attributing its whole output to the go-render site.
 	r.segments = append(r.segments, outputSegment{
-		isLiteral: false,
-		future:    future,
-		goFrames:  r.curFrames,
+		kind:     outputSegmentFuture,
+		future:   future,
+		goFrames: r.curFrames,
 	})
 
 	// Return the errgroup for the caller to spawn work on
@@ -1521,14 +1662,7 @@ func (r *renderer) flushWithFutures() error {
 		return nil
 	}
 
-	// Flush any remaining pending output
-	if r.pendingBuf != nil && r.pendingBuf.Len() > 0 {
-		r.segments = append(r.segments, outputSegment{
-			isLiteral: true,
-			literal:   r.pendingBuf.String(),
-			srcSpans:  r.takePendingSpans(),
-		})
-	}
+	r.flushPendingLiteralLocked()
 
 	// Take ownership of segments and pendingBuf for cleanup
 	segments := r.segments
@@ -1554,7 +1688,7 @@ func (r *renderer) flushWithFutures() error {
 	// Collect futures for cleanup - pre-allocate based on segment count
 	futures := make([]*renderFuture, 0, len(segments))
 	for _, seg := range segments {
-		if !seg.isLiteral {
+		if seg.kind == outputSegmentFuture {
 			futures = append(futures, seg.future)
 		}
 	}
@@ -1572,10 +1706,11 @@ func (r *renderer) flushWithFutures() error {
 	// Collect results from all futures (all work has completed after eg.Wait())
 	results := make([]string, len(segments))
 	for i, seg := range segments {
-		if seg.isLiteral {
+		switch seg.kind {
+		case outputSegmentLiteral:
 			results[i] = seg.literal
 			r.finalSpans = append(r.finalSpans, seg.srcSpans...)
-		} else {
+		case outputSegmentFuture:
 			// Work has completed, so exactly one channel has a value
 			select {
 			case err := <-seg.future.err:
@@ -1589,12 +1724,26 @@ func (r *renderer) flushWithFutures() error {
 					r.finalSpans = append(r.finalSpans, SourceSpan{Frames: seg.goFrames, Length: len(result), IsText: false})
 				}
 			}
+		case outputSegmentTextFragment:
+			if r.collectSrc {
+				cleanup()
+				return errors.New("text fragment was retained while collecting a source map")
+			}
+		default:
+			cleanup()
+			return errors.New("invalid renderer output segment")
 		}
 	}
 
 	// Write all segments to output in order
-	for _, result := range results {
-		if _, err := io.WriteString(r.out, result); err != nil {
+	for i, seg := range segments {
+		var err error
+		if seg.kind == outputSegmentTextFragment {
+			err = emitTextFragment(r.out, seg.fragment)
+		} else {
+			_, err = io.WriteString(r.out, results[i])
+		}
+		if err != nil {
 			cleanup()
 			return err
 		}

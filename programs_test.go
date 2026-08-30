@@ -54,3 +54,44 @@ func TestInitPackageLevelVariables(t *testing.T) {
 	}
 
 }
+
+func TestProgramSharedImportedPackageInitializesOnce(t *testing.T) {
+	program, err := Build(Files{
+		"go.mod": []byte("module example.test/sharedinit\n"),
+		"main.go": []byte(`package main
+
+import (
+	_ "example.test/sharedinit/a"
+	_ "example.test/sharedinit/b"
+)
+
+func main() {}
+`),
+		"a/a.go": []byte(`package a
+
+import "example.test/sharedinit/c"
+
+func init() { c.Value += 10 }
+`),
+		"b/b.go": []byte(`package b
+
+import "example.test/sharedinit/c"
+
+func init() {
+	if c.Value != 52 {
+		panic(c.Value)
+	}
+}
+`),
+		"c/c.go": []byte(`package c
+
+var Value = 42
+`),
+	}, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := program.Run(nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+}

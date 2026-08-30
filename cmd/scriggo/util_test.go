@@ -5,6 +5,7 @@
 package main
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -63,6 +64,42 @@ func Test_nextGoVersion(t *testing.T) {
 		t.Run(tt.current, func(t *testing.T) {
 			if got := nextGoVersion(tt.current); got != tt.want {
 				t.Errorf("nextGoVersion(%s) = %v, want %v", tt.current, got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_goVersionAtLeast(t *testing.T) {
+	tests := []struct {
+		version string
+		minimum string
+		want    bool
+	}{
+		{version: "go1.25", minimum: "go1.26", want: false},
+		{version: "go1.26", minimum: "go1.26", want: true},
+		{version: "go1.27", minimum: "go1.26", want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.version, func(t *testing.T) {
+			if got := goVersionAtLeast(test.version, test.minimum); got != test.want {
+				t.Fatalf("goVersionAtLeast(%q, %q) = %t, want %t", test.version, test.minimum, got, test.want)
+			}
+		})
+	}
+}
+
+func Test_stdLibPathsIncludesPackagesIntroducedBeforeCurrentToolchain(t *testing.T) {
+	for _, test := range []struct {
+		version string
+		want    bool
+	}{
+		{version: "go1.25", want: false},
+		{version: "go1.26", want: true},
+		{version: "go1.27", want: true},
+	} {
+		t.Run(test.version, func(t *testing.T) {
+			if got := slices.Contains(stdLibPaths(test.version), "crypto/hpke"); got != test.want {
+				t.Fatalf("stdLibPaths(%q) contains crypto/hpke = %t, want %t", test.version, got, test.want)
 			}
 		})
 	}

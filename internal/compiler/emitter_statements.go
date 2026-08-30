@@ -72,9 +72,9 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 
 		case *ast.Defer:
 			call := node.Call.(*ast.Call)
-			if em.builtinCallName(call) == "recover" {
+			builtin := em.builtinCallName(call)
+			if builtin == "recover" {
 				stackShift := em.fb.currentStackShift()
-				backup := em.fb
 				fnReg := em.fb.newRegister(reflect.Func)
 				fn := &runtime.Function{
 					Pkg:    em.fb.fn.Pkg,
@@ -83,12 +83,16 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 					Parent: em.fb.fn,
 				}
 				em.fb.emitLoadFunc(false, em.fb.addFunction(fn), fnReg)
-				em.fb = newBuilder(fn, em.fb.getPath())
+				exitFunction := em.enterFunction(newBuilder(fn, em.fb.getPath()))
 				em.fb.emitRecover(0, true)
 				em.fb.emitReturn()
-				em.fb = backup
+				exitFunction()
 				em.fb.emitDefer(fnReg, 0, stackShift, runtime.StackShift{0, 0, 0, 0}, fn.Type)
 				continue
+			}
+			if ident, ok := call.Func.(*ast.Identifier); ok && em.ti(call.Func).IsNative() &&
+				(ident.Name == "print" || ident.Name == "println") {
+				em.fb.fn.UsesPrint = true
 			}
 			em.fb.enterStack()
 			_, _ = em.emitCallNode(call, false, true, runtime.ReturnString)
@@ -318,18 +322,26 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 					em.emitCallNode(expr.(*ast.Call), false, false, ast.Format(ctx))
 					em.fb.exitStack()
 				} else if render, ok := expr.(*ast.Render); ok {
-					// Optimize {{ render "path" }}
 					em.fb.enterStack()
-					em.emitNodes([]ast.Node{render.IR.Import})
-					em.emitCallNode(render.IR.Call, false, false, ast.Format(ctx))
-					em.fb.exitStack()
-				} else if renderGlob, ok := expr.(*ast.RenderGlob); ok {
-					// Optimize {{ render_glob "pattern" }}
-					for _, render := range renderGlob.Renders {
-						em.fb.enterStack()
+					if render.Parallel {
+						em.emitExpr(render, em.typ(render))
+					} else {
 						em.emitNodes([]ast.Node{render.IR.Import})
 						em.emitCallNode(render.IR.Call, false, false, ast.Format(ctx))
+					}
+					em.fb.exitStack()
+				} else if renderGlob, ok := expr.(*ast.RenderGlob); ok {
+					if renderGlob.Parallel {
+						em.fb.enterStack()
+						em.emitExpr(renderGlob, em.typ(renderGlob))
 						em.fb.exitStack()
+					} else {
+						for _, render := range renderGlob.Renders {
+							em.fb.enterStack()
+							em.emitNodes([]ast.Node{render.IR.Import})
+							em.emitCallNode(render.IR.Call, false, false, ast.Format(ctx))
+							em.fb.exitStack()
+						}
 					}
 				} else {
 					ti := em.ti(expr)
@@ -1174,7 +1186,7 @@ func (em *emitter) emitForRange(node *ast.ForRange) {
 	em.fb.setLabelAddr(rangeLabel)
 	endRange := em.fb.newLabel()
 	em.rangeLabels = append(em.rangeLabels, rangeLabel)
-	em.fb.emitRange(kExpr, exprReg, index, elem, exprType.Kind())
+	em.fb.emitRange(kExpr, exprReg, index, elem, exprType)
 	em.fb.emitGoto(endRange)
 	em.fb.enterScope()
 

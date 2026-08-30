@@ -6,13 +6,13 @@ package runtime
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
 	goruntime "runtime"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"unicode"
 
 	"gitlab.com/haproxy-haptic/scriggo/ast"
@@ -121,6 +121,10 @@ func (args *parallelRenderArgs) copyToVM(nvm *VM) {
 	copy(nvm.regs.float, args.floats)
 	copy(nvm.regs.string, args.strings)
 	copy(nvm.regs.general, args.generals)
+	nvm.noteCopiedRegisters(0, len(args.ints))
+	nvm.noteCopiedRegisters(1, len(args.floats))
+	nvm.noteCopiedRegisters(2, len(args.strings))
+	nvm.noteCopiedRegisters(3, len(args.generals))
 }
 
 // toReflectValues converts captured arguments to []reflect.Value for native function calls.
@@ -210,12 +214,12 @@ func (args *parallelRenderArgs) toReflectValues(fnType reflect.Type) []reflect.V
 // runScriggoMacroParallel runs a Scriggo function in a goroutine and sends result to future.
 // This centralizes the VM setup, argument copying, execution, and cleanup.
 func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args *parallelRenderArgs,
-	future *renderFuture, parentEnv *env) {
+	future *renderFuture, parentEnv *env, childContext context.Context) {
 	// Capture function info for error reporting before any operations
 	fnName := fn.Name
 	fnPkg := fn.Pkg
 
-	nvm := getPooledVM(parentEnv)
+	nvm := getPooledVM(parentEnv, childContext)
 	nvm.vars = fnVars
 	if nvm.vars == nil {
 		nvm.vars = parentEnv.globals
@@ -223,7 +227,7 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args *paralle
 
 	buf := stringBuilderPool.get()
 	buf.Reset()
-	nvm.renderer = newRenderer(buf)
+	nvm.setRenderer(buf)
 
 	nvm.fn = fn
 	nvm.fp = [4]Addr{0, 0, 0, 0}
@@ -249,15 +253,26 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args *paralle
 		putPooledVM(nvm)
 		putStringBuilder(buf)
 		if r := recover(); r != nil {
-			if pe, ok := r.(*PanicError); ok {
-				future.err <- pe
-			} else {
+			switch err := r.(type) {
+			case stopError:
+				future.err <- err
+			case *PanicError:
+				future.err <- err
+			default:
 				future.err <- panicErrorWithContext(r, fnName, fnPkg)
 			}
 		}
 	}()
 
-	nvm.run()
+	if err := nvm.runFunc(fn, nvm.vars); err != nil {
+		switch err.(type) {
+		case *PanicError, stopError:
+			future.err <- err
+		default:
+			future.err <- stopError{err}
+		}
+		return
+	}
 	future.result <- buf.String()
 }
 
@@ -288,22 +303,11 @@ func runNativeMacroParallel(nativeFn *NativeFunction, args []reflect.Value, futu
 func (vm *VM) runFunc(fn *Function, vars []reflect.Value) error {
 	vm.fn = fn
 	vm.vars = vars
-	var stop chan struct{}
-	if vm.env.doneChan != nil {
-		// Capture env rather than reading vm.env inside the goroutine. A
-		// pooled VM is reset — including vm.env = nil — as soon as the call
-		// that borrowed it returns, and this watchdog can still be racing to
-		// enter its select at that moment. Reading vm.env there dereferences
-		// nil and takes the process down.
-		env := vm.env
-		stop = make(chan struct{})
-		go func() {
-			select {
-			case <-stop:
-			case <-env.ctx.Done():
-				atomic.StoreInt32(&env.done, 1)
-			}
-		}()
+	ctx := vm.nativeEnv.ctx
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 	}
 	for {
 		err := vm.runRecoverable()
@@ -312,9 +316,6 @@ func (vm *VM) runFunc(fn *Function, vars []reflect.Value) error {
 		}
 		p, ok := err.(*PanicError)
 		if !ok {
-			if stop != nil {
-				close(stop)
-			}
 			return err
 		}
 		p.next = vm.panic
@@ -325,10 +326,9 @@ func (vm *VM) runFunc(fn *Function, vars []reflect.Value) error {
 		vm.calls = append(vm.calls, callFrame{cl: callable{fn: vm.fn}, renderer: vm.renderer, fp: vm.fp, status: panicked})
 		vm.fn = nil
 	}
-	if stop != nil {
-		close(stop)
-		if atomic.LoadInt32(&vm.env.done) == 1 {
-			return vm.env.ctx.Err()
+	if currentContext := vm.nativeEnv.ctx; currentContext != nil {
+		if err := currentContext.Err(); err != nil {
+			return err
 		}
 	}
 	if vm.panic != nil {
@@ -386,7 +386,9 @@ func (vm *VM) executeMacro(fn *Function, format int8) {
 			}
 			vm.renderer = newRenderer(&bytes.Buffer{})
 		} else {
-			vm.renderer = newRenderer(vm.renderer.out)
+			nr := newRenderer(vm.renderer.out)
+			nr.retainTextFragments = vm.renderer.retainTextFragments
+			vm.renderer = nr
 		}
 	}
 	vm.fn = fn
@@ -404,13 +406,17 @@ func (vm *VM) run() (Addr, bool) {
 	var op Operation
 	var a, b, c int8
 
-	done := vm.env.doneChan
+	done := vm.doneChan
 
 mainLoop:
 	for {
 
-		if done != nil && atomic.LoadInt32(&vm.env.done) == 1 {
-			return vm.stop()
+		if done != nil {
+			select {
+			case <-done:
+				return vm.stop()
+			default:
+			}
 		}
 
 		in := vm.fn.Body[vm.pc]
@@ -476,11 +482,21 @@ mainLoop:
 
 		// Append
 		case OpAppend:
-			vm.setGeneral(c, vm.appendSlice(a, int(b-a), vm.general(c)))
+			slice := vm.general(c)
+			length := int(b - a)
+			if length > 0 && length <= slice.Cap()-slice.Len() {
+				vm.observeMutation(MutationAppend, slice)
+			}
+			vm.setGeneral(c, vm.appendSlice(a, length, slice))
 
 		// AppendSlice
 		case OpAppendSlice:
-			vm.setGeneral(c, reflect.AppendSlice(vm.general(c), vm.general(a)))
+			slice := vm.general(c)
+			source := vm.general(a)
+			if source.Len() > 0 && source.Len() <= slice.Cap()-slice.Len() {
+				vm.observeMutation(MutationAppend, slice)
+			}
+			vm.setGeneral(c, reflect.AppendSlice(slice, source))
 
 		// Assert
 		case OpAssert:
@@ -610,6 +626,7 @@ mainLoop:
 			if f.fn == nil {
 				off := vm.fn.Body[vm.pc]
 				vm.callNative(f.Native(), c, StackShift{int8(off.Op), off.A, off.B, off.C}, startNativeGoroutine)
+				done = vm.doneChan
 				startNativeGoroutine = false
 				vm.pc++
 			} else {
@@ -655,7 +672,9 @@ mainLoop:
 							}
 							vm.renderer = newRenderer(&bytes.Buffer{})
 						} else {
-							vm.renderer = newRenderer(vm.renderer.out)
+							nr := newRenderer(vm.renderer.out)
+							nr.retainTextFragments = vm.renderer.retainTextFragments
+							vm.renderer = nr
 						}
 					}
 				}
@@ -676,7 +695,30 @@ mainLoop:
 			fn := vm.fn.NativeFunctions[uint8(a)]
 			off := vm.fn.Body[vm.pc]
 			vm.callNative(fn, c, StackShift{int8(off.Op), off.A, off.B, off.C}, startNativeGoroutine)
+			done = vm.doneChan
 			startNativeGoroutine = false
+			vm.pc++
+		case OpCallNativeValue:
+			initReflectNativeFunction(&vm.nativeCall, vm.general(a))
+			vm.nativeCall.frameCallKind = nativeFrameCallFunctionField
+			off := vm.fn.Body[vm.pc]
+			vm.callNative(&vm.nativeCall, c, StackShift{int8(off.Op), off.A, off.B, off.C}, false)
+			done = vm.doneChan
+			vm.pc++
+		case OpCallNativeFrameMethod:
+			receiver := vm.general(a)
+			method := vm.stringk(b, true)
+			off := vm.fn.Body[vm.pc]
+			shift := StackShift{int8(off.Op), off.A, off.B, off.C}
+			expectedType := vm.fn.InstructionInfo[vm.pc-1].FuncType
+			if !vm.callNativeMethodFrame(receiver, method, expectedType, c, shift) {
+				recordNativeFrameCall(nativeFrameCallInterfaceMethod, false)
+				value := receiver.MethodByName(method)
+				initReflectNativeFunction(&vm.nativeCall, value)
+				vm.nativeCall.SetBoundMethodReceiver(receiver, method)
+				vm.callNative(&vm.nativeCall, c, shift, false)
+			}
+			done = vm.doneChan
 			vm.pc++
 
 		// Cap
@@ -714,7 +756,15 @@ mainLoop:
 
 		// Close
 		case OpClose:
-			vm.general(a).Close()
+			ch := vm.general(a)
+			vm.rejectChannelOperation(MutationCloseChannel, ch)
+			ch.Close()
+
+		// Clear
+		case OpClear:
+			target := vm.general(a)
+			vm.observeMutation(MutationClear, target)
+			target.Clear()
 
 		// Complex
 		case OpComplex64:
@@ -969,7 +1019,9 @@ mainLoop:
 
 		// Copy
 		case OpCopy:
-			n := reflect.Copy(vm.general(c), vm.general(a))
+			dst := vm.general(c)
+			vm.observeMutation(MutationCopy, dst)
+			n := reflect.Copy(dst, vm.general(a))
 			if b != 0 {
 				vm.setInt(b, int64(n))
 			}
@@ -992,6 +1044,7 @@ mainLoop:
 		// Delete
 		case OpDelete:
 			m := vm.general(a)
+			vm.observeMutation(MutationDelete, m)
 			k := reflect.New(m.Type().Key()).Elem()
 			vm.getIntoReflectValue(b, k, false)
 			m.SetMapIndex(k, reflect.Value{})
@@ -1044,17 +1097,40 @@ mainLoop:
 				// Multi-level field access (embedded structs)
 				vm.setFromReflectValue(c, vm.fieldByIndex(v, uint8(b)))
 			}
+		case OpFieldNativeFunc:
+			v := vm.general(a)
+			fieldIndexes := vm.fn.FieldIndexes[uint8(b)]
+			if len(fieldIndexes) == 1 {
+				v = derefPointer(v).Field(fieldIndexes[0])
+			} else {
+				v = vm.fieldByIndex(v, uint8(b))
+			}
+			vm.setGeneral(c, v)
 
 		// GetVar
 		case OpGetVar:
-			v := vm.vars[decodeInt16(a, b)]
-			k := v.Kind()
-			switch {
-			case reflect.Bool <= k && k <= reflect.Float64:
-			case k == reflect.String:
-			case k == reflect.Func:
-			case k == reflect.Interface:
-			default:
+			index := decodeInt16(a, b)
+			v := vm.vars[index]
+			if global, ok := vm.internalFunctionGlobal(index); ok &&
+				!vm.env.internalFunctionEscaped[global].Load() {
+				if function := vm.env.internalFunctionValues[global].Load(); function != nil {
+					vm.setGeneral(c, reflect.ValueOf(function))
+					break
+				}
+			}
+			if global, ok := vm.vectorGlobal(index); ok {
+				var bound bool
+				var err error
+				v, bound, err = vm.env.vector.valueForGlobal(global)
+				if err != nil {
+					panic(stopError{err})
+				}
+				if !bound {
+					v = vm.vars[index]
+				}
+			}
+			switch v.Kind() {
+			case reflect.Array, reflect.Struct:
 				v2 := reflect.New(v.Type()).Elem()
 				v2.Set(v)
 				v = v2
@@ -1063,11 +1139,26 @@ mainLoop:
 
 		// GetVarAddr
 		case OpGetVarAddr:
-			ptr := vm.vars[decodeInt16(a, b)].Addr()
+			index := decodeInt16(a, b)
+			if global, ok := vm.vectorGlobal(index); ok && vm.env.vector.hasGlobal(global) {
+				panic(stopError{fmt.Errorf("%w: a vector binding address cannot escape", ErrVectorInvalidConfiguration)})
+			}
+			vm.markBatchGlobalsEscaped()
+			if global, ok := vm.internalFunctionGlobal(index); ok {
+				vm.env.internalFunctionEscaped[global].Store(true)
+				if function := vm.env.internalFunctionValues[global].Swap(nil); function != nil {
+					vm.vars[index].Set(function.Value(vm.env, vm.nativeEnv.ctx))
+				}
+			}
+			ptr := vm.vars[index].Addr()
 			vm.setFromReflectValue(c, ptr)
 
 		// Go
 		case OpGo:
+			if (vm.env.observeMutation != nil || vm.env.observeMutationContext != nil) &&
+				vm.detachedScriggoCall() {
+				panic(stopError{ErrMutationObserverDetachedGo})
+			}
 			wasNative := vm.startGoroutine()
 			if wasNative {
 				startNativeGoroutine = true
@@ -1089,17 +1180,25 @@ mainLoop:
 
 			stackShift := StackShift{int8(off.Op), off.A, off.B, off.C}
 			args := vm.captureArgs(stackShift)
+			childContext := vm.env.deriveChildContext(vm.nativeEnv.ctx)
 
-			vm.renderer.spawnParallelRender(eg, func(fn *Function, args *parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
+			vm.renderer.spawnParallelRender(eg, func(fn *Function, args *parallelRenderArgs, future *renderFuture, parentEnv *env, childContext context.Context) func() {
 				return func() {
-					runScriggoMacroParallel(fn, parentEnv.globals, args, future, parentEnv)
+					runScriggoMacroParallel(fn, parentEnv.globals, args, future, parentEnv, childContext)
 				}
-			}(fn, args, future, vm.env))
+			}(fn, args, future, vm.env, childContext))
 
 		// GoRenderIndirect - spawn a parallel render operation for an indirect function call
 		case OpGoRenderIndirect:
 			vm.setSrcCtx(false) // attribute the parallel block to this go-render site
 			f := vm.general(a).Interface().(*callable)
+			var nativeFn *NativeFunction
+			var childEnv *nativeEnv
+			if f.fn == nil {
+				nativeFn = f.Native()
+				childEnv = vm.newChildNativeEnv()
+				vm.beforeNativeCall(childEnv)
+			}
 			off := vm.fn.Body[vm.pc]
 			vm.pc++
 
@@ -1115,9 +1214,16 @@ mainLoop:
 
 			if f.fn == nil {
 				// Native function path: callable was converted to a native wrapper via callable.Value()
-				nativeFn := f.Native()
 				reflectArgs := args.toReflectValues(nativeFn.value.Type())
 				putParallelRenderArgs(args)
+				for i := range reflectArgs {
+					if nativeFn.value.Type().In(i) == envType {
+						reflectArgs[i] = reflect.ValueOf(childEnv)
+					}
+				}
+				if receiver := nativeFn.receiver(reflectArgs); receiver.IsValid() {
+					vm.observeNativeCall(childEnv, receiver, nativeFn.name, false)
+				}
 
 				vm.renderer.spawnParallelRender(eg, func(nativeFn *NativeFunction, args []reflect.Value, future *renderFuture) func() {
 					return func() {
@@ -1128,17 +1234,21 @@ mainLoop:
 				// Scriggo function path: callable has a direct function reference
 				fn := f.fn
 				fnVars := f.vars
+				childContext := vm.env.deriveChildContext(vm.nativeEnv.ctx)
 
-				vm.renderer.spawnParallelRender(eg, func(fn *Function, fnVars []reflect.Value, args *parallelRenderArgs, future *renderFuture, parentEnv *env) func() {
+				vm.renderer.spawnParallelRender(eg, func(fn *Function, fnVars []reflect.Value, args *parallelRenderArgs, future *renderFuture, parentEnv *env, childContext context.Context) func() {
 					return func() {
-						runScriggoMacroParallel(fn, fnVars, args, future, parentEnv)
+						runScriggoMacroParallel(fn, fnVars, args, future, parentEnv, childContext)
 					}
-				}(fn, fnVars, args, future, vm.env))
+				}(fn, fnVars, args, future, vm.env, childContext))
 			}
 
 		// GoRenderWait - wait for all pending parallel renders and flush output
 		case OpGoRenderWait:
 			if err := vm.renderer.flushWithFutures(); err != nil {
+				if _, ok := err.(stopError); ok {
+					panic(err)
+				}
 				panic(vm.newPanic(err))
 			}
 
@@ -1488,6 +1598,7 @@ mainLoop:
 				fn.native = vm.fn.NativeFunctions[uint8(b)]
 				vm.setGeneral(c, reflect.ValueOf(&fn))
 			} else {
+				vm.markBatchGlobalsEscaped()
 				fn := vm.fn.Functions[uint8(b)]
 				var vars []reflect.Value
 				if fn.VarRefs != nil {
@@ -1627,13 +1738,23 @@ mainLoop:
 			vm.setFromReflectValue(c, elem)
 
 		// MethodValue
-		case OpMethodValue:
+		case OpMethodValue, OpMethodValueFrame:
 			receiver := vm.general(a)
 			if !receiver.IsValid() {
 				panic(errNilPointer)
 			}
 			method := vm.stringk(b, true)
-			vm.setGeneral(c, reflect.ValueOf(&callable{value: receiver.MethodByName(method)}))
+			var nativeEnv *nativeEnv
+			if vm.env.observeNativeCall != nil {
+				nativeEnv = vm.nativeEnvForExposure()
+			}
+			vm.observeNativeCallWithContext(vm.nativeEnv.ctx, nativeEnv, receiver, method, true)
+			if op == OpMethodValueFrame {
+				vm.setGeneral(c, receiver)
+				break
+			}
+			value := receiver.MethodByName(method)
+			vm.setGeneral(c, reflect.ValueOf(newNativeMethodCallable(value, receiver, method)))
 
 		// Move
 		case OpMove, -OpMove:
@@ -1751,6 +1872,31 @@ mainLoop:
 			rangeAddress := endAddress - 1
 			bodyAddress := endAddress + 1
 			v := vm.general(a)
+			if vm.env.deterministic && v.Kind() == reflect.Map {
+				entries, err := deterministicMapEntries(v)
+				if err != nil {
+					panic(stopError{err})
+				}
+				for _, entry := range entries {
+					if b != 0 {
+						vm.setFromReflectValue(b, entry.key)
+					}
+					if c != 0 {
+						vm.setFromReflectValue(c, entry.value)
+					}
+					vm.pc = bodyAddress
+					addr, breakOut := vm.run()
+					if addr != rangeAddress {
+						return addr, breakOut
+					}
+					if breakOut {
+						break
+					}
+				}
+				vm.ok = vm.pc != endAddress
+				vm.pc = endAddress
+				continue mainLoop
+			}
 			switch s := v.Interface().(type) {
 			case []int:
 				if len(s) == 0 {
@@ -2071,6 +2217,7 @@ mainLoop:
 
 				case reflect.Chan:
 					// Channels still use recursive approach due to blocking semantics
+					vm.rejectChannelOperation(MutationReceiveChannel, v)
 					var u reflect.Value
 					var ok bool
 					for {
@@ -2079,7 +2226,7 @@ mainLoop:
 						} else {
 							var chosen int
 							cas := reflect.SelectCase{Dir: reflect.SelectRecv, Chan: v}
-							vm.cases = append(vm.cases, cas, vm.env.doneCase)
+							vm.cases = append(vm.cases, cas, vm.doneCase)
 							chosen, u, ok = reflect.Select(vm.cases)
 							if chosen == 1 {
 								return vm.stop()
@@ -2181,6 +2328,29 @@ mainLoop:
 			}
 			switch kind := v.Kind(); kind {
 			case reflect.Map:
+				if vm.env.deterministic {
+					entries, err := deterministicMapEntries(v)
+					if err != nil {
+						panic(stopError{err})
+					}
+					for _, entry := range entries {
+						if b != 0 {
+							vm.setGeneral(b, entry.key)
+						}
+						if c != 0 {
+							vm.setGeneral(c, entry.value)
+						}
+						vm.pc = bodyAddress
+						addr, breakOut := vm.run()
+						if addr != rangeAddress {
+							return addr, breakOut
+						}
+						if breakOut {
+							break
+						}
+					}
+					break
+				}
 				iter := v.MapRange()
 				for iter.Next() {
 					if b != 0 {
@@ -2199,6 +2369,7 @@ mainLoop:
 					}
 				}
 			case reflect.Chan:
+				vm.rejectChannelOperation(MutationReceiveChannel, v)
 				var u reflect.Value
 				var ok bool
 				for {
@@ -2207,7 +2378,7 @@ mainLoop:
 					} else {
 						var chosen int
 						cas := reflect.SelectCase{Dir: reflect.SelectRecv, Chan: v}
-						vm.cases = append(vm.cases, cas, vm.env.doneCase)
+						vm.cases = append(vm.cases, cas, vm.doneCase)
 						chosen, u, ok = reflect.Select(vm.cases)
 						if chosen == 1 {
 							return vm.stop()
@@ -2332,13 +2503,14 @@ mainLoop:
 		// Receive
 		case OpReceive:
 			ch := vm.general(a)
+			vm.rejectChannelOperation(MutationReceiveChannel, ch)
 			var v reflect.Value
 			if done == nil {
 				v, vm.ok = ch.Recv()
 			} else {
 				var chosen int
 				cas := reflect.SelectCase{Dir: reflect.SelectRecv, Chan: ch}
-				vm.cases = append(vm.cases, cas, vm.env.doneCase)
+				vm.cases = append(vm.cases, cas, vm.doneCase)
 				chosen, v, vm.ok = reflect.Select(vm.cases)
 				if chosen == 1 {
 					return vm.stop()
@@ -2454,13 +2626,44 @@ mainLoop:
 		// Select
 		case OpSelect:
 			numCase := len(vm.cases)
+			if vm.env.observeMutation != nil || vm.env.observeMutationContext != nil {
+				var nativeEnv *nativeEnv
+				if vm.env.observeMutation != nil {
+					nativeEnv = vm.nativeEnvForExposure()
+				}
+				ctx := vm.nativeEnv.ctx
+				var observerErr error
+				observedChannel := false
+				for _, candidate := range vm.cases {
+					var operation MutationOperation
+					switch candidate.Dir {
+					case reflect.SelectSend:
+						operation = MutationSendChannel
+					case reflect.SelectRecv:
+						operation = MutationReceiveChannel
+					default:
+						continue
+					}
+					observedChannel = true
+					if err := vm.notifyMutation(ctx, nativeEnv, operation, candidate.Chan); err != nil && observerErr == nil {
+						observerErr = err
+					}
+				}
+				if !observedChannel {
+					observerErr = vm.notifyMutation(ctx, nativeEnv, MutationSelectChannel, reflect.Value{})
+				}
+				if observerErr != nil {
+					panic(stopError{observerErr})
+				}
+				panic(stopError{ErrMutationObserverChannelOperation})
+			}
 			var chosen int
 			var recv reflect.Value
 			var recvOK bool
 			if done == nil || hasDefaultCase {
 				chosen, recv, recvOK = reflect.Select(vm.cases)
 			} else {
-				vm.cases = append(vm.cases, vm.env.doneCase)
+				vm.cases = append(vm.cases, vm.doneCase)
 				chosen, recv, recvOK = reflect.Select(vm.cases)
 				if chosen == numCase {
 					return vm.stop()
@@ -2494,6 +2697,7 @@ mainLoop:
 		// Send
 		case OpSend, -OpSend:
 			ch := vm.generalk(c, op < 0)
+			vm.rejectChannelOperation(MutationSendChannel, ch)
 			elemType := ch.Type().Elem()
 			v := reflect.New(elemType).Elem()
 			vm.getIntoReflectValue(a, v, op < 0)
@@ -2501,7 +2705,7 @@ mainLoop:
 				ch.Send(v)
 			} else {
 				cas := reflect.SelectCase{Dir: reflect.SelectSend, Chan: ch, Send: v}
-				vm.cases = append(vm.cases, cas, vm.env.doneCase)
+				vm.cases = append(vm.cases, cas, vm.doneCase)
 				chosen, _, _ := reflect.Select(vm.cases)
 				if chosen == 1 {
 					return vm.stop()
@@ -2512,11 +2716,13 @@ mainLoop:
 		// SetField
 		case OpSetField, -OpSetField:
 			v := vm.general(b)
+			vm.observeMutation(MutationSetField, vm.fieldMutationTarget(v, uint8(c)))
 			vm.getIntoReflectValue(a, vm.fieldByIndex(v, uint8(c)), op < 0)
 
 		// SetMap
 		case OpSetMap, -OpSetMap:
 			mv := vm.general(b)
+			vm.observeMutation(MutationSetMapIndex, mv)
 			switch m := mv.Interface().(type) {
 			case map[string]string:
 				k := vm.string(c)
@@ -2567,6 +2773,7 @@ mainLoop:
 		case OpSetSlice, -OpSetSlice:
 			i := vm.int(c)
 			sv := vm.general(b)
+			vm.observeMutation(MutationSetIndex, sv)
 			switch s := sv.Interface().(type) {
 			case []int:
 				s[i] = int(vm.intk(a, op < 0))
@@ -2592,7 +2799,23 @@ mainLoop:
 
 		// SetVar
 		case OpSetVar, -OpSetVar:
-			v := vm.vars[decodeInt16(b, c)]
+			index := decodeInt16(b, c)
+			if global, ok := vm.vectorGlobal(index); ok && vm.env.vector.hasGlobal(global) {
+				panic(stopError{fmt.Errorf("%w: a vector binding cannot be mutated", ErrVectorInvalidConfiguration)})
+			}
+			v := vm.vars[index]
+			vm.observeMutation(MutationSetVariable, v)
+			if global, ok := vm.internalFunctionGlobal(index); ok &&
+				!vm.env.internalFunctionEscaped[global].Load() {
+				value := vm.generalk(a, op < 0)
+				if value.IsValid() {
+					if function, callableValue := value.Interface().(*callable); callableValue {
+						v.SetZero()
+						vm.env.internalFunctionValues[global].Store(function)
+						break
+					}
+				}
+			}
 			vm.getIntoReflectValue(a, v, op < 0)
 
 		// Shl
@@ -2648,43 +2871,43 @@ mainLoop:
 				ctx := Context(c)
 				switch t.Kind() {
 				case reflect.Int:
-					err = vm.renderer.Show(vm.env, int(vm.intk(b, op < 0)), ctx)
+					err = vm.renderer.Show(vm.nativeEnvForExposure(), int(vm.intk(b, op < 0)), ctx)
 					if err != nil {
 						panic(outError{err})
 					}
 					continue mainLoop
 				case reflect.Int64:
-					err = vm.renderer.Show(vm.env, vm.intk(b, op < 0), ctx)
+					err = vm.renderer.Show(vm.nativeEnvForExposure(), vm.intk(b, op < 0), ctx)
 					if err != nil {
 						panic(outError{err})
 					}
 					continue mainLoop
 				case reflect.Int32:
-					err = vm.renderer.Show(vm.env, int32(vm.intk(b, op < 0)), ctx)
+					err = vm.renderer.Show(vm.nativeEnvForExposure(), int32(vm.intk(b, op < 0)), ctx)
 					if err != nil {
 						panic(outError{err})
 					}
 					continue mainLoop
 				case reflect.String:
-					err = vm.renderer.Show(vm.env, vm.stringk(b, op < 0), ctx)
+					err = vm.renderer.Show(vm.nativeEnvForExposure(), vm.stringk(b, op < 0), ctx)
 					if err != nil {
 						panic(outError{err})
 					}
 					continue mainLoop
 				case reflect.Bool:
-					err = vm.renderer.Show(vm.env, vm.boolk(b, op < 0), ctx)
+					err = vm.renderer.Show(vm.nativeEnvForExposure(), vm.boolk(b, op < 0), ctx)
 					if err != nil {
 						panic(outError{err})
 					}
 					continue mainLoop
 				case reflect.Float64:
-					err = vm.renderer.Show(vm.env, vm.floatk(b, op < 0), ctx)
+					err = vm.renderer.Show(vm.nativeEnvForExposure(), vm.floatk(b, op < 0), ctx)
 					if err != nil {
 						panic(outError{err})
 					}
 					continue mainLoop
 				case reflect.Float32:
-					err = vm.renderer.Show(vm.env, float32(vm.floatk(b, op < 0)), ctx)
+					err = vm.renderer.Show(vm.nativeEnvForExposure(), float32(vm.floatk(b, op < 0)), ctx)
 					if err != nil {
 						panic(outError{err})
 					}
@@ -2701,7 +2924,7 @@ mainLoop:
 			if rv.IsValid() {
 				v = rv.Interface()
 			}
-			err := vm.renderer.Show(vm.env, v, Context(c))
+			err := vm.renderer.Show(vm.nativeEnvForExposure(), v, Context(c))
 			if err != nil {
 				panic(outError{err})
 			}
@@ -2737,7 +2960,7 @@ mainLoop:
 				}
 				val = field.Interface()
 			}
-			if err := vm.renderer.Show(vm.env, val, Context(c)); err != nil {
+			if err := vm.renderer.Show(vm.nativeEnvForExposure(), val, Context(c)); err != nil {
 				panic(outError{err})
 			}
 
@@ -2769,7 +2992,7 @@ mainLoop:
 				}
 				val = elem.Interface()
 			}
-			if err := vm.renderer.Show(vm.env, val, Context(c)); err != nil {
+			if err := vm.renderer.Show(vm.nativeEnvForExposure(), val, Context(c)); err != nil {
 				panic(outError{err})
 			}
 
@@ -2967,8 +3190,7 @@ mainLoop:
 			if ok {
 				t = st.GoType()
 			}
-			v := reflect.New(t).Elem()
-			vm.getIntoReflectValue(b, v, op < 0)
+			v, _ := vm.reflectValueInContext(b, t, op < 0, vm.nativeEnv.ctx)
 			if st != nil {
 				v = st.Wrap(v)
 			}

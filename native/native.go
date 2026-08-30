@@ -78,7 +78,122 @@ type Env interface {
 	TypeOf(v reflect.Value) reflect.Type
 }
 
+// VectorAuthority authenticates a vector execution controller to an Env.
+// Each vector run accepts only the exact authority configured by its caller.
+type VectorAuthority struct {
+	token byte
+}
+
+// VectorBoundary marks VM-native vector item boundaries.
+type VectorBoundary struct {
+	seal *VectorBoundary
+}
+
+// VectorFiberBoundary marks VM-native child boundaries inside one vector item.
+type VectorFiberBoundary struct {
+	seal *VectorFiberBoundary
+}
+
+// NewVectorFiberBoundary returns a unique VM-native vector fiber boundary.
+func NewVectorFiberBoundary() *VectorFiberBoundary {
+	boundary := &VectorFiberBoundary{}
+	boundary.seal = boundary
+	return boundary
+}
+
+// Valid reports whether boundary was created by NewVectorFiberBoundary.
+func (boundary *VectorFiberBoundary) Valid() bool {
+	return boundary != nil && boundary.seal == boundary
+}
+
+// BeginChild starts one child of the active vector item.
+func (boundary *VectorFiberBoundary) BeginChild(int, int) {
+	panic("native: vector fiber boundary called outside a VM-native vector run")
+}
+
+// EndChild finishes one child of the active vector item.
+func (boundary *VectorFiberBoundary) EndChild(int, int) {
+	panic("native: vector fiber boundary called outside a VM-native vector run")
+}
+
+// NewVectorBoundary returns a unique VM-native vector boundary.
+func NewVectorBoundary() *VectorBoundary {
+	boundary := &VectorBoundary{}
+	boundary.seal = boundary
+	return boundary
+}
+
+// Valid reports whether boundary was created by NewVectorBoundary.
+func (boundary *VectorBoundary) Valid() bool {
+	return boundary != nil && boundary.seal == boundary
+}
+
+// Begin starts a VM-native vector item.
+func (boundary *VectorBoundary) Begin(int) {
+	panic("native: vector boundary called outside a VM-native vector run")
+}
+
+// End finishes a VM-native vector item.
+func (boundary *VectorBoundary) End(int) {
+	panic("native: vector boundary called outside a VM-native vector run")
+}
+
+// VectorLifecycle receives authenticated VM-native vector item transitions.
+type VectorLifecycle interface {
+	Begin(context.Context, int) error
+	Finish(int) error
+	Commit(int) error
+	Abort(int, error)
+}
+
+// VectorFiberLifecycle receives authenticated child transitions. BeginChild
+// returns the exact context owned by that child.
+type VectorFiberLifecycle interface {
+	BeginChild(int, int) (context.Context, error)
+	EndChild(int, int) error
+}
+
+// NewVectorAuthority returns a unique vector execution authority.
+func NewVectorAuthority() *VectorAuthority {
+	return &VectorAuthority{token: 1}
+}
+
+// VectorEnv is implemented by an Env while a vector execution is configured.
+type VectorEnv interface {
+	Env
+	ActivateVectorIndex(*VectorAuthority, int) error
+	RevokeVectorIndex(*VectorAuthority) error
+	LoadVectorRange(
+		*VectorAuthority,
+		int,
+		map[string]any,
+		[]context.Context,
+		[]*FunctionTrampoline,
+	) error
+	// LoadVectorRangeOwned transfers freshly allocated columns and contexts to the VM.
+	LoadVectorRangeOwned(
+		*VectorAuthority,
+		int,
+		map[string]any,
+		[]context.Context,
+		[]*FunctionTrampoline,
+	) error
+}
+
 type (
+
+	// TextFragment is immutable, replayable text that can be streamed without
+	// first materializing it as a string. It is showable only in text context.
+	TextFragment interface {
+		io.WriterTo
+	}
+
+	// TextFragmentWriter accepts a fragment directly and may retain it after the
+	// template execution returns. Scriggo uses it only for a text-format root
+	// without source maps; its output must match TextFragment.WriteTo.
+	TextFragmentWriter interface {
+		WriteTextFragment(TextFragment) error
+	}
 
 	// EnvStringer is like fmt.Stringer where the String method takes an [Env]
 	// parameter.
@@ -161,6 +276,28 @@ type Declaration any
 //
 // The key is the declaration's name and the element is its value.
 type Declarations map[string]Declaration
+
+// SynchronousDeclaration marks callable native behavior as safe for batched
+// template execution. Calls must finish before returning and must not retain
+// Env values or Scriggo function values. Members contains callable field or
+// method paths exposed by a variable, type, or function result. Members of a
+// multiple-result function start with their zero-based result index, such as
+// "[0].Milliseconds". A '*' path segment matches every struct field at that
+// level, not callable names.
+type SynchronousDeclaration struct {
+	Declaration Declaration
+	Members     []string
+}
+
+// Synchronous marks callable native behavior as safe for batched template
+// execution. A function declaration or function-typed variable is certified
+// directly. Callable fields and methods require explicit member paths.
+// Members of a multiple-result function require an exact zero-based result
+// index. Function-valued results cannot be certified and make a batch fail
+// closed.
+func Synchronous(declaration Declaration, members ...string) SynchronousDeclaration {
+	return SynchronousDeclaration{Declaration: declaration, Members: members}
+}
 
 type (
 	// UntypedStringConst represents an untyped string constant.

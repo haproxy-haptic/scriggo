@@ -54,6 +54,9 @@ type compilation struct {
 	// call site may have different local variables to pass.
 	renderInheritContextMacro map[*ast.Render]renderIR
 
+	isolatedRenderTrees map[*ast.Tree]struct{}
+	nestedRenderTrees   map[*ast.Tree]struct{}
+
 	// iteaToUsingCheck maps 'itea' identifiers ($itea0, $itea1... ) to their
 	// corresponding usingCheck.
 	iteaToUsingCheck map[string]usingCheck
@@ -109,6 +112,8 @@ func newCompilation(globalScope map[string]scopeName) *compilation {
 		indirectVars:              map[*ast.Identifier]bool{},
 		renderImportMacro:         map[*ast.Tree]renderIR{},
 		renderInheritContextMacro: map[*ast.Render]renderIR{},
+		isolatedRenderTrees:       map[*ast.Tree]struct{}{},
+		nestedRenderTrees:         map[*ast.Tree]struct{}{},
 		currentIteaIndex:          -1,
 		currentWildcardIndex:      -1,
 		currentPipelineIndex:      -1,

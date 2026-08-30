@@ -131,3 +131,9 @@ text`,
 		})
 	}
 }
+
+func Test_goBaseVersionHyphenatedExperiment(t *testing.T) {
+	if got, want := goBaseVersion("go1.27.0-X:nodwarf5"), "go1.27"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

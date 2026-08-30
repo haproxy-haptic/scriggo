@@ -121,6 +121,10 @@ type checkerOptions struct {
 
 	// mdConverter converts a Markdown source code to HTML.
 	mdConverter Converter
+
+	// isolateRootRenderPath identifies the root template whose render
+	// expressions start independent package-state generations.
+	isolateRootRenderPath string
 }
 
 // typechecker represents the state of the type checking.
@@ -378,8 +382,9 @@ func checkError(path string, nodeOrPos any, format string, args ...any) error {
 // across the 4 locations where macro typeInfos are created.
 func newMacroTypeInfo(funcType reflect.Type, format ast.Format, additionalProps properties) *typeInfo {
 	return &typeInfo{
-		Type:        funcType,
-		Properties:  propertyIsMacroDeclaration | additionalProps,
-		MacroFormat: format,
+		Type:             funcType,
+		Properties:       propertyIsMacroDeclaration | additionalProps,
+		MacroFormat:      format,
+		NativeProvenance: []nativeProvenance{{Local: true}},
 	}
 }

@@ -510,6 +510,7 @@ var errorType = reflect.TypeFor[error]()
 var universe = map[string]scopeName{
 	"append":     {ti: &typeInfo{Properties: propertyUniverse}},
 	"cap":        {ti: &typeInfo{Properties: propertyUniverse}},
+	"clear":      {ti: &typeInfo{Properties: propertyUniverse}},
 	"close":      {ti: &typeInfo{Properties: propertyUniverse}},
 	"complex":    {ti: &typeInfo{Properties: propertyUniverse}},
 	"copy":       {ti: &typeInfo{Properties: propertyUniverse}},

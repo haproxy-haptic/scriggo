@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	stringerType    = reflect.TypeFor[fmt.Stringer]()
-	envStringerType = reflect.TypeFor[native.EnvStringer]()
+	stringerType     = reflect.TypeFor[fmt.Stringer]()
+	envStringerType  = reflect.TypeFor[native.EnvStringer]()
+	textFragmentType = reflect.TypeFor[native.TextFragment]()
 
 	htmlStringerType    = reflect.TypeFor[native.HTMLStringer]()
 	htmlEnvStringerType = reflect.TypeFor[native.HTMLEnvStringer]()
@@ -569,7 +570,7 @@ nodesLoop:
 			if a := node.Assignment; a.Type == ast.AssignmentDeclaration {
 				ident := a.Lhs[0].(*ast.Identifier)
 				name = ident.Name
-				ti = &typeInfo{Type: t.Type, Properties: propertyAddressable}
+				ti = newTrackedVariableTypeInfo(t.Type)
 				tc.scopes.Declare(name, ti, ident, nil)
 			}
 			var positionOfDefault *ast.Position
@@ -607,7 +608,7 @@ nodesLoop:
 						panic(tc.errorf(cas, "%v (type %s) is not a type", expr, t.StringWithNumber(true)))
 					}
 					if name != "" && len(cas.Expressions) == 1 {
-						ti := &typeInfo{Type: t.Type, Properties: propertyAddressable}
+						ti := newTrackedVariableTypeInfo(t.Type)
 						ident := ast.NewIdentifier(cas.Expressions[0].Pos(), name)
 						tc.scopes.Declare(name, ti, ident, nil)
 					}
@@ -787,7 +788,7 @@ nodesLoop:
 				case "recover":
 					// The statement "defer recover()" is a special case
 					// implemented by the emitter.
-				case "close", "copy", "delete", "panic", "print", "println":
+				case "clear", "close", "copy", "delete", "panic", "print", "println":
 					tc.compilation.typeInfos[call.Func] = deferGoBuiltin(name)
 				}
 			}
@@ -811,7 +812,7 @@ nodesLoop:
 				switch name {
 				case "append", "cap", "complex", "imag", "len", "make", "new", "real":
 					panic(tc.errorf(node, "go discards result of %s", call))
-				case "close", "copy", "delete", "panic", "print", "println", "recover":
+				case "clear", "close", "copy", "delete", "panic", "print", "println", "recover":
 					tc.compilation.typeInfos[call.Func] = deferGoBuiltin(name)
 				}
 			}
@@ -1142,7 +1143,7 @@ func (tc *typechecker) checkFunc(node *ast.Func) {
 	for i := 0; i < t.NumIn(); i++ {
 		param := node.Type.Parameters[i]
 		if param.Ident != nil && !isBlankIdentifier(param.Ident) {
-			tc.scopes.Declare(param.Ident.Name, &typeInfo{Type: t.In(i), Properties: propertyAddressable}, param.Ident, nil)
+			tc.scopes.Declare(param.Ident.Name, newTrackedVariableTypeInfo(t.In(i)), param.Ident, nil)
 			tc.scopes.Use(param.Ident.Name)
 		}
 	}
@@ -1173,7 +1174,7 @@ func (tc *typechecker) checkFunc(node *ast.Func) {
 			if isBlankIdentifier(ret.Ident) {
 				ret.Ident.Name = "$blank" + strconv.Itoa(i)
 			}
-			tc.scopes.Declare(ret.Ident.Name, &typeInfo{Type: t.Out(i), Properties: propertyAddressable}, ret.Ident, nil)
+			tc.scopes.Declare(ret.Ident.Name, newTrackedVariableTypeInfo(t.Out(i)), ret.Ident, nil)
 			tc.scopes.Use(ret.Ident.Name)
 			assignment := ast.NewAssignment(
 				ret.Ident.Position,
@@ -1423,6 +1424,9 @@ var timeType = reflect.TypeFor[time.Time]()
 
 // checkShow type checks the show of a value of type t in context ctx.
 func checkShow(t reflect.Type, ctx ast.Context) error {
+	if ctx != ast.ContextText && t.Implements(textFragmentType) {
+		return fmt.Errorf("cannot show type %s as %s", t, ctx)
+	}
 	if t == emptyInterfaceType {
 		return nil
 	}
@@ -1467,6 +1471,7 @@ func checkShowConcrete(t reflect.Type, ctx ast.Context) error {
 		case ctx == ast.ContextCSSString && t == byteSliceType:
 		case t.Implements(stringerType):
 		case t.Implements(envStringerType):
+		case ctx == ast.ContextText && t.Implements(textFragmentType):
 		case t.Implements(errorType):
 		default:
 			return fmt.Errorf("cannot show type %s as %s", t, ctx)

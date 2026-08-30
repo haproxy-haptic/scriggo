@@ -30,7 +30,12 @@ type functionStore struct {
 
 	// predefFuncIndexes holds the indexes of the predefined functions that have
 	// been added to Predefined because they are referenced in the Scriggo code.
-	predefFuncIndexes map[*runtime.Function]map[reflect.Value]int8
+	predefFuncIndexes map[*runtime.Function]map[predefinedFunctionKey]int8
+}
+
+type predefinedFunctionKey struct {
+	value        reflect.Value
+	nativeMethod bool
 }
 
 // newFunctionStore returns a new functionStore.
@@ -39,7 +44,7 @@ func newFunctionStore(emitter *emitter) *functionStore {
 		emitter:               emitter,
 		availableScriggoFuncs: map[*ast.Package]map[string]*runtime.Function{},
 		scriggoFuncIndexes:    map[*runtime.Function]map[*runtime.Function]int8{},
-		predefFuncIndexes:     map[*runtime.Function]map[reflect.Value]int8{},
+		predefFuncIndexes:     map[*runtime.Function]map[predefinedFunctionKey]int8{},
 	}
 }
 
@@ -97,8 +102,9 @@ func (fs *functionStore) predefFunc(fn ast.Expression, allowMethod bool) (int8, 
 	case *ast.Identifier:
 		name = fn.Name
 	case *ast.Selector:
-		switch fn.Expr.(type) {
-		case *ast.Identifier:
+		if ti.NativeMethod || ti.MethodType == methodCallConcrete {
+			name = fn.Ident
+		} else if _, packageSelector := fn.Expr.(*ast.Identifier); packageSelector {
 			name = fn.Ident
 		}
 	default:
@@ -108,16 +114,26 @@ func (fs *functionStore) predefFunc(fn ast.Expression, allowMethod bool) (int8, 
 	// Add the function to the Predefined slice, or get the index if already
 	// present.
 	fnRv := ti.value.(reflect.Value)
+	key := predefinedFunctionKey{
+		value:        fnRv,
+		nativeMethod: ti.MethodType == methodCallConcrete || ti.NativeMethod,
+	}
 	currFn := fs.emitter.fb.fn
 	if fs.predefFuncIndexes[currFn] == nil {
-		fs.predefFuncIndexes[currFn] = map[reflect.Value]int8{}
+		fs.predefFuncIndexes[currFn] = map[predefinedFunctionKey]int8{}
 	}
-	if index, ok := fs.predefFuncIndexes[currFn][fnRv]; ok {
+	if index, ok := fs.predefFuncIndexes[currFn][key]; ok {
 		return index, true
 	}
 	f := newNativeFunction(ti.NativePackageName, name, fnRv.Interface())
+	if key.nativeMethod {
+		f.SetMethodReceiver(0)
+	}
+	if ti.MutationOperation != 0 {
+		f.SetMutationOperation(ti.MutationOperation)
+	}
 	index := fs.emitter.fb.addNativeFunction(f)
-	fs.predefFuncIndexes[currFn][fnRv] = index
+	fs.predefFuncIndexes[currFn][key] = index
 	return index, true
 
 }

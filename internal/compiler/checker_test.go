@@ -1576,6 +1576,14 @@ var checkerStmts = map[string]string{
 	`append(nil)`:                `first argument to append must be typed slice; have untyped nil`,
 	`append([]string{}, nil)`:    `cannot use nil as type string in append`,
 
+	// Builtin function 'clear'.
+	`clear(map[string]int{})`: ok,
+	`clear([]int{})`:          ok,
+	`clear()`:                 `missing argument to clear: clear()`,
+	`clear(nil)`:              `use of untyped nil`,
+	`clear(1)`:                `invalid argument: cannot clear int`,
+	`clear([]int{}, []int{})`: `too many arguments to clear: clear([]int{}, []int{})`,
+
 	// Builtin function 'copy'.
 	`_ = copy([]int{}, []int{})`:     ok,
 	`copy([]int{}, []int{})`:         ok,
@@ -1918,6 +1926,12 @@ func (mp *MvEnv) MpNil(env native.Env, a, b int) int {
 	return a * b
 }
 
+type EnvFields struct {
+	Env0   func(native.Env)
+	Env1   func(native.Env, int)
+	EnvVar func(native.Env, ...int)
+}
+
 func TestCheckerRemoveEnv(t *testing.T) {
 	p := native.Package{
 		Name: "p",
@@ -1931,6 +1945,7 @@ func TestCheckerRemoveEnv(t *testing.T) {
 			"Env2":   func(env native.Env, a, b int) {},
 			"EnvVar": func(env native.Env, a ...int) {},
 			"Mv":     reflect.TypeFor[MvEnv](),
+			"Fields": reflect.TypeFor[EnvFields](),
 		},
 	}
 	main := `
@@ -1953,6 +1968,10 @@ func TestCheckerRemoveEnv(t *testing.T) {
 		Env0()
 		Env1(1)
 		EnvVar(1,2,3,4,5)
+		var fields Fields
+		fields.Env0()
+		fields.Env1(1)
+		fields.EnvVar(1,2,3,4,5)
 		methodValues()
 	}
 

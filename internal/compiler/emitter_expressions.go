@@ -257,15 +257,14 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 		em.setFunctionVarRefs(fn, expr.Upvars)
 
 		funcLitBuilder := newBuilder(fn, em.fb.getPath())
-		currFB := em.fb
-		em.fb = funcLitBuilder
+		exitFunction := em.enterFunction(funcLitBuilder)
 
 		em.fb.enterScope()
 		em.prepareFunctionBodyParameters(expr)
 		em.emitNodes(expr.Body.Nodes)
 		em.fb.exitScope()
 		em.fb.end()
-		em.fb = currFB
+		exitFunction()
 
 		em.changeRegister(false, tmp, reg, ti.Type, dstType)
 

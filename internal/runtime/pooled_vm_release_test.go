@@ -5,9 +5,14 @@
 package runtime
 
 import (
+	"context"
+	"io"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
+
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 // A VM returned to the pool must hold nothing from the render it just ran.
@@ -79,6 +84,94 @@ func TestPutPooledVMClearsRegistersBeyondHighWaterMark(t *testing.T) {
 	}
 	if vm.regs.string[beyond] != "" {
 		t.Error("string register beyond the high-water mark still holds a value")
+	}
+}
+
+func TestResetReleasesExecutionState(t *testing.T) {
+	vm := NewVM()
+	oldState := vm.state
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	vm.SetContext(ctx)
+	vm.SetChildContext(func(parent context.Context) context.Context { return parent })
+	vm.SetMutationObserver(func(native.Env, Mutation) error { return nil })
+	vm.SetNativeCallObserver(func(native.Env, NativeCall) error { return nil })
+	vm.SetBeforeNativeCall(func(native.Env) error { return nil })
+	vm.SetDeterministic(true)
+	vm.SetPrint(func(any) {})
+	vm.SetRenderer(io.Discard, func([]byte, io.Writer) error { return nil })
+	vm.SetProfiling(true)
+	vm.env.globals = []reflect.Value{reflect.ValueOf("held")}
+	vm.env.typeof = func(value reflect.Value) reflect.Type { return value.Type() }
+	vm.nativeEnv.callPath = "held"
+	vm.nativeEnv.callLine = 42
+	vm.rootRender.pendingBuf = &strings.Builder{}
+	vm.rootRender.pendingSpans = []SourceSpan{{Length: 1}}
+	vm.fn = &Function{Name: "held"}
+	vm.vars = []reflect.Value{reflect.ValueOf("held")}
+	vm.regs.int[1] = 41
+	vm.regs.float[1] = 42
+	vm.regs.string[1] = "held"
+	vm.regs.general[1] = reflect.ValueOf(&struct{ payload [64]byte }{})
+	vm.calls = append(vm.calls, callFrame{renderer: &renderer{}})
+	vm.ranges = append(vm.ranges, rangeState{sliceIface: []any{"held"}})
+	vm.cases = append(vm.cases, reflect.SelectCase{Chan: reflect.ValueOf(make(chan struct{}))})
+	vm.calls = vm.calls[:0]
+	vm.ranges = vm.ranges[:0]
+	vm.cases = vm.cases[:0]
+	vm.high = [4]Addr{1, 1, 1, 1}
+	vm.rangesBase = 9
+	vm.panic = &PanicError{message: "held"}
+	vm.nativeArgs[0] = reflect.ValueOf("held")
+	vm.nativeCall.value = reflect.ValueOf(func() {})
+
+	vm.Reset()
+
+	if vm.state == oldState || vm.env == &oldState.env || vm.nativeEnv == &oldState.nativeEnv {
+		t.Fatal("Reset reused an execution environment reachable by an escaped closure")
+	}
+	if oldState.env.ctx != ctx || oldState.nativeEnv.ctx != ctx {
+		t.Fatal("Reset mutated the prior execution environment")
+	}
+	if vm.env != &vm.state.env || vm.nativeEnv != &vm.state.nativeEnv || vm.nativeEnv.env != vm.env {
+		t.Fatal("Reset installed an inconsistent execution environment")
+	}
+	if got := vm.envArg.Interface(); got != vm.nativeEnv {
+		t.Fatalf("Reset environment argument = %p, want %p", got, vm.nativeEnv)
+	}
+	if vm.env.ctx != nil || vm.env.childContext != nil || vm.env.globals != nil || vm.env.print != nil ||
+		vm.env.typeof != nil || vm.env.conv != nil || vm.env.observeMutation != nil ||
+		vm.env.observeMutationContext != nil || vm.env.observeNativeCall != nil ||
+		vm.env.observeNativeCallContext != nil || vm.env.beforeNativeCall != nil ||
+		vm.env.beforeNativeCallContext != nil || vm.env.deterministic {
+		t.Fatal("Reset retained execution environment options")
+	}
+	if vm.nativeEnv.ctx != nil || vm.nativeEnv.callPath != "" || vm.nativeEnv.callLine != 0 {
+		t.Fatal("Reset retained native execution environment state")
+	}
+	if vm.regs.int[1] != 0 || vm.regs.float[1] != 0 || vm.regs.string[1] != "" || vm.regs.general[1].IsValid() {
+		t.Fatal("Reset retained register data from the previous execution")
+	}
+	if vm.high != [4]Addr{} {
+		t.Fatalf("Reset retained high-water marks: %v", vm.high)
+	}
+	assertCleared(t, "calls", vm.calls, func(f callFrame) bool { return f.renderer != nil })
+	assertCleared(t, "ranges", vm.ranges, func(r rangeState) bool { return r.sliceIface != nil })
+	assertCleared(t, "cases", vm.cases, func(c reflect.SelectCase) bool { return c.Chan.IsValid() })
+	if vm.fn != nil || vm.vars != nil || vm.renderer != nil || vm.rootRender.out != nil ||
+		vm.rootRender.pendingBuf != nil || vm.rootRender.pendingSpans != nil || vm.rangesBase != 0 {
+		t.Fatal("Reset retained VM or renderer execution state")
+	}
+	if vm.doneChan != nil || vm.doneCase.Chan.IsValid() || vm.panic != nil || vm.profiler != nil {
+		t.Fatal("Reset retained cancellation, panic, or profiler state")
+	}
+	for index, value := range vm.nativeArgs {
+		if value.IsValid() {
+			t.Fatalf("Reset retained native argument %d", index)
+		}
+	}
+	if vm.nativeCall.value.IsValid() {
+		t.Fatal("Reset retained a native function value")
 	}
 }
 

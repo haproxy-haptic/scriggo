@@ -1,3 +1,3 @@
 module many_calls_to_init.dir
 
-go 1.16
+go 1.27.0

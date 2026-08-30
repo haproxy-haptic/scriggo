@@ -98,6 +98,7 @@ func (tc *typechecker) obsoleteForRangeAssign(node ast.Node, leftExpr, rightExpr
 				return ""
 			}
 			newRight.Properties |= propertyAddressable
+			setTrackedNativeProvenance(newRight, resolvedNativeProvenance(right))
 			tc.assignScope(leftExpr.Name, newRight, leftExpr, nil)
 			return leftExpr.Name
 		}
@@ -114,6 +115,7 @@ func (tc *typechecker) obsoleteForRangeAssign(node ast.Node, leftExpr, rightExpr
 			panic(tc.errorf(node, "%s in assignment", err))
 		}
 		right.setValue(left.Type)
+		mergeTrackedNativeProvenance(left, right, true)
 		tc.compilation.typeInfos[leftExpr] = left
 	default:
 		panic(internalError("unexpected"))

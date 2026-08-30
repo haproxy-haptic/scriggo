@@ -66,16 +66,30 @@ func parseNumericConst(s string) (constant, reflect.Type, error) {
 // depth must be 0 unless toTypeCheckerScope is called recursively.
 func toTypeCheckerScope(pkg native.ImportablePackage, mod checkingMod, global bool, depth int) map[string]scopeName {
 	scope := map[string]scopeName{}
-	_ = pkg.LookupFunc(func(ident string, decl native.Declaration) error {
+	_ = pkg.LookupFunc(func(ident string, _ native.Declaration) error {
 		ti := &typeInfo{NativePackageName: pkg.PackageName()}
+		declaration := pkg.Lookup(ident)
+		synchronous := false
+		var synchronousMembers []string
+		if certified, ok := declaration.(native.SynchronousDeclaration); ok {
+			declaration = certified.Declaration
+			synchronous = true
+			synchronousMembers = append([]string(nil), certified.Members...)
+			if declaration == nil {
+				panic(fmt.Errorf("scriggo: synchronous declaration %s.%s is nil", pkg.PackageName(), ident))
+			}
+		}
+		var declarationKind NativeDeclarationKind
+		recordDeclaration := true
 		if global {
 			ti.Properties = propertyGlobal
 		}
-		switch v := pkg.Lookup(ident).(type) {
+		switch v := declaration.(type) {
 		default:
 			rv := reflect.ValueOf(v)
 			switch rv.Kind() {
 			case reflect.Pointer:
+				declarationKind = NativeDeclarationVariable
 				// Import a variable.
 				ti.Type = rv.Type().Elem()
 				elem := rv.Elem()
@@ -84,11 +98,13 @@ func toTypeCheckerScope(pkg native.ImportablePackage, mod checkingMod, global bo
 				ti.value = &elem
 				ti.Properties |= propertyAddressable | propertyIsNative | propertyHasValue
 			case reflect.Func:
+				declarationKind = NativeDeclarationFunction
 				// Import a function.
 				ti.Type = removeEnvArg(rv.Type(), false)
 				ti.value = rv
 				ti.Properties |= propertyIsNative | propertyHasValue
 			default:
+				declarationKind = NativeDeclarationConstant
 				// Import a typed constant.
 				ti.Constant = convertToConstant(rv)
 				if ti.Constant == nil {
@@ -101,6 +117,7 @@ func toTypeCheckerScope(pkg native.ImportablePackage, mod checkingMod, global bo
 				ti.Type = rv.Type()
 			}
 		case native.ImportablePackage:
+			recordDeclaration = false
 			// Import an auto-imported package. This is supported in templates only.
 			if mod == programMod {
 				panic(fmt.Errorf("scriggo: auto-imported packages are only supported for templates"))
@@ -119,20 +136,24 @@ func toTypeCheckerScope(pkg native.ImportablePackage, mod checkingMod, global bo
 			ti.Properties |= propertyIsPackage | propertyHasValue
 			ti.NativePackageName = ""
 		case reflect.Type:
+			declarationKind = NativeDeclarationType
 			// Import a type.
 			ti.Type = v
 			ti.Properties |= propertyIsType | propertyIsNative
 		case native.UntypedBooleanConst:
+			declarationKind = NativeDeclarationConstant
 			// Import an untyped boolean constant.
 			ti.Type = boolType
 			ti.Properties |= propertyUntyped
 			ti.Constant = boolConst(v)
 		case native.UntypedStringConst:
+			declarationKind = NativeDeclarationConstant
 			// Import an untyped string constant.
 			ti.Type = stringType
 			ti.Properties |= propertyUntyped
 			ti.Constant = stringConst(v)
 		case native.UntypedNumericConst:
+			declarationKind = NativeDeclarationConstant
 			// Import an untyped numeric constant.
 			var err error
 			ti.Constant, ti.Type, err = parseNumericConst(string(v))
@@ -141,6 +162,7 @@ func toTypeCheckerScope(pkg native.ImportablePackage, mod checkingMod, global bo
 			}
 			ti.Properties |= propertyUntyped
 		case native.AdaptiveFunc:
+			declarationKind = NativeDeclarationFunction
 			// Import an adaptive native function. Impl carries the
 			// concrete runtime function (used for argument validation
 			// and runtime dispatch); ReturnType carries the closure
@@ -162,6 +184,20 @@ func toTypeCheckerScope(pkg native.ImportablePackage, mod checkingMod, global bo
 			ti.AdaptiveReturnType = v.ReturnType
 			ti.AdaptiveLambdaParams = v.LambdaParams
 			ti.Properties |= propertyIsNative | propertyHasValue
+		}
+		if recordDeclaration {
+			declaration := &NativeDeclaration{
+				Package:            pkg.PackageName(),
+				Name:               ident,
+				Kind:               declarationKind,
+				Declaration:        declaration,
+				Synchronous:        synchronous,
+				SynchronousMembers: synchronousMembers,
+			}
+			declaration.identity = declaration
+			ti.NativeDeclaration = declaration
+			ti.NativeProvenance = []nativeProvenance{{Declaration: declaration}}
+			ti.NativeTracker = &nativeProvenanceTracker{Provenance: ti.NativeProvenance}
 		}
 		scope[ident] = scopeName{ti: ti}
 		return nil

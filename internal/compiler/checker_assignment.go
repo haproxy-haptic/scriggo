@@ -91,6 +91,8 @@ func (tc *typechecker) checkAssignment(node *ast.Assignment) {
 		} else {
 			ti.setValue(lhs[i].Type)
 		}
+		_, direct := node.Lhs[i].(*ast.Identifier)
+		mergeTrackedNativeProvenance(lhs[i], ti, direct)
 	}
 
 }
@@ -344,6 +346,7 @@ func (tc *typechecker) checkShortVariableDeclaration(node *ast.Assignment) {
 				lh := tc.checkIdentifier(node.Lhs[i].(*ast.Identifier), false)
 				tc.mustBeAssignableTo(ti, expr, lh.Type, false, nil)
 				ti.setValue(lh.Type)
+				mergeTrackedNativeProvenance(lh, ti, true)
 			case ti.Nil():
 				panic(tc.errorf(expr, "use of untyped nil"))
 			case j == 0 || ti.Untyped():
@@ -351,7 +354,7 @@ func (tc *typechecker) checkShortVariableDeclaration(node *ast.Assignment) {
 				fallthrough
 			default:
 				if j == 1 {
-					tc.declareVariable(node.Lhs[i].(*ast.Identifier), ti.Type)
+					tc.declareVariable(node.Lhs[i].(*ast.Identifier), ti.Type, rhs[i].TypeInfo())
 				}
 				ti.setValue(nil)
 			}
@@ -447,7 +450,7 @@ func (tc *typechecker) checkVariableDeclaration(node *ast.Var) {
 			continue
 		}
 
-		tc.declareVariable(node.Lhs[i], varTyp)
+		tc.declareVariable(node.Lhs[i], varTyp, ti)
 
 	}
 
@@ -456,11 +459,12 @@ func (tc *typechecker) checkVariableDeclaration(node *ast.Var) {
 // declareVariable declares the variable lh in the current block/scope with the
 // given type. Note that a variable declaration may come from both 'var'
 // statements and short variable declaration statements.
-func (tc *typechecker) declareVariable(lh *ast.Identifier, typ reflect.Type) {
+func (tc *typechecker) declareVariable(lh *ast.Identifier, typ reflect.Type, source *typeInfo) {
 	ti := &typeInfo{
 		Type:       typ,
 		Properties: propertyAddressable,
 	}
+	trackVariableNativeProvenance(ti, source)
 	tc.compilation.typeInfos[lh] = ti
 	tc.assignScope(lh.Name, ti, lh, nil)
 }

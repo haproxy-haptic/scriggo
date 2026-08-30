@@ -286,11 +286,16 @@ func canEmitDirectly(k1, k2 reflect.Kind) bool {
 // before changing or saving it.
 func (em *emitter) setFunctionVarRefs(fn *runtime.Function, closureVars []ast.Upvar) {
 	refs := make([]int16, len(closureVars))
+	globalRefs := make([]int16, len(closureVars))
+	for index := range globalRefs {
+		globalRefs[index] = -1
+	}
 	for i := range closureVars {
 		v := &closureVars[i]
 		// v is predefined.
 		if v.Declaration == nil {
 			refs[i] = em.varStore.predefVarIndex(v.NativeValue, v.NativeValueType, v.NativePkg, v.NativeName)
+			globalRefs[i] = refs[i]
 			em.varStore.setPredefVarRef(fn, v.NativeValue, int16(i))
 			continue
 		}
@@ -304,13 +309,21 @@ func (em *emitter) setFunctionVarRefs(fn *runtime.Function, closureVars []ast.Up
 		// v is package-level variable. This happens when a function
 		// literal assigned to a package-level variable refers to another
 		// package-level variable.
+		// A capture from an enclosing closure keeps its var-ref index but is not a
+		// global; only a package-level variable is.
+		if index, ok := em.varStore.closureVarIndex(ident); ok {
+			refs[i] = int16(index)
+			continue
+		}
 		if index, ok := em.varStore.nonLocalVarIndex(ident); ok {
 			refs[i] = int16(index)
+			globalRefs[i] = refs[i]
 			continue
 		}
 		panic(internalError("don't know how to handle identifier %s", ident))
 	}
 	fn.VarRefs = refs
+	fn.GlobalVarRefs = globalRefs
 }
 
 func (em *emitter) emitValueNotPredefined(ti *typeInfo, reg int8, dstType reflect.Type) (int8, bool) {
