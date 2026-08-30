@@ -178,6 +178,10 @@ func goLanguageVersion() (string, error) {
 	return pkgVersion.Lang(info.GoVersion), nil
 }
 
+func goVersionAtLeast(version, minimum string) bool {
+	return pkgVersion.Compare(version, minimum) >= 0
+}
+
 // hasStdlibPrefix reports whether the prefix of path conflicts with the path of
 // a package of the Go standard library.
 func hasStdlibPrefix(path string) bool {

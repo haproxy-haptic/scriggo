@@ -410,7 +410,13 @@ func (fb *functionBuilder) addNativeFunction(f *runtime.NativeFunction) int8 {
 	fn := fb.fn
 	r := len(fn.NativeFunctions)
 	if r == maxNativeFunctionsCount {
-		panic(newLimitExceededError(fb.fn.Pos, fb.path, "native functions count exceeded %d", maxNativeFunctionsCount))
+		panic(newLimitExceededError(
+			fb.fn.Pos,
+			fb.path,
+			"native functions count exceeded %d in function %q",
+			maxNativeFunctionsCount,
+			fb.fn.Name,
+		))
 	}
 	fn.NativeFunctions = append(fn.NativeFunctions, f)
 	return int8(r)

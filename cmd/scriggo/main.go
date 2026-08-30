@@ -692,7 +692,7 @@ func stdLibPaths(version string) []string {
 	for _, path := range stdlibPaths {
 		switch path {
 		case "crypto/hpke":
-			if version != "go1.26" {
+			if !goVersionAtLeast(version, "go1.26") {
 				continue
 			}
 		}

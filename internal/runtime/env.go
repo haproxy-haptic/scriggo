@@ -8,6 +8,9 @@ import (
 	"context"
 	"reflect"
 	"sync"
+	"sync/atomic"
+
+	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
 type PrintFunc func(any)
@@ -15,73 +18,218 @@ type PrintFunc func(any)
 // Context represents a context in Show and Text instructions.
 type Context byte
 
-// The env type implements the native.Env interface.
 type env struct {
-	ctx     context.Context // context.
-	globals []reflect.Value // global variables.
-	print   PrintFunc       // custom print builtin.
-	typeof  TypeOfFunc      // typeof function.
-	conv    Converter       // Markdown converter
-
-	done     int32
-	doneChan <-chan struct{}
-	doneCase reflect.SelectCase
-
-	// Only the callPath and callLine fields can be changed after the vm has
-	// been started and access to them must be done with this mutex.
-	mu       sync.Mutex
-	callPath string // path of the file where the main goroutine is in.
-	callLine int    // line within callPath of the current call site (0 if unknown).
+	ctx                      context.Context // root context.
+	childContext             func(context.Context) context.Context
+	globals                  []reflect.Value // global variables.
+	print                    PrintFunc       // custom print builtin.
+	typeof                   TypeOfFunc      // typeof function.
+	conv                     Converter       // Markdown converter
+	observeMutation          MutationObserver
+	observeMutationContext   MutationContextObserver
+	observeNativeCall        NativeCallObserver
+	observeNativeCallContext NativeCallContextObserver
+	beforeNativeCall         BeforeNativeCall
+	beforeNativeCallContext  BeforeNativeCallContext
+	nativeTrampolines        map[reflect.Value]nativeFunctionCallSite
+	methodTrampolines        map[nativeMethodTrampolineKey]nativeFunctionCallSite
+	deterministic            bool
+	vector                   *VectorState
+	internalFunctionGlobals  []bool
+	internalFunctionValues   []atomic.Pointer[callable]
+	internalFunctionEscaped  []atomic.Bool
 }
 
-func (env *env) CallPath() string {
+// nativeEnv is the native-facing view of an execution environment.
+// Runtime state stays in env; each VM carries its execution context.
+type nativeEnv struct {
+	env              *env
+	ctx              context.Context
+	vector           *VectorState
+	vectorGeneration uint64
+	vectorLease      *vectorInvocationLease
+
+	mu       sync.Mutex
+	callPath string
+	callLine int
+}
+
+func (env *env) deriveChildContext(parent context.Context) context.Context {
+	if env.childContext == nil {
+		return parent
+	}
+	return env.childContext(parent)
+}
+
+func (env *nativeEnv) CallPath() string {
+	release := env.acquireVectorGeneration()
+	defer release()
 	env.mu.Lock()
 	callPath := env.callPath
 	env.mu.Unlock()
 	return callPath
 }
 
-func (env *env) CallLine() int {
+func (env *nativeEnv) CallLine() int {
+	release := env.acquireVectorGeneration()
+	defer release()
 	env.mu.Lock()
 	callLine := env.callLine
 	env.mu.Unlock()
 	return callLine
 }
 
-func (env *env) Context() context.Context {
+func (env *nativeEnv) Context() context.Context {
 	return env.ctx
 }
 
-func (env *env) Fatal(v any) {
-	panic(&fatalError{env: env, msg: v})
+func (env *nativeEnv) Fatal(v any) {
+	release := env.acquireVectorGeneration()
+	defer release()
+	panic(&fatalError{env: env.env, msg: v})
 }
 
-func (env *env) MarkdownConverter() Converter {
-	return env.conv
+func (env *nativeEnv) MarkdownConverter() Converter {
+	release := env.acquireVectorGeneration()
+	defer release()
+	return env.env.conv
 }
 
-func (env *env) Print(args ...any) {
+func (env *nativeEnv) Print(args ...any) {
+	release := env.acquireVectorGeneration()
+	defer release()
 	for _, arg := range args {
-		env.doPrint(arg)
+		env.env.doPrint(arg)
 	}
 }
 
-func (env *env) Println(args ...any) {
+func (env *nativeEnv) Println(args ...any) {
+	release := env.acquireVectorGeneration()
+	defer release()
 	for i, arg := range args {
 		if i > 0 {
-			env.doPrint(" ")
+			env.env.doPrint(" ")
 		}
-		env.doPrint(arg)
+		env.env.doPrint(arg)
 	}
-	env.doPrint("\n")
+	env.env.doPrint("\n")
 }
 
-func (env *env) Stop(err error) {
+func (env *nativeEnv) Stop(err error) {
+	release := env.acquireVectorGeneration()
+	defer release()
 	panic(stopError{err})
 }
 
-func (env *env) TypeOf(v reflect.Value) reflect.Type {
-	return env.typeof(v)
+func (env *nativeEnv) TypeOf(v reflect.Value) reflect.Type {
+	release := env.acquireVectorGeneration()
+	defer release()
+	return env.env.typeof(v)
+}
+
+func (env *nativeEnv) acquireVectorGeneration() func() {
+	if env == nil || env.vector == nil || env.vectorGeneration == 0 {
+		return func() {}
+	}
+	if env.vectorLease != nil {
+		if err := env.vectorLease.acquireUse(); err != nil {
+			panic(stopError{err})
+		}
+		return env.vectorLease.releaseUse
+	}
+	if err := env.vector.acquire(env.vectorGeneration); err != nil {
+		panic(stopError{err})
+	}
+	return env.vector.release
+}
+
+func (env *nativeEnv) ActivateVectorIndex(authority *native.VectorAuthority, index int) error {
+	if env == nil || env.env == nil || env.env.vector == nil {
+		return ErrVectorInvalidConfiguration
+	}
+	if env.vectorGeneration != 0 {
+		return ErrVectorInvalidConfiguration
+	}
+	if err := env.env.vector.Activate(authority, index); err != nil {
+		return err
+	}
+	generation, ctx := env.env.vector.captureContext()
+	if generation == 0 || ctx == nil {
+		return ErrVectorInvalidConfiguration
+	}
+	env.vector = env.env.vector
+	env.vectorGeneration = generation
+	env.ctx = ctx
+	return nil
+}
+
+func (env *nativeEnv) RevokeVectorIndex(authority *native.VectorAuthority) error {
+	if env == nil || env.env == nil || env.env.vector == nil {
+		return ErrVectorInvalidConfiguration
+	}
+	if env.vector != env.env.vector || env.vectorGeneration == 0 ||
+		env.vector.capture() != env.vectorGeneration {
+		return ErrVectorGenerationRevoked
+	}
+	return env.env.vector.Revoke(authority)
+}
+
+func (env *nativeEnv) LoadVectorRange(
+	authority *native.VectorAuthority,
+	start int,
+	bindings map[string]any,
+	contexts []context.Context,
+	trampolines []*native.FunctionTrampoline,
+) error {
+	if env == nil || env.env == nil || env.env.vector == nil || env.vectorGeneration != 0 {
+		return ErrVectorInvalidConfiguration
+	}
+	if len(trampolines) == 0 {
+		return env.env.vector.LoadRange(authority, start, bindings, contexts)
+	}
+	nativeTrampolines, methodTrampolines, err := mergeNativeFunctionTrampolines(
+		env.env.nativeTrampolines,
+		env.env.methodTrampolines,
+		trampolines,
+	)
+	if err != nil {
+		return err
+	}
+	if err := env.env.vector.LoadRange(authority, start, bindings, contexts); err != nil {
+		return err
+	}
+	env.env.nativeTrampolines = nativeTrampolines
+	env.env.methodTrampolines = methodTrampolines
+	return nil
+}
+
+func (env *nativeEnv) LoadVectorRangeOwned(
+	authority *native.VectorAuthority,
+	start int,
+	bindings map[string]any,
+	contexts []context.Context,
+	trampolines []*native.FunctionTrampoline,
+) error {
+	if env == nil || env.env == nil || env.env.vector == nil || env.vectorGeneration != 0 {
+		return ErrVectorInvalidConfiguration
+	}
+	if len(trampolines) == 0 {
+		return env.env.vector.LoadOwnedRange(authority, start, bindings, contexts)
+	}
+	nativeTrampolines, methodTrampolines, err := mergeNativeFunctionTrampolines(
+		env.env.nativeTrampolines,
+		env.env.methodTrampolines,
+		trampolines,
+	)
+	if err != nil {
+		return err
+	}
+	if err := env.env.vector.LoadOwnedRange(authority, start, bindings, contexts); err != nil {
+		return err
+	}
+	env.env.nativeTrampolines = nativeTrampolines
+	env.env.methodTrampolines = methodTrampolines
+	return nil
 }
 
 func typeOfFunc(v reflect.Value) reflect.Type {

@@ -6,6 +6,7 @@ package compiler
 
 import (
 	"reflect"
+	"strings"
 
 	"gitlab.com/haproxy-haptic/scriggo/ast"
 	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
@@ -119,6 +120,20 @@ func (vs *varStore) predefVarIndex(v *reflect.Value, typ reflect.Type, pkg, name
 	// Original behavior: assign new index
 	index := int16(len(vs.globals))
 	g := newGlobal(pkg, name, typ, reflect.Value{})
+	g.Native = true
+	g.FunctionPath = currFn.File
+	g.FunctionName = currFn.Name
+	if currFn.Name == "main" || strings.HasPrefix(currFn.Name, `M"`) {
+		g.FunctionName = "@root"
+	}
+	if currFn.Pos != nil {
+		g.FunctionPosition = ast.Position{
+			Line:   currFn.Pos.Line,
+			Column: currFn.Pos.Column,
+			Start:  currFn.Pos.Start,
+			End:    currFn.Pos.End,
+		}
+	}
 	if v.IsValid() {
 		g.Value = *v
 	}
@@ -140,6 +155,25 @@ func (vs *varStore) setPredefVarRef(fn *runtime.Function, v *reflect.Value, inde
 // getGlobals returns the slice of all Globals collected during the emission.
 func (vs *varStore) getGlobals() []Global {
 	return vs.globals
+}
+
+// closureVarIndex reports the var-ref index of a variable the current function
+// captured from an enclosing one.
+//
+// nonLocalVarIndex answers for these too, which is why the caller has to ask
+// this first: a capture and a package-level variable are indistinguishable in
+// its result, and recording a capture as a global makes the vector VM serve a
+// lane binding in its place.
+func (vs *varStore) closureVarIndex(v ast.Expression) (index int, ok bool) {
+	ident, isIdent := v.(*ast.Identifier)
+	if !isIdent {
+		return 0, false
+	}
+	if ti := vs.emitter.ti(v); ti != nil && ti.IsNative() {
+		return 0, false
+	}
+	reference, ok := vs.closureVars[vs.emitter.fb.fn][ident.Name]
+	return int(reference), ok
 }
 
 func (vs *varStore) nonLocalVarIndex(v ast.Expression) (index int, ok bool) {

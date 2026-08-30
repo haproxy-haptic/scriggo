@@ -13,6 +13,7 @@ import (
 
 	"gitlab.com/haproxy-haptic/scriggo/ast"
 	"gitlab.com/haproxy-haptic/scriggo/internal/compiler/types"
+	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 	"gitlab.com/haproxy-haptic/scriggo/native"
 )
 
@@ -241,19 +242,28 @@ func (tc *typechecker) convert(ti *typeInfo, expr ast.Expression, t2 reflect.Typ
 // and 'go' statements with a builtin call as argument.
 func deferGoBuiltin(name string) *typeInfo {
 	var fun any
+	var mutationOperation runtime.MutationOperation
 	switch name {
+	case "clear":
+		fun = func(target any) {
+			reflect.ValueOf(target).Clear()
+		}
+		mutationOperation = runtime.MutationClear
 	case "close":
 		fun = func(ch any) {
 			reflect.ValueOf(ch).Close()
 		}
+		mutationOperation = runtime.MutationCloseChannel
 	case "copy":
 		fun = func(dst, src any) {
 			reflect.Copy(reflect.ValueOf(dst), reflect.ValueOf(src))
 		}
+		mutationOperation = runtime.MutationCopy
 	case "delete":
 		fun = func(m any, key any) {
 			reflect.ValueOf(m).SetMapIndex(reflect.ValueOf(key), reflect.Value{})
 		}
+		mutationOperation = runtime.MutationDelete
 	case "panic":
 		fun = func(env native.Env, v any) {
 			panic(v)
@@ -273,9 +283,10 @@ func deferGoBuiltin(name string) *typeInfo {
 	}
 	rv := reflect.ValueOf(fun)
 	return &typeInfo{
-		Properties: propertyHasValue | propertyIsNative,
-		Type:       removeEnvArg(rv.Type(), false),
-		value:      rv,
+		Properties:        propertyHasValue | propertyIsNative,
+		Type:              removeEnvArg(rv.Type(), false),
+		MutationOperation: mutationOperation,
+		value:             rv,
 	}
 }
 

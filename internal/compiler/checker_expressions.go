@@ -390,6 +390,7 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 			Type:       t.Type,
 			Properties: t.Properties & propertyUntyped,
 		}
+		inheritNativeProvenance(ti, t, "")
 		var k reflect.Kind
 		if !t.Nil() {
 			k = t.Type.Kind()
@@ -702,7 +703,7 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 		if expr.Type.Macro {
 			return newMacroTypeInfo(t.Type, expr.Format, 0)
 		}
-		return &typeInfo{Type: t.Type}
+		return &typeInfo{Type: t.Type, NativeProvenance: []nativeProvenance{{Local: true}}}
 
 	case *ast.Call:
 		tis := tc.checkCallExpression(expr)
@@ -733,16 +734,22 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 		}
 		t.setValue(nil)
 		kind := t.Type.Kind()
+		member := "[" + expr.Index.String() + "]"
 		switch kind {
 		case reflect.String:
 			tc.checkIndex(expr.Index, t, false)
-			return &typeInfo{Type: uint8Type}
+			ti := &typeInfo{Type: uint8Type}
+			inheritNativeProvenance(ti, t, member)
+			return ti
 		case reflect.Slice:
 			tc.checkIndex(expr.Index, t, false)
-			return &typeInfo{Type: t.Type.Elem(), Properties: propertyAddressable}
+			ti := &typeInfo{Type: t.Type.Elem(), Properties: propertyAddressable}
+			inheritNativeProvenance(ti, t, member)
+			return ti
 		case reflect.Array:
 			tc.checkIndex(expr.Index, t, false)
 			ti := &typeInfo{Type: t.Type.Elem()}
+			inheritNativeProvenance(ti, t, member)
 			if t.Addressable() {
 				ti.Properties = propertyAddressable
 			}
@@ -757,7 +764,9 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 			unOp := ast.NewUnaryOperator(expr.Expr.Pos(), ast.OperatorPointer, expr.Expr)
 			tc.compilation.typeInfos[unOp] = &typeInfo{Type: elemType}
 			expr.Expr = unOp
-			return &typeInfo{Type: elemType.Elem(), Properties: propertyAddressable}
+			ti := &typeInfo{Type: elemType.Elem(), Properties: propertyAddressable}
+			inheritNativeProvenance(ti, t, member)
+			return ti
 		case reflect.Map:
 			key := tc.checkExpr(expr.Index)
 			if err := tc.isAssignableTo(key, expr.Index, t.Type.Key()); err != nil {
@@ -772,7 +781,9 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 			} else {
 				key.setValue(t.Type.Key())
 			}
-			return &typeInfo{Type: t.Type.Elem()}
+			ti := &typeInfo{Type: t.Type.Elem()}
+			inheritNativeProvenance(ti, t, member)
+			return ti
 		case reflect.Interface:
 			// Allow indexing on empty interface{} - defer type check to runtime.
 			// Only support string keys (for map[string]any patterns from JSON).
@@ -792,7 +803,9 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 				key.setValue(stringType)
 			}
 			// Result is interface{} since we don't know the element type at compile time
-			return &typeInfo{Type: emptyInterfaceType}
+			ti := &typeInfo{Type: emptyInterfaceType}
+			inheritNativeProvenance(ti, t, member)
+			return ti
 		default:
 			panic(tc.errorf(expr, "invalid operation: %s (type %s does not support indexing)", expr, t.ShortString()))
 		}
@@ -913,10 +926,9 @@ func (tc *typechecker) typeof(expr ast.Expression, typeExpected bool) *typeInfo 
 		if typ.Type.Kind() != reflect.Interface && !types.Implements(typ.Type, t.Type) {
 			panic(tc.errorf(expr, "%s", tc.errTypeAssertion(typ.Type, t.Type)))
 		}
-		return &typeInfo{
-			Type:       typ.Type,
-			Properties: t.Properties & propertyAddressable,
-		}
+		ti := &typeInfo{Type: typ.Type, Properties: t.Properties & propertyAddressable}
+		inheritNativeProvenance(ti, t, "")
+		return ti
 
 	}
 
@@ -1621,6 +1633,22 @@ func (tc *typechecker) checkBuiltinCall(expr *ast.Call) []*typeInfo {
 		}
 		return []*typeInfo{ti}
 
+	case "clear":
+		if len(expr.Args) == 0 {
+			panic(tc.errorf(expr, "missing argument to clear: %s", expr))
+		}
+		if len(expr.Args) > 1 {
+			panic(tc.errorf(expr, "too many arguments to clear: %s", expr))
+		}
+		arg := tc.checkExpr(expr.Args[0])
+		if arg.Nil() {
+			panic(tc.errorf(expr, "use of untyped nil"))
+		}
+		if kind := arg.Type.Kind(); kind != reflect.Map && kind != reflect.Slice {
+			panic(tc.errorf(expr, "invalid argument: cannot clear %s", arg.ShortString()))
+		}
+		return nil
+
 	case "close":
 		if len(expr.Args) == 0 {
 			panic(tc.errorf(expr, "missing argument to close: %s", expr))
@@ -2141,7 +2169,10 @@ func (tc *typechecker) checkCallExpression(expr *ast.Call) []*typeInfo {
 
 	resultTypes := make([]*typeInfo, numOut)
 	for i := range numOut {
-		resultTypes[i] = &typeInfo{Type: t.Type.Out(i)}
+		resultTypes[i] = &typeInfo{
+			Type:             t.Type.Out(i),
+			NativeProvenance: nativeResultProvenance(t, i, numOut),
+		}
 	}
 
 	// AdaptiveFunc override: when the callee is a native.AdaptiveFunc
@@ -2168,7 +2199,10 @@ func (tc *typechecker) checkCallExpression(expr *ast.Call) []*typeInfo {
 			panic(tc.errorf(expr, "%s", err))
 		}
 		if adapted != nil {
-			resultTypes[0] = &typeInfo{Type: adapted}
+			resultTypes[0] = &typeInfo{
+				Type:             adapted,
+				NativeProvenance: nativeResultProvenance(t, 0, numOut),
+			}
 		}
 	}
 
@@ -2513,7 +2547,7 @@ func (tc *typechecker) checkCompositeLiteral(node *ast.CompositeLiteral, typ ref
 
 	}
 
-	nodeTi := &typeInfo{Type: ti.Type}
+	nodeTi := &typeInfo{Type: ti.Type, NativeProvenance: nativeConstructedProvenance(ti)}
 	tc.compilation.typeInfos[node] = nodeTi
 
 	return nodeTi
@@ -2819,6 +2853,21 @@ func (tc *typechecker) checkPipeExpression(expr *ast.BinaryOperator) *typeInfo {
 // checkRender checks the 'render' expression and changes its internal
 // representation.
 func (tc *typechecker) checkRender(render *ast.Render) *typeInfo {
+	isolateRootRender := tc.opts.isolateRootRenderPath != "" && tc.path == tc.opts.isolateRootRenderPath
+	if isolateRootRender && render.InheritContext {
+		panic(tc.errorf(render, "root render state isolation does not support inherit_context"))
+	}
+	if isolateRootRender {
+		if _, nested := tc.compilation.nestedRenderTrees[render.Tree]; nested {
+			panic(tc.errorf(render, "isolated root render target %q is also rendered from a child template", render.Path))
+		}
+		tc.compilation.isolatedRenderTrees[render.Tree] = struct{}{}
+	} else {
+		if _, isolated := tc.compilation.isolatedRenderTrees[render.Tree]; isolated {
+			panic(tc.errorf(render, "isolated root render target %q is also rendered from a child template", render.Path))
+		}
+		tc.compilation.nestedRenderTrees[render.Tree] = struct{}{}
+	}
 
 	// Handle inherit_context separately
 	if render.InheritContext {
@@ -2832,9 +2881,13 @@ func (tc *typechecker) checkRender(render *ast.Render) *typeInfo {
 
 	stored, ok := tc.compilation.renderImportMacro[tree]
 	if !ok {
+		macroName := "M" + strconv.Quote(tree.Path)
+		if isolateRootRender {
+			macroName += "_IRS"
+		}
 		macroDecl := ast.NewFunc(
 			&ast.Position{Line: 1, Column: 1},
-			ast.NewIdentifier(nil, "M"+strconv.Quote(tree.Path)),
+			ast.NewIdentifier(nil, macroName),
 			ast.NewFuncType(nil, true, nil, nil, false), // func()
 			ast.NewBlock(nil, tree.Nodes),
 			false,
@@ -2973,7 +3026,9 @@ func (tc *typechecker) checkRenderWithInheritContext(render *ast.Render) *typeIn
 	// Add parameters to scope with their actual types (not interface{})
 	for i, lv := range localVars {
 		paramIdent := params[i].Ident
-		tc.scopes.Declare(paramIdent.Name, &typeInfo{Type: lv.TI.Type, Properties: propertyAddressable}, paramIdent, nil)
+		paramTI := newTrackedVariableTypeInfo(lv.TI.Type)
+		setTrackedNativeProvenance(paramTI, resolvedNativeProvenance(lv.TI))
+		tc.scopes.Declare(paramIdent.Name, paramTI, paramIdent, nil)
 		tc.scopes.Use(paramIdent.Name)
 	}
 
@@ -3208,7 +3263,12 @@ func (tc *typechecker) checkMethodExpression(t *typeInfo, expr *ast.Selector) *t
 		panic(tc.errorf(expr, "%v undefined (type %s has no method %s)", expr, t, expr.Ident))
 	}
 
-	ti := &typeInfo{Properties: propertyIsNative | propertyHasValue}
+	ti := &typeInfo{
+		Properties:   propertyIsNative | propertyHasValue,
+		NativeMethod: true,
+	}
+	inheritNativeProvenance(ti, t, name)
+	ti.NativeCallable = true
 
 	if t.Type.Kind() == reflect.Interface {
 		if !isExported(name) {
@@ -3273,20 +3333,26 @@ func (tc *typechecker) checkMethodValue(t *typeInfo, expr *ast.Selector) (*typeI
 		if !isExported(name) {
 			panic(tc.errorf(expr, "%s undefined (cannot refer to unexported field or method %s)", expr, name))
 		}
-		return &typeInfo{
+		ti := &typeInfo{
 			Type:       removeEnvArg(method.Type, true),
 			value:      name,
 			MethodType: methodValueInterface,
 			Properties: propertyIsNative | propertyHasValue,
-		}, true
+		}
+		inheritNativeProvenance(ti, t, name)
+		ti.NativeCallable = true
+		return ti, true
 	}
 
-	return &typeInfo{
+	ti := &typeInfo{
 		Type:       removeEnvArg(tc.types.Zero(typ).MethodByName(name).Type(), false),
 		value:      method.Func, // the function value has the receiver as first parameter.
 		MethodType: methodValueConcrete,
 		Properties: propertyIsNative | propertyHasValue,
-	}, true
+	}
+	inheritNativeProvenance(ti, t, name)
+	ti.NativeCallable = true
+	return ti, true
 }
 
 // checkKeySelector checks a key selector.
@@ -3305,9 +3371,22 @@ func (tc *typechecker) checkKeySelector(t *typeInfo, expr *ast.Selector) (*typeI
 		// Remember to replace 'm.x' with 'm["x"]'.
 		replacement := ast.NewIndex(expr.Pos(), expr.Expr, ast.NewBasicLiteral(expr.Pos(), ast.StringLiteral, "`"+expr.Ident+"`"))
 		tc.checkExpr(replacement)
-		return &typeInfo{Type: t.Type.Elem(), Properties: propertyMapSelector, replacement: replacement}, true
+		ti := &typeInfo{
+			Type:        t.Type.Elem(),
+			Properties:  propertyMapSelector,
+			replacement: replacement,
+		}
+		inheritNativeProvenance(ti, t, expr.Ident)
+		ti.NativeCallable = ti.Type.Kind() == reflect.Func
+		return ti, true
 	case t.IsMapSelector() && t.Type == emptyInterfaceType:
-		return &typeInfo{Type: t.Type, Properties: t.Properties}, true
+		ti := &typeInfo{
+			Type:       t.Type,
+			Properties: t.Properties,
+		}
+		inheritNativeProvenance(ti, t, expr.Ident)
+		ti.NativeCallable = ti.Type.Kind() == reflect.Func
+		return ti, true
 	}
 
 	return nil, false
@@ -3318,24 +3397,28 @@ func (tc *typechecker) checkFieldSelector(t *typeInfo, expr *ast.Selector) *type
 
 	name := expr.Ident
 
-	typ := t.Type
-	if typ.Kind() == reflect.Pointer {
-		typ = t.Type.Elem()
+	structType := t.Type
+	if structType.Kind() == reflect.Pointer {
+		structType = t.Type.Elem()
 	}
-	if typ.Kind() != reflect.Struct {
+	if structType.Kind() != reflect.Struct {
 		panic(tc.errorf(expr, "%v undefined (type %s has no field or method %s)", expr, t.Type, name))
 	}
 
-	typ, _, encodedName := tc.findStructField(typ, expr)
+	typ, _, encodedName := tc.findStructField(structType, expr)
 	if typ == nil {
 		panic(tc.errorf(expr, "%v undefined (type %s has no field or method %s)", expr, t.Type, name))
 	}
 	if encodedName == "" {
 		panic(tc.errorf(expr, "%v undefined (cannot refer to unexported field or method %s)", expr, name))
 	}
-
 	// Create the type info of the field.
+	if typ.Kind() == reflect.Func {
+		typ = removeEnvArg(typ, false)
+	}
 	ti := &typeInfo{Type: typ}
+	inheritNativeProvenance(ti, t, name)
+	ti.NativeCallable = typ.Kind() == reflect.Func
 	if t.Type.Kind() == reflect.Struct && t.Addressable() {
 		// Struct fields are addressable only if the struct is addressable.
 		ti.Properties = propertyAddressable
@@ -3593,7 +3676,7 @@ func (tc *typechecker) checkLambda(node *ast.Func) *typeInfo {
 	tc.scopes.Enter(node)
 	for i, param := range node.Type.Parameters {
 		if !isBlankIdentifier(param.Ident) {
-			tc.scopes.Declare(param.Ident.Name, &typeInfo{Type: params[i], Properties: propertyAddressable}, param.Ident, nil)
+			tc.scopes.Declare(param.Ident.Name, newTrackedVariableTypeInfo(params[i]), param.Ident, nil)
 			tc.scopes.Use(param.Ident.Name)
 		}
 	}
@@ -3602,7 +3685,7 @@ func (tc *typechecker) checkLambda(node *ast.Func) *typeInfo {
 
 	node.Type.Reflect = reflect.FuncOf(params, []reflect.Type{result}, false)
 	tc.checkFunc(node)
-	return &typeInfo{Type: node.Type.Reflect}
+	return &typeInfo{Type: node.Type.Reflect, NativeProvenance: []nativeProvenance{{Local: true}}}
 }
 
 // paramTypes returns a function type's parameter types.

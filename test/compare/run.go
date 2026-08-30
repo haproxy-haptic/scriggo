@@ -657,6 +657,9 @@ func goBaseVersion(v string) string {
 	if i := strings.Index(v, " X:"); i > 0 {
 		v = v[:i]
 	}
+	if i := strings.Index(v, "-X:"); i > 0 {
+		v = v[:i]
+	}
 
 	if i := strings.Index(v, "beta"); i >= 0 {
 		v = v[:i]

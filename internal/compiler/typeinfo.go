@@ -6,6 +6,7 @@ package compiler
 
 import (
 	"reflect"
+	"strconv"
 
 	"gitlab.com/haproxy-haptic/scriggo/ast"
 	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
@@ -39,7 +40,12 @@ type typeInfo struct {
 	Properties        properties   // Properties.
 	Constant          constant     // Constant value.
 	NativePackageName string       // Name of the package. Empty string if non-native.
-	MethodType        methodType   // Method type.
+	NativeDeclaration *NativeDeclaration
+	NativeProvenance  []nativeProvenance
+	NativeTracker     *nativeProvenanceTracker
+	NativePath        string
+	NativeCallable    bool
+	MethodType        methodType // Method type.
 	// MacroFormat stores the output format (HTML, CSS, JS, etc.) for macro declarations.
 	// Only valid when propertyIsMacroDeclaration is set. Used to synthesize return types
 	// for macros without explicit return type declarations when called in expression contexts.
@@ -58,9 +64,176 @@ type typeInfo struct {
 	// static return type, overriding Impl's declared concrete return.
 	// Nil for non-adaptive functions.
 	AdaptiveReturnType func(argTypes []reflect.Type) (reflect.Type, error)
+	MutationOperation  runtime.MutationOperation
+	NativeMethod       bool
 	value              any          // value; for packages has type *Package.
 	valueType          reflect.Type // When value is a native type holds the original type of value.
 	replacement        ast.Node     // Replacement node.
+}
+
+type nativeProvenance struct {
+	Declaration *NativeDeclaration
+	Path        string
+	Result      bool
+	Local       bool
+	Selected    bool
+	Constructed bool
+}
+
+type nativeProvenanceTracker struct {
+	Provenance []nativeProvenance
+	Unknown    bool
+}
+
+func appendNativePath(path, member string) string {
+	if path == "" {
+		return member
+	}
+	if member == "" {
+		return path
+	}
+	if member[0] == '[' {
+		return path + member
+	}
+	return path + "." + member
+}
+
+func appendNativeProvenance(provenance []nativeProvenance, member string) []nativeProvenance {
+	if len(provenance) == 0 {
+		return nil
+	}
+	appended := make([]nativeProvenance, len(provenance))
+	for index, origin := range provenance {
+		appended[index] = origin
+		appended[index].Path = appendNativePath(origin.Path, member)
+	}
+	return appended
+}
+
+func resolvedNativeProvenance(info *typeInfo) []nativeProvenance {
+	if info == nil {
+		return nil
+	}
+	var provenance []nativeProvenance
+	if info.NativeTracker == nil {
+		provenance = append([]nativeProvenance(nil), info.NativeProvenance...)
+	} else {
+		provenance = appendNativeProvenance(info.NativeTracker.Provenance, info.NativePath)
+		if info.NativeTracker.Unknown {
+			provenance = mergeNativeProvenance(provenance, []nativeProvenance{{Path: info.NativePath}})
+		}
+	}
+	if info.NativeCallable {
+		for index := range provenance {
+			provenance[index].Selected = true
+		}
+	}
+	return provenance
+}
+
+func setTrackedNativeProvenance(info *typeInfo, provenance []nativeProvenance) {
+	info.NativeProvenance = append([]nativeProvenance(nil), provenance...)
+	info.NativeTracker = &nativeProvenanceTracker{
+		Provenance: append([]nativeProvenance(nil), provenance...),
+		Unknown:    len(provenance) == 0,
+	}
+	info.NativePath = ""
+}
+
+func newTrackedVariableTypeInfo(typ reflect.Type) *typeInfo {
+	info := &typeInfo{Type: typ, Properties: propertyAddressable}
+	setTrackedNativeProvenance(info, nil)
+	return info
+}
+
+func trackVariableNativeProvenance(info *typeInfo, source *typeInfo) {
+	if source != nil && source.NativeTracker != nil {
+		info.NativeProvenance = resolvedNativeProvenance(source)
+		info.NativeTracker = source.NativeTracker
+		info.NativePath = source.NativePath
+		info.NativeCallable = source.NativeCallable
+		return
+	}
+	setTrackedNativeProvenance(info, resolvedNativeProvenance(source))
+	if source != nil {
+		info.NativeCallable = source.NativeCallable
+	}
+}
+
+func inheritNativeProvenance(info *typeInfo, source *typeInfo, member string) {
+	info.NativeProvenance = appendNativeProvenance(source.NativeProvenance, member)
+	info.NativeTracker = source.NativeTracker
+	info.NativePath = appendNativePath(source.NativePath, member)
+	info.NativeCallable = source.NativeCallable
+}
+
+func nativeResultProvenance(info *typeInfo, resultIndex, resultCount int) []nativeProvenance {
+	provenance := resolvedNativeProvenance(info)
+	results := provenance[:0]
+	for _, origin := range provenance {
+		if origin.Local {
+			continue
+		}
+		if resultCount > 1 {
+			origin.Path = appendNativePath(origin.Path, "["+strconv.Itoa(resultIndex)+"]")
+		}
+		origin.Result = true
+		origin.Selected = false
+		results = append(results, origin)
+	}
+	return results
+}
+
+func nativeConstructedProvenance(info *typeInfo) []nativeProvenance {
+	provenance := resolvedNativeProvenance(info)
+	for index := range provenance {
+		provenance[index].Constructed = true
+	}
+	return provenance
+}
+
+func mergeTrackedNativeProvenance(target *typeInfo, added *typeInfo, direct bool) {
+	if target.NativeTracker == nil {
+		setTrackedNativeProvenance(target, resolvedNativeProvenance(target))
+	}
+	if !direct {
+		target.NativeTracker.Unknown = true
+		return
+	}
+	if target.NativePath != "" {
+		target.NativeTracker.Unknown = true
+		return
+	}
+	provenance := resolvedNativeProvenance(added)
+	if len(provenance) == 0 {
+		target.NativeTracker.Unknown = true
+		return
+	}
+	for _, origin := range provenance {
+		if origin.Declaration == nil {
+			target.NativeTracker.Unknown = true
+			continue
+		}
+		target.NativeTracker.Provenance = mergeNativeProvenance(target.NativeTracker.Provenance, []nativeProvenance{origin})
+	}
+}
+
+func mergeNativeProvenance(target, added []nativeProvenance) []nativeProvenance {
+	for _, candidate := range added {
+		found := false
+		for _, existing := range target {
+			if existing.Declaration == candidate.Declaration && existing.Path == candidate.Path &&
+				existing.Result == candidate.Result && existing.Local == candidate.Local &&
+				existing.Selected == candidate.Selected && existing.Constructed == candidate.Constructed {
+				found = true
+				break
+			}
+		}
+		if !found {
+			target = append(target, candidate)
+		}
+	}
+	return target
 }
 
 // methodType represents the type of a method, intended as a combination of a

@@ -1,3 +1,3 @@
 module import_blank.dir
 
-go 1.16
+go 1.27.0

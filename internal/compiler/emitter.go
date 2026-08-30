@@ -84,6 +84,18 @@ type emitter struct {
 	// alreadyInitializedTemplatePkgs keeps track of the template packages for
 	// which the initialization code has already been emitted.
 	alreadyInitializedTemplatePkgs map[string]bool
+
+	initVarsFuncs map[*ast.Package]*runtime.Function
+}
+
+type emitterFunctionState struct {
+	fb          *functionBuilder
+	rangeLabels []label
+	breakable   bool
+	inForRange  bool
+	breakLabel  *label
+	inURL       bool
+	isURLSet    bool
 }
 
 // newEmitter returns a new emitter with the given type infos, format types,
@@ -99,10 +111,48 @@ func newEmitter(typeInfos map[ast.Node]*typeInfo, formatTypes map[ast.Format]ref
 		alreadyEmittedFuncs:            map[*ast.Func]*runtime.Function{},
 		alreadyInitializedVars:         map[*ast.Identifier]int16{},
 		alreadyInitializedTemplatePkgs: map[string]bool{},
+		initVarsFuncs:                  map[*ast.Package]*runtime.Function{},
 	}
 	em.fnStore = newFunctionStore(em)
 	em.varStore = newVarStore(em, indirectVars, canonicalGlobals)
 	return em
+}
+
+func isDummyMacroForRender(name string) bool {
+	return strings.HasPrefix(name, `M"`) &&
+		(strings.HasSuffix(name, `"`) || strings.Contains(name, `"_IC`) || strings.HasSuffix(name, `"_IRS`))
+}
+
+func isIsolatedRootRenderMacro(name string) bool {
+	return strings.HasPrefix(name, `M"`) && strings.HasSuffix(name, `"_IRS`)
+}
+
+func (em *emitter) enterFunction(fb *functionBuilder) func() {
+	state := emitterFunctionState{
+		fb:          em.fb,
+		rangeLabels: em.rangeLabels,
+		breakable:   em.breakable,
+		inForRange:  em.inForRange,
+		breakLabel:  em.breakLabel,
+		inURL:       em.inURL,
+		isURLSet:    em.isURLSet,
+	}
+	em.fb = fb
+	em.rangeLabels = nil
+	em.breakable = false
+	em.inForRange = false
+	em.breakLabel = nil
+	em.inURL = false
+	em.isURLSet = false
+	return func() {
+		em.fb = state.fb
+		em.rangeLabels = state.rangeLabels
+		em.breakable = state.breakable
+		em.inForRange = state.inForRange
+		em.breakLabel = state.breakLabel
+		em.inURL = state.inURL
+		em.isURLSet = state.isURLSet
+	}
 }
 
 // ti returns the type info of node n.
@@ -141,7 +191,7 @@ func (em *emitter) emitPackage(pkg *ast.Package, extendingFile bool, path string
 			// Do not add duplicated init functions.
 			for _, pkgInit := range pkgInits {
 				if !slices.Contains(inits, pkgInit) {
-					inits = append(inits, pkgInits...)
+					inits = append(inits, pkgInit)
 				}
 			}
 		}
@@ -176,12 +226,7 @@ func (em *emitter) emitPackage(pkg *ast.Package, extendingFile bool, path string
 					continue
 				}
 				em.fnStore.makeAvailableScriggoFn(em.pkg, fun.Ident.Name, fn)
-				// Check if this is a synthetic macro created for render or render with inherit_context
-				// Regular render macros: M"/path" (ends with ")
-				// Inherit context macros: M"/path"_IC0 (contains "_IC" after the closing quote)
-				isDummyMacroForRender := strings.HasPrefix(fun.Ident.Name, `M"`) &&
-					(strings.HasSuffix(fun.Ident.Name, `"`) || strings.Contains(fun.Ident.Name, `"_IC`))
-				if isExported(fun.Ident.Name) || isDummyMacroForRender {
+				if isExported(fun.Ident.Name) || isDummyMacroForRender(fun.Ident.Name) {
 					functions[fun.Ident.Name] = fn
 				}
 			}
@@ -192,53 +237,72 @@ func (em *emitter) emitPackage(pkg *ast.Package, extendingFile bool, path string
 	vars := map[string]int16{}
 
 	// Emit the package variables.
-	var initVarsFn *runtime.Function
+	initVarsFn := em.initVarsFuncs[pkg]
 	var initVarsFb *functionBuilder
-	for _, dec := range pkg.Declarations {
-		if n, ok := dec.(*ast.Var); ok {
-			// If the package has some variable declarations, a special "init"
-			// function must be created to initialize them. "$initvars" is
-			// used because is not a valid Go identifier, so there's no risk
-			// of collision with Scriggo defined functions.
-			backupFb := em.fb
-			if initVarsFn == nil {
-				initVarsFn = newFunction("main", "$initvars", reflect.FuncOf(nil, nil, false), path, &ast.Position{})
-				em.fnStore.makeAvailableScriggoFn(em.pkg, "$initvars", initVarsFn)
-				initVarsFb = newBuilder(initVarsFn, path)
-			}
-			em.fb = initVarsFb
-			addresses := make([]address, len(n.Lhs))
-			pkgVarRegs := map[string]int8{}
-			pkgVarTypes := map[string]reflect.Type{}
-			for i, v := range n.Lhs {
-				if isBlankIdentifier(v) {
-					addresses[i] = em.addressBlankIdent(v.Pos())
-					continue
+	if initVarsFn != nil {
+		em.fnStore.makeAvailableScriggoFn(em.pkg, "$initvars", initVarsFn)
+		for _, dec := range pkg.Declarations {
+			if n, ok := dec.(*ast.Var); ok {
+				for _, variable := range n.Lhs {
+					if isBlankIdentifier(variable) {
+						continue
+					}
+					index, initialized := em.alreadyInitializedVars[variable]
+					if !initialized {
+						panic(internalError("package variable %q has no initializer", variable.Name))
+					}
+					vars[variable.Name] = index
 				}
-				// This variable has already been emitted and initialized; just
-				// add it to the 'vars' slice, everything else has already been
-				// done.
-				if index, ok := em.alreadyInitializedVars[v]; ok {
+			}
+		}
+	} else {
+		for _, dec := range pkg.Declarations {
+			if n, ok := dec.(*ast.Var); ok {
+				// If the package has some variable declarations, a special "init"
+				// function must be created to initialize them. "$initvars" is
+				// used because is not a valid Go identifier, so there's no risk
+				// of collision with Scriggo defined functions.
+				if initVarsFn == nil {
+					initVarsFn = newFunction("main", "$initvars", reflect.FuncOf(nil, nil, false), path, &ast.Position{})
+					em.fnStore.makeAvailableScriggoFn(em.pkg, "$initvars", initVarsFn)
+					initVarsFb = newBuilder(initVarsFn, path)
+				}
+				exitFunction := em.enterFunction(initVarsFb)
+				addresses := make([]address, len(n.Lhs))
+				pkgVarRegs := map[string]int8{}
+				pkgVarTypes := map[string]reflect.Type{}
+				for i, v := range n.Lhs {
+					if isBlankIdentifier(v) {
+						addresses[i] = em.addressBlankIdent(v.Pos())
+						continue
+					}
+					// This variable has already been emitted and initialized; just
+					// add it to the 'vars' slice, everything else has already been
+					// done.
+					if index, ok := em.alreadyInitializedVars[v]; ok {
+						vars[v.Name] = index
+						continue
+					}
+					varType := em.typ(v)
+					varr := em.fb.newRegister(varType.Kind())
+					addresses[i] = em.addressLocalVar(varr, varType, v.Pos(), 0)
+					// Store the variable register. It will be used later to store
+					// initialized value inside the proper global index.
+					pkgVarRegs[v.Name] = varr
+					pkgVarTypes[v.Name] = varType
+					global := newGlobal(pkg.Name, v.Name, varType, reflect.Value{})
+					global.Path = path
+					index := em.varStore.createScriggoPackageVar(em.pkg, global)
+					em.alreadyInitializedVars[v] = index
 					vars[v.Name] = index
-					continue
 				}
-				varType := em.typ(v)
-				varr := em.fb.newRegister(varType.Kind())
-				addresses[i] = em.addressLocalVar(varr, varType, v.Pos(), 0)
-				// Store the variable register. It will be used later to store
-				// initialized value inside the proper global index.
-				pkgVarRegs[v.Name] = varr
-				pkgVarTypes[v.Name] = varType
-				index := em.varStore.createScriggoPackageVar(em.pkg, newGlobal(pkg.Name, v.Name, varType, reflect.Value{}))
-				em.alreadyInitializedVars[v] = index
-				vars[v.Name] = index
+				em.assignValuesToAddresses(addresses, n.Rhs)
+				for name, reg := range pkgVarRegs {
+					index := vars[name]
+					em.fb.emitSetVar(false, reg, int(index), pkgVarTypes[name].Kind())
+				}
+				exitFunction()
 			}
-			em.assignValuesToAddresses(addresses, n.Rhs)
-			for name, reg := range pkgVarRegs {
-				index := vars[name]
-				em.fb.emitSetVar(false, reg, int(index), pkgVarTypes[name].Kind())
-			}
-			em.fb = backupFb
 		}
 	}
 
@@ -262,7 +326,12 @@ func (em *emitter) emitPackage(pkg *ast.Package, extendingFile bool, path string
 			} else {
 				fn, _ = em.fnStore.availableScriggoFn(em.pkg, n.Ident.Name)
 			}
-			em.fb = newBuilder(fn, path)
+			var restoreTemplatePackages map[string]bool
+			if isIsolatedRootRenderMacro(n.Ident.Name) {
+				restoreTemplatePackages = em.alreadyInitializedTemplatePkgs
+				em.alreadyInitializedTemplatePkgs = map[string]bool{}
+			}
+			exitFunction := em.enterFunction(newBuilder(fn, path))
 			em.fb.enterScope()
 			// If this is the main function, functions that initialize variables
 			// must be called before executing every other statement of the main
@@ -285,12 +354,17 @@ func (em *emitter) emitPackage(pkg *ast.Package, extendingFile bool, path string
 			em.fb.end()
 			em.fb.exitScope()
 			em.alreadyEmittedFuncs[n] = fn
+			exitFunction()
+			if restoreTemplatePackages != nil {
+				em.alreadyInitializedTemplatePkgs = restoreTemplatePackages
+			}
 		}
 	}
 
-	if initVarsFn != nil {
+	if initVarsFb != nil {
 		initVarsFb.emitReturn()
 		initVarsFb.end()
+		em.initVarsFuncs[pkg] = initVarsFn
 	}
 
 	// If this package is imported, initFuncs must contain initVarsFn, that is
@@ -588,7 +662,12 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 		method := em.fb.newRegister(reflect.Func)
 		name := call.Func.(*ast.Selector).Ident
 		s := em.fb.makeStringValue(name)
-		em.fb.emitMethodValue(s, rcvr, method, call.Func.Pos())
+		frameMethod := !goStmt && !deferStmt && !call.Parallel
+		if frameMethod {
+			em.fb.emitMethodValueFrame(s, rcvr, method, call.Func.Pos())
+		} else {
+			em.fb.emitMethodValue(s, rcvr, method, call.Func.Pos())
+		}
 		stackShift := em.fb.currentStackShift()
 		opts := callOptions{
 			predefined:    true,
@@ -609,12 +688,16 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 			numVar = numArgs - (funTi.Type.NumIn() - 1)
 		}
 		if goStmt {
-			em.fb.emitGo()
+			em.fb.emitGo(call.Pos())
 		}
 		if deferStmt {
 			panic(internalError("not implemented"))
 		}
-		em.fb.emitCallIndirect(method, int8(numVar), stackShift, call.Pos(), funTi.Type, toFormat)
+		if frameMethod {
+			em.fb.emitCallNativeFrameMethod(method, s, int8(numVar), stackShift, call.Pos(), funTi.Type)
+		} else {
+			em.fb.emitCallIndirect(method, int8(numVar), stackShift, call.Pos(), funTi.Type, toFormat)
+		}
 		return regs, types
 	}
 
@@ -636,7 +719,7 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 		regs, types := em.prepareCallParameters(funTi.Type, args, opts)
 		index, _ := em.fnStore.predefFunc(call.Func, true)
 		if goStmt {
-			em.fb.emitGo()
+			em.fb.emitGo(call.Pos())
 		}
 		numVar := runtime.NoVariadicArgs
 		if funTi.Type.IsVariadic() && !call.IsVariadic {
@@ -668,7 +751,7 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 			regs, types := em.prepareCallParameters(fn.Type, call.Args, callOptions{callHasDots: call.IsVariadic})
 			index := em.fnStore.scriggoFnIndex(fn)
 			if goStmt {
-				em.fb.emitGo()
+				em.fb.emitGo(call.Pos())
 			}
 			if deferStmt {
 				args := stackDifference(em.fb.currentStackShift(), stackShift)
@@ -700,7 +783,7 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 				regs, types := em.prepareCallParameters(fun.Type, call.Args, callOptions{callHasDots: call.IsVariadic})
 				index := em.fnStore.scriggoFnIndex(fun)
 				if goStmt {
-					em.fb.emitGo()
+					em.fb.emitGo(call.Pos())
 				}
 				if deferStmt {
 					panic(internalError("not implemented"))
@@ -744,7 +827,14 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 	}
 
 	// Indirect function.
-	reg := em.emitExpr(call.Func, em.typ(call.Func))
+	var reg int8
+	synchronousNativeField := false
+	if !goStmt && !deferStmt && !call.Parallel {
+		reg, synchronousNativeField = em.emitSynchronousNativeFieldCallee(call.Func)
+	}
+	if !synchronousNativeField {
+		reg = em.emitExpr(call.Func, em.typ(call.Func))
+	}
 	stackShift := em.fb.currentStackShift()
 	opts := callOptions{predefined: false, callHasDots: call.IsVariadic}
 	regs, types := em.prepareCallParameters(funTi.Type, call.Args, opts)
@@ -754,21 +844,54 @@ func (em *emitter) emitCallNode(call *ast.Call, goStmt bool, deferStmt bool, toF
 	// reason the arguments of an indirect call are emitted as if always calling
 	// a Scriggo defined function.
 	if goStmt {
-		em.fb.emitGo()
+		em.fb.emitGo(call.Pos())
 	}
 	if deferStmt {
 		args := stackDifference(em.fb.currentStackShift(), stackShift)
 		em.fb.emitDefer(reg, int8(runtime.NoVariadicArgs), stackShift, args, funTi.Type)
 		return regs, types
 	}
-	// Parallel macro call: emit OpGoRenderIndirect to spawn goroutine with output capture
-	if call.Parallel && funTi.IsMacroDeclaration() {
+	// An indirect macro value retains its callable at runtime, but its static
+	// function type no longer carries the macro-declaration property.
+	if call.Parallel {
 		em.fb.emitGoRenderIndirect(reg, stackShift, call.Pos(), toFormat)
 		return regs, types
 	}
-	em.fb.emitCallIndirect(reg, int8(runtime.NoVariadicArgs), stackShift, call.Pos(), funTi.Type, toFormat)
+	if synchronousNativeField {
+		em.fb.emitCallNativeValue(reg, int8(runtime.NoVariadicArgs), stackShift, call.Pos(), funTi.Type)
+	} else {
+		em.fb.emitCallIndirect(reg, int8(runtime.NoVariadicArgs), stackShift, call.Pos(), funTi.Type, toFormat)
+	}
 
 	return regs, types
+}
+
+func (em *emitter) emitSynchronousNativeFieldCallee(expr ast.Expression) (int8, bool) {
+	selector, ok := expr.(*ast.Selector)
+	if !ok {
+		return 0, false
+	}
+	receiver := selector.Expr
+	if pointer, ok := receiver.(*ast.UnaryOperator); ok && pointer.Op == ast.OperatorPointer {
+		receiver = pointer.Expr
+	}
+	receiverType := em.typ(receiver)
+	structType := receiverType
+	if structType.Kind() == reflect.Pointer {
+		structType = structType.Elem()
+	}
+	if structType.Kind() != reflect.Struct {
+		return 0, false
+	}
+	field, ok := structType.FieldByName(selector.Ident)
+	if !ok || field.Type.Kind() != reflect.Func || !runtime.NativeFunctionUsesReflection(field.Type) {
+		return 0, false
+	}
+	receiverReg := em.emitExpr(receiver, receiverType)
+	fieldIndex := em.fb.makeFieldIndex(field.Index)
+	calleeReg := em.fb.newRegister(reflect.Func)
+	em.fb.emitFieldNativeFunc(receiverReg, fieldIndex, calleeReg)
+	return calleeReg, true
 }
 
 // emitTypeConversionToRegister emits a type conversion into a new register.
@@ -842,6 +965,9 @@ func (em *emitter) emitBuiltin(call *ast.Call, reg int8, dstType reflect.Type) {
 		tmp := em.fb.newRegister(intType.Kind())
 		em.fb.emitCap(s, tmp)
 		em.changeRegister(false, tmp, reg, intType, dstType)
+	case "clear":
+		target := em.emitExpr(args[0], em.typ(args[0]))
+		em.fb.emitClear(target, call.Pos())
 	case "close":
 		chann := em.emitExpr(args[0], em.typ(args[0]))
 		em.fb.emitClose(chann, call.Pos())

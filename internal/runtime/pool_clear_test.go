@@ -62,7 +62,7 @@ func TestPooledVMClearsEveryWrittenRegister(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			vm := getPooledVM(nil)
+			vm := getPooledVM(nil, nil)
 			tc.write(vm)
 			putPooledVM(vm)
 
@@ -82,6 +82,9 @@ func TestPooledVMClearsEveryWrittenRegister(t *testing.T) {
 			if vm.high != [4]Addr{0, 0, 0, 0} {
 				t.Fatalf("high-water not reset on release: %v", vm.high)
 			}
+			if vm.nativeEnv != nil {
+				t.Fatal("native environment retained after release")
+			}
 		})
 	}
 }
@@ -90,7 +93,7 @@ func TestPooledVMClearsEveryWrittenRegister(t *testing.T) {
 // invariant: a bank is zero above the high-water mark, so a VM that writes
 // little does not have to pay for a VM that previously wrote a lot.
 func TestPooledVMPartialClearLeavesBankZeroed(t *testing.T) {
-	vm := getPooledVM(nil)
+	vm := getPooledVM(nil, nil)
 	vm.fp[3] = 300
 	for r := int8(1); r < 50; r++ {
 		vm.setGeneral(r, reflect.ValueOf(&struct{ X int }{int(r)}))
@@ -99,7 +102,7 @@ func TestPooledVMPartialClearLeavesBankZeroed(t *testing.T) {
 	putPooledVM(vm)
 
 	// Now a shallow user of the same VM.
-	vm2 := getPooledVM(nil)
+	vm2 := getPooledVM(nil, nil)
 	vm2.setGeneral(1, reflect.ValueOf(&struct{ X int }{1}))
 	putPooledVM(vm2)
 

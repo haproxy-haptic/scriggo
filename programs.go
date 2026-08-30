@@ -60,19 +60,163 @@ type BuildOptions struct {
 	//
 	// Used for templates only.
 	EnableProfiling bool
+
+	// IsolateRootRenderState makes each render expression in the root template
+	// reinitialize package variables reachable through the rendered file.
+	// Nested renders share the state of their enclosing root render.
+	//
+	// Used for templates only.
+	IsolateRootRenderState bool
 }
 
 // PrintFunc represents a function that prints the arguments of the print and
 // println builtins.
 type PrintFunc func(any)
 
+// MutationOperation identifies a template-language mutation.
+type MutationOperation = runtime.MutationOperation
+
+const (
+	MutationSetVariable    = runtime.MutationSetVariable
+	MutationSetPointer     = runtime.MutationSetPointer
+	MutationSetField       = runtime.MutationSetField
+	MutationSetMapIndex    = runtime.MutationSetMapIndex
+	MutationSetIndex       = runtime.MutationSetIndex
+	MutationDelete         = runtime.MutationDelete
+	MutationClear          = runtime.MutationClear
+	MutationAppend         = runtime.MutationAppend
+	MutationCopy           = runtime.MutationCopy
+	MutationCloseChannel   = runtime.MutationCloseChannel
+	MutationSendChannel    = runtime.MutationSendChannel
+	MutationReceiveChannel = runtime.MutationReceiveChannel
+	MutationSelectChannel  = runtime.MutationSelectChannel
+)
+
+// Mutation describes storage immediately before a template mutates it.
+// Target is the variable, pointer, struct, map, slice, array, or channel whose
+// reachable storage will change. An observer must treat Target as read-only.
+type Mutation = runtime.Mutation
+
+// NativeCall describes a native method immediately before Scriggo calls it or
+// exposes it as a method value. Receiver must be treated as read-only by an
+// observer. MethodValue reports the latter case.
+type NativeCall = runtime.NativeCall
+
+// ErrMutationObserverDetachedGo is returned before a detached Scriggo
+// goroutine starts while ObserveMutation is set. Waited go-render operations
+// remain available.
+var ErrMutationObserverDetachedGo = runtime.ErrMutationObserverDetachedGo
+
+// ErrMutationObserverChannelOperation is returned before a channel close,
+// send, receive, or select while ObserveMutation is set.
+var ErrMutationObserverChannelOperation = runtime.ErrMutationObserverChannelOperation
+
+// ErrDeterministicPrint is returned before execution when deterministic mode
+// finds a language-level print or println call.
+var ErrDeterministicPrint = runtime.ErrDeterministicPrint
+
+// ErrDeterministicMapKey is returned when deterministic mode encounters a map
+// key whose identity has no stable, value-based order.
+var ErrDeterministicMapKey = runtime.ErrDeterministicMapKey
+
+// ErrDeterministicGo is returned before deterministic execution starts when
+// the program contains a goroutine or parallel render operation.
+var ErrDeterministicGo = runtime.ErrDeterministicGo
+
+// ErrBatchDetachedWork is returned before batch execution starts when the
+// program contains a goroutine or parallel render operation.
+var ErrBatchDetachedWork = runtime.ErrBatchDetachedWork
+
+// ErrBatchUncertifiedNative is returned before batch execution starts when a
+// referenced native capability lacks a synchronous declaration certificate.
+var ErrBatchUncertifiedNative = runtime.ErrBatchUncertifiedNative
+
+// ErrVectorInvalidConfiguration reports a malformed or unauthenticated vector run.
+var ErrVectorInvalidConfiguration = runtime.ErrVectorInvalidConfiguration
+
+// ErrVectorInactive reports an activation lifecycle violation.
+var ErrVectorInactive = runtime.ErrVectorInactive
+
+// ErrVectorGenerationRevoked reports a callable invoked outside its vector item.
+var ErrVectorGenerationRevoked = runtime.ErrVectorGenerationRevoked
+
+// VectorRunOptions configure columnar globals for one template execution.
+type VectorRunOptions struct {
+	Authority        *native.VectorAuthority
+	Count            int
+	Bindings         map[string]any
+	Contexts         []context.Context
+	DeferredBindings []string
+	VMNative         bool
+	Boundary         *native.VectorBoundary
+	Lifecycle        native.VectorLifecycle
+	FiberBoundary    *native.VectorFiberBoundary
+	FiberLifecycle   native.VectorFiberLifecycle
+}
+
 // RunOptions are the run options.
 type RunOptions struct {
+	// Deterministic orders map ranges by key and disables print, println,
+	// goroutines, and parallel rendering. Functions containing those operations
+	// and statically unsupported map key types are rejected before execution.
+	// Dynamic pointer, channel, unsafe-pointer, and NaN map keys are rejected when
+	// their range begins. Native functions and methods remain outside this policy.
+	Deterministic bool
+
+	// Vector installs concrete slice columns into every mutable global slot
+	// with the corresponding name. A native.VectorEnv controller selects the
+	// active element. Used for templates only.
+	Vector *VectorRunOptions
+
+	// NativeFunctionTrampolines provide direct paths for function values created
+	// by native.MakeFunctionTrampoline. Other native functions use normal dispatch.
+	NativeFunctionTrampolines []*native.FunctionTrampoline
 
 	// Context is a context that can be read by native functions and methods
 	// via the Context method of native.Env. Canceling the context, the
 	// execution is terminated and the Run method returns Context.Err().
 	Context context.Context
+
+	// ChildContext derives the context exposed through native.Env in a child
+	// execution from the context of its parent execution. It is called for
+	// Scriggo functions invoked by native code and for executions started by a
+	// go statement, including parallel template renders. The returned context
+	// must derive from parent. Calls may occur concurrently.
+	ChildContext func(parent context.Context) context.Context
+
+	// ObserveMutation is called synchronously immediately before template code
+	// mutates reachable storage. Returning an error prevents the mutation and
+	// makes Run return that error. The Env carries the current child execution
+	// context. Calls may occur concurrently.
+	//
+	// Native functions and methods are outside this observer. Clone or guard
+	// mutable values before passing them to native code, or use
+	// ObserveNativeCall for method receivers. Detached Scriggo go
+	// statements return [ErrMutationObserverDetachedGo] before they start.
+	// Channel operations return this function's error, or
+	// [ErrMutationObserverChannelOperation] when it returns nil. A select reports
+	// every channel candidate; an empty select has an invalid Target.
+	ObserveMutation func(env native.Env, mutation Mutation) error
+
+	// ObserveMutationContext is the non-escaping context-only form of ObserveMutation.
+	ObserveMutationContext func(ctx context.Context, mutation Mutation) error
+
+	// ObserveNativeCall is called synchronously before Scriggo calls a native
+	// method or exposes it as a method value. Returning an error prevents the
+	// access and makes Run return that error. It is not called for native
+	// functions. Calls may occur concurrently.
+	ObserveNativeCall func(env native.Env, call NativeCall) error
+
+	// ObserveNativeCallContext is the non-escaping context-only form of ObserveNativeCall.
+	ObserveNativeCallContext func(ctx context.Context, call NativeCall) error
+
+	// BeforeNativeCall is called synchronously immediately before every native
+	// function or method invocation. Returning an error prevents the call and
+	// makes Run return that error. Calls may occur concurrently.
+	BeforeNativeCall func(env native.Env) error
+
+	// BeforeNativeCallContext is the non-escaping context-only form of BeforeNativeCall.
+	BeforeNativeCallContext func(ctx context.Context) error
 
 	// Print is called by the print and println builtins to print values.
 	// If it is nil, the print and println builtins format their arguments as
@@ -190,11 +334,51 @@ func (p *Program) Disassemble(pkgPath string) ([]byte, error) {
 // If the context has been canceled, Run returns the error returned by the Err
 // method of the context.
 func (p *Program) Run(options *RunOptions) error {
+	if options != nil && options.Vector != nil {
+		return ErrVectorInvalidConfiguration
+	}
 	vm := runtime.NewVM()
 	if options != nil {
 		if options.Context != nil {
 			vm.SetContext(options.Context)
 		}
+		if options.ChildContext != nil {
+			vm.SetChildContext(options.ChildContext)
+		}
+		if options.ObserveMutation != nil {
+			vm.SetMutationObserver(func(env native.Env, mutation runtime.Mutation) error {
+				return options.ObserveMutation(env, Mutation{
+					Operation: MutationOperation(mutation.Operation),
+					Target:    mutation.Target,
+					Path:      mutation.Path,
+					Line:      mutation.Line,
+				})
+			})
+		}
+		if options.ObserveMutationContext != nil {
+			vm.SetMutationContextObserver(runtime.MutationContextObserver(options.ObserveMutationContext))
+		}
+		if options.ObserveNativeCall != nil {
+			vm.SetNativeCallObserver(func(env native.Env, call runtime.NativeCall) error {
+				return options.ObserveNativeCall(env, NativeCall{
+					Receiver:    call.Receiver,
+					Method:      call.Method,
+					MethodValue: call.MethodValue,
+					Path:        call.Path,
+					Line:        call.Line,
+				})
+			})
+		}
+		if options.ObserveNativeCallContext != nil {
+			vm.SetNativeCallContextObserver(runtime.NativeCallContextObserver(options.ObserveNativeCallContext))
+		}
+		if options.BeforeNativeCall != nil {
+			vm.SetBeforeNativeCall(runtime.BeforeNativeCall(options.BeforeNativeCall))
+		}
+		if options.BeforeNativeCallContext != nil {
+			vm.SetBeforeNativeCallContext(runtime.BeforeNativeCallContext(options.BeforeNativeCallContext))
+		}
+		vm.SetDeterministic(options.Deterministic)
 		if options.Print != nil {
 			vm.SetPrint(runtime.PrintFunc(options.Print))
 		}

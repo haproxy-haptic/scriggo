@@ -271,6 +271,7 @@ func disassembleFunction(b *bytes.Buffer, globals []Global, fn *runtime.Function
 		}
 		switch in.Op {
 		case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpGoRender, runtime.OpCallIndirect, runtime.OpCallNative,
+			runtime.OpCallNativeValue, runtime.OpCallNativeFrameMethod,
 			runtime.OpTailCall, runtime.OpSlice, runtime.OpStringSlice:
 			addr += 1
 		case runtime.OpDefer:
@@ -355,13 +356,15 @@ func disassembleInstruction(fn *runtime.Function, globals []Global, addr runtime
 		s += " " + disassembleOperand(fn, c, kind, false)
 	case runtime.OpBreak, runtime.OpContinue, runtime.OpGoto:
 		s += " " + strconv.Itoa(int(decodeUint24(a, b, c)))
-	case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpGoRender, runtime.OpCallIndirect, runtime.OpCallNative, runtime.OpTailCall, runtime.OpDefer:
+	case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpGoRender, runtime.OpCallIndirect, runtime.OpCallNative,
+		runtime.OpCallNativeValue, runtime.OpCallNativeFrameMethod,
+		runtime.OpTailCall, runtime.OpDefer:
 		if a != runtime.CurrentFunction {
 			switch op {
 			case runtime.OpCallFunc, runtime.OpCallMacro, runtime.OpGoRender, runtime.OpTailCall:
 				sf := fn.Functions[uint8(a)]
 				s += " " + packageName(sf.Pkg) + "." + sf.Name
-			case runtime.OpCallIndirect:
+			case runtime.OpCallIndirect, runtime.OpCallNativeValue, runtime.OpCallNativeFrameMethod:
 				s += " " + "("
 				s += disassembleOperand(fn, a, reflect.Interface, false)
 				s += ")"
@@ -374,7 +377,9 @@ func disassembleInstruction(fn *runtime.Function, globals []Global, addr runtime
 		}
 		grow := fn.Body[addr+1]
 		stackShift := runtime.StackShift{int8(grow.Op), grow.A, grow.B, grow.C}
-		if c != runtime.NoVariadicArgs && (op == runtime.OpCallIndirect || op == runtime.OpCallNative || op == runtime.OpDefer) {
+		if c != runtime.NoVariadicArgs && (op == runtime.OpCallIndirect || op == runtime.OpCallNative ||
+			op == runtime.OpCallNativeValue ||
+			op == runtime.OpCallNativeFrameMethod || op == runtime.OpDefer) {
 			s += " ..." + strconv.Itoa(int(c))
 		}
 		_, _, typ := funcNameType(fn, a, addr, op)
@@ -400,7 +405,7 @@ func disassembleInstruction(fn *runtime.Function, globals []Global, addr runtime
 		default:
 			s += " Default"
 		}
-	case runtime.OpClose, runtime.OpPanic, runtime.OpPrint:
+	case runtime.OpClear, runtime.OpClose, runtime.OpPanic, runtime.OpPrint:
 		s += " " + disassembleOperand(fn, a, reflect.Interface, false)
 	case runtime.OpComplex64, runtime.OpComplex128:
 		s += " " + disassembleOperand(fn, a, reflect.Float64, false)
@@ -505,7 +510,7 @@ func disassembleInstruction(fn *runtime.Function, globals []Global, addr runtime
 			s += " " + conditionName[b]
 			s += " " + disassembleOperand(fn, a, reflect.String, k)
 		}
-	case runtime.OpField:
+	case runtime.OpField, runtime.OpFieldNativeFunc:
 		s += " " + disassembleOperand(fn, a, reflect.Interface, false)
 		s += " " + disassembleFieldIndex(fn.FieldIndexes[uint8(b)])
 		s += " " + disassembleOperand(fn, c, getKind('c', fn, addr), false)
@@ -592,7 +597,7 @@ func disassembleInstruction(fn *runtime.Function, globals []Global, addr runtime
 		s += " " + disassembleOperand(fn, a, reflect.Interface, false)
 		s += " " + disassembleOperand(fn, b, reflect.String, k)
 		s += " " + disassembleOperand(fn, c, reflect.Interface, false)
-	case runtime.OpMethodValue:
+	case runtime.OpMethodValue, runtime.OpMethodValueFrame:
 		s += " " + disassembleOperand(fn, a, reflect.Interface, false)
 		s += " " + disassembleOperand(fn, b, reflect.String, true)
 		s += " " + disassembleOperand(fn, c, reflect.Interface, false)
@@ -742,7 +747,8 @@ func funcNameType(fn *runtime.Function, index int8, addr runtime.Addr, op runtim
 		name := fn.NativeFunctions[index].Name()
 		typ := reflect.TypeOf(fn.NativeFunctions[index].Func())
 		return false, name, typ
-	case runtime.OpCallIndirect, runtime.OpDefer:
+	case runtime.OpCallIndirect, runtime.OpCallNativeValue,
+		runtime.OpCallNativeFrameMethod, runtime.OpDefer:
 		return false, "", fn.InstructionInfo[addr].FuncType
 	case runtime.OpTailCall:
 		panic(internalError("tail call optimization not implemented"))
@@ -996,16 +1002,20 @@ var operationName = [...]string{
 
 	runtime.OpBreak: "Break",
 
-	runtime.OpCallFunc:     "Call",
-	runtime.OpCallIndirect: "Call",
-	runtime.OpCallMacro:    "Call",
-	runtime.OpCallNative:   "Call",
+	runtime.OpCallFunc:              "Call",
+	runtime.OpCallIndirect:          "Call",
+	runtime.OpCallMacro:             "Call",
+	runtime.OpCallNative:            "Call",
+	runtime.OpCallNativeValue:       "Call",
+	runtime.OpCallNativeFrameMethod: "Call",
 
 	runtime.OpCap: "Cap",
 
 	runtime.OpCase: "Case",
 
 	runtime.OpClose: "Close",
+
+	runtime.OpClear: "Clear",
 
 	runtime.OpComplex64:  "Complex64",
 	runtime.OpComplex128: "Complex128",
@@ -1147,6 +1157,9 @@ var operationName = [...]string{
 	runtime.OpXor: "Xor",
 
 	runtime.OpZero: "Zero",
+
+	runtime.OpFieldNativeFunc:  "Field",
+	runtime.OpMethodValueFrame: "MethodValue",
 }
 
 var conditionName = [...]string{

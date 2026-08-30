@@ -265,7 +265,7 @@ func (vm *VM) convertPanic(msg any) error {
 			break
 		}
 		fallthrough
-	case OpCallNative:
+	case OpCallNative, OpCallNativeValue, OpCallNativeFrameMethod:
 		switch msg := msg.(type) {
 		case runtimeError:
 			break

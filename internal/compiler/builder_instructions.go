@@ -148,6 +148,40 @@ func (fb *functionBuilder) emitCallNative(f int8, numVariadic int8, shift runtim
 	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.Operation(shift[0]), A: shift[1], B: shift[2], C: shift[3]})
 }
 
+func (fb *functionBuilder) emitCallNativeValue(
+	f int8,
+	numVariadic int8,
+	shift runtime.StackShift,
+	pos *ast.Position,
+	funcType reflect.Type,
+) {
+	fb.addPosAndPath(pos)
+	fb.addFunctionType(funcType)
+	fn := fb.fn
+	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.OpCallNativeValue, A: f, C: numVariadic})
+	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.Operation(shift[0]), A: shift[1], B: shift[2], C: shift[3]})
+}
+
+func (fb *functionBuilder) emitCallNativeFrameMethod(
+	receiver int8,
+	method int8,
+	numVariadic int8,
+	shift runtime.StackShift,
+	pos *ast.Position,
+	funcType reflect.Type,
+) {
+	fb.addPosAndPath(pos)
+	fb.addFunctionType(funcType)
+	fn := fb.fn
+	fn.Body = append(fn.Body, runtime.Instruction{
+		Op: runtime.OpCallNativeFrameMethod,
+		A:  receiver,
+		B:  method,
+		C:  numVariadic,
+	})
+	fn.Body = append(fn.Body, runtime.Instruction{Op: runtime.Operation(shift[0]), A: shift[1], B: shift[2], C: shift[3]})
+}
+
 // emitCap appends a new "cap" instruction to the function body.
 //
 //	z = cap(s)
@@ -280,6 +314,12 @@ func (fb *functionBuilder) emitCopy(dst, src, n int8) {
 	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpCopy, A: src, B: n, C: dst})
 }
 
+// emitClear appends a new "Clear" instruction to the function body.
+func (fb *functionBuilder) emitClear(target int8, pos *ast.Position) {
+	fb.addPosAndPath(pos)
+	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpClear, A: target})
+}
+
 // emitDefer appends a new "Defer" instruction to the function body.
 //
 //	defer
@@ -330,6 +370,11 @@ func (fb *functionBuilder) emitField(a, field, c int8, dstKind reflect.Kind) {
 	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpField, A: a, B: field, C: c})
 }
 
+func (fb *functionBuilder) emitFieldNativeFunc(a, field, c int8) {
+	fb.addOperandKinds(0, 0, reflect.Func)
+	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpFieldNativeFunc, A: a, B: field, C: c})
+}
+
 // emitGetVar appends a new "GetVar" instruction to the function body.
 //
 //	r = v
@@ -350,7 +395,8 @@ func (fb *functionBuilder) emitGetVarAddr(v int, r int8) {
 // emitGo appends a new "Go" instruction to the function body.
 //
 //	go
-func (fb *functionBuilder) emitGo() {
+func (fb *functionBuilder) emitGo(pos *ast.Position) {
+	fb.addPosAndPath(pos)
 	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpGo})
 }
 
@@ -598,6 +644,11 @@ func (fb *functionBuilder) emitMethodValue(name int8, receiver int8, dst int8, p
 	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpMethodValue, A: receiver, B: name, C: dst})
 }
 
+func (fb *functionBuilder) emitMethodValueFrame(name int8, receiver int8, dst int8, pos *ast.Position) {
+	fb.addPosAndPath(pos)
+	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpMethodValueFrame, A: receiver, B: name, C: dst})
+}
+
 // emitMove appends a new "Move" instruction to the function body.
 //
 //	z = x
@@ -691,16 +742,17 @@ func (fb *functionBuilder) emitPanic(v int8, typ reflect.Type, pos *ast.Position
 //
 //	print(arg)
 func (fb *functionBuilder) emitPrint(arg int8) {
+	fb.fn.UsesPrint = true
 	fb.fn.Body = append(fb.fn.Body, runtime.Instruction{Op: runtime.OpPrint, A: arg})
 }
 
 // emitRange appends a new "Range" instruction to the function body.
 //
 //	for i, e := range s
-func (fb *functionBuilder) emitRange(k bool, s, i, e int8, kind reflect.Kind) {
+func (fb *functionBuilder) emitRange(k bool, s, i, e int8, typ reflect.Type) {
 	fn := fb.fn
 	var op runtime.Operation
-	switch kind {
+	switch typ.Kind() {
 	case reflect.String:
 		op = runtime.OpRangeString
 		if k {
@@ -711,9 +763,13 @@ func (fb *functionBuilder) emitRange(k bool, s, i, e int8, kind reflect.Kind) {
 	default:
 		op = runtime.OpRange
 	}
-	if k && kind != reflect.String {
+	if k && typ.Kind() != reflect.String {
 		panic("bug on emitter: emitRange with k = true is compatible only with kind == reflect.String")
 	}
+	if fn.RangeTypes == nil {
+		fn.RangeTypes = map[runtime.Addr]reflect.Type{}
+	}
+	fn.RangeTypes[runtime.Addr(len(fn.Body))] = typ
 	fn.Body = append(fn.Body, runtime.Instruction{Op: op, A: s, B: i, C: e})
 }
 
