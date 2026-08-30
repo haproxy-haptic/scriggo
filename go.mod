@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/yuin/goldmark v1.4.13
+	github.com/yuin/goldmark v1.7.17
 	github.com/yuin/goldmark/v2 v2.0.0
 	golang.org/x/mod v0.40.0
 	golang.org/x/sync v0.22.0
