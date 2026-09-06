@@ -21,8 +21,6 @@ import (
 
 	"gitlab.com/haproxy-haptic/scriggo"
 	"gitlab.com/haproxy-haptic/scriggo/native"
-
-	"github.com/yuin/goldmark"
 )
 
 // runBufSize is the size of the i/o buffer used by the run command.
@@ -62,13 +60,13 @@ func run(name string, flags buildFlags) (err error) {
 		fsys = formatFS{FS: fsys, format: format}
 	}
 
-	md := goldmark.New(goldmarkOptions...)
+	md := newMarkdownConverter()
 
 	opts := &scriggo.BuildOptions{
 		AllowGoStmt: true,
 		Globals:     globals,
 		MarkdownConverter: func(src []byte, out io.Writer) error {
-			return md.Convert(src, out)
+			return md(src, out)
 		},
 	}
 	opts.Globals["filepath"] = strings.TrimSuffix(name, path.Ext(name))

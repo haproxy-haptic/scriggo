@@ -23,8 +23,6 @@ import (
 	"gitlab.com/haproxy-haptic/scriggo/ast"
 	"gitlab.com/haproxy-haptic/scriggo/ast/astutil"
 	"gitlab.com/haproxy-haptic/scriggo/native"
-
-	"github.com/yuin/goldmark"
 )
 
 // build the template.
@@ -70,12 +68,12 @@ func build(dir, o string, llms string, consts []string) error {
 		}
 	}()
 
-	md := goldmark.New(goldmarkOptions...)
+	md := newMarkdownConverter()
 
 	buildOptions := &scriggo.BuildOptions{
 		Globals: make(native.Declarations, len(globals)+len(consts)+1),
 		MarkdownConverter: func(src []byte, out io.Writer) error {
-			return md.Convert(src, out)
+			return md(src, out)
 		},
 	}
 	maps.Copy(buildOptions.Globals, globals)
