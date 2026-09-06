@@ -21,8 +21,6 @@ import (
 	"gitlab.com/haproxy-haptic/scriggo"
 	"gitlab.com/haproxy-haptic/scriggo/builtin"
 	"gitlab.com/haproxy-haptic/scriggo/native"
-
-	"github.com/yuin/goldmark"
 )
 
 const (
@@ -47,13 +45,13 @@ func serve(asm int, metrics bool, disableLiveReload bool, httpValue string, http
 	}
 	defer fsys.Close()
 
-	md := goldmark.New(goldmarkOptions...)
+	md := newMarkdownConverter()
 
 	srv := &server{
 		fsys:   fsys,
 		static: http.FileServer(http.Dir(".")),
 		mdConverter: func(src []byte, out io.Writer) error {
-			return md.Convert(src, out)
+			return md(src, out)
 		},
 		templates:             map[string]*scriggo.Template{},
 		templatesDependencies: map[string]map[string]struct{}{},

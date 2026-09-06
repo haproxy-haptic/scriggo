@@ -13,7 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/yuin/goldmark/util"
+	"github.com/yuin/goldmark/v2/util"
 )
 
 type replacement struct {
