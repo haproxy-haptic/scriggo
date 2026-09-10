@@ -1081,6 +1081,9 @@ func (vm *VM) Stack(buf []byte, all bool) int {
 			ppc = vm.pc - 1
 		} else {
 			call := vm.calls[i]
+			if call.status == deferred {
+				continue
+			}
 			fn = call.cl.fn
 			if call.status == tailed {
 				ppc = call.pc - 1
@@ -1256,7 +1259,8 @@ func (vm *VM) callNative(fn *NativeFunction, numVariadic int8, shift StackShift,
 	recordNativeFrameCall(fn.frameCallKind, false)
 
 	// Call the function without the reflect.
-	if !fn.reflectCall {
+	packedVariadic := fn.value.Type().IsVariadic() && numVariadic == NoVariadicArgs
+	if !fn.reflectCall && !packedVariadic {
 		if asGoroutine {
 			childEnv := callEnv
 			switch f := fn.function.(type) {
@@ -1865,7 +1869,7 @@ func (vm *VM) equals(x, y reflect.Value) bool {
 	}
 	if t, ok := tx.(ScriggoType); ok {
 		if !tx.Comparable() {
-			panic("runtime error: comparing uncomparable type " + tx.String())
+			panic(runtimeError("runtime error: comparing uncomparable type " + tx.String()))
 		}
 		x, _ = t.Unwrap(x)
 		y, _ = t.Unwrap(y)
@@ -1991,7 +1995,7 @@ func (vm *VM) nextCall() bool {
 		case deferred:
 			// A call, that has deferred calls, is returned, its first
 			// deferred call will be executed.
-			current := callFrame{cl: callable{fn: vm.fn}, renderer: vm.renderer, fp: vm.fp, status: returned}
+			current := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc, status: returned}
 			vm.swapStack(&call.fp, &current.fp, current.cl.fn.NumReg)
 			vm.calls[i] = current
 			i++
@@ -2036,9 +2040,7 @@ func (vm *VM) nextCall() bool {
 				if call.status == deferred {
 					vm.calls[i] = vm.calls[i+1]
 					vm.calls[i].status = panicked
-					if call.cl.fn != nil {
-						i++
-					}
+					i++
 					break
 				}
 			}
@@ -2054,11 +2056,25 @@ func (vm *VM) nextCall() bool {
 				vm.rangesBase = call.rangesLen
 				return true
 			}
+			vm.calls = vm.calls[:i]
+			caller := vm.calls[i-1]
+			vm.fn = caller.cl.fn
+			vm.vars = caller.cl.vars
+			vm.pc = caller.pc
 			vm.fp = call.fp
-			vm.callNative(call.cl.Native(), call.numVariadic, StackShift{}, false)
+			vm.callDeferredNative(call.cl.Native(), call.numVariadic)
 		}
 	}
 	return false
+}
+
+func (vm *VM) callDeferredNative(fn *NativeFunction, numVariadic int8) {
+	defer func() {
+		if value := recover(); value != nil {
+			panic(vm.nativePanic(value))
+		}
+	}()
+	vm.callNative(fn, numVariadic, StackShift{}, false)
 }
 
 // create creates a new virtual machine with the execution environment env.
@@ -2541,7 +2557,7 @@ type nativeCallable struct {
 
 func newNativeCallable(value reflect.Value) *callable {
 	c := &nativeCallable{}
-	initNativeFunction(&c.native, "", "", value)
+	initNativeFunction(&c.native, "", "", snapshotValue(value))
 	c.callable.native = &c.native
 	return &c.callable
 }
@@ -2704,18 +2720,7 @@ func (c *callable) Value(env *env, parentContext context.Context) reflect.Value 
 				panic(stopError{err})
 			}
 			if p, ok := err.(*PanicError); ok {
-				var msg string
-				for ; p != nil; p = p.next {
-					msg = "\n" + msg
-					if p.recovered {
-						msg = " [recovered]" + msg
-					}
-					msg = p.String() + msg
-					if p.next != nil {
-						msg = "\tpanic: " + msg
-					}
-				}
-				err = &fatalError{msg: msg}
+				panic(p.Message())
 			}
 			panic(err)
 		}

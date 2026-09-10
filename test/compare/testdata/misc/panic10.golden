@@ -1,1 +1,8 @@
 panic: runtime error: integer divide by zero
+		panic: BUG2
+	
+	scriggo goroutine 1 [running]:
+	main.()
+		main:13
+	main.main()
+		main:???

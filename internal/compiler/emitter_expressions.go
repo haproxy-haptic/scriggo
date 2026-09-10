@@ -123,11 +123,7 @@ func (em *emitter) _emitExpr(expr ast.Expression, dstType reflect.Type, reg int8
 
 			// Optimization: if we can emit directly to the destination register, do so.
 			if canEmitDirectly(convertType.Kind(), dstType.Kind()) {
-				if markdownToHTML {
-					em.changeRegisterConvertFormat(false, argReg, reg, argType, convertType)
-				} else {
-					em.changeRegister(false, argReg, reg, argType, convertType)
-				}
+				em.emitTypeConversion(argReg, reg, argType, convertType, markdownToHTML)
 				return reg, false
 			}
 
@@ -1039,10 +1035,7 @@ func (em *emitter) emitUnaryOp(expr *ast.UnaryOperator, reg int8, regType reflec
 	}
 
 	// Emit code for the negation of a complex number.
-	if exprKind == reflect.Complex64 || exprKind == reflect.Complex128 {
-		if op != ast.OperatorSubtraction {
-			panic("bug: expected operator subtraction")
-		}
+	if op == ast.OperatorSubtraction && (exprKind == reflect.Complex64 || exprKind == reflect.Complex128) {
 		stackShift := em.fb.currentStackShift()
 		em.fb.enterScope()
 		index := em.fb.complexOperationIndex(ast.OperatorSubtraction, true)

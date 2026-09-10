@@ -275,6 +275,31 @@ func TestMutationObserverSetVariable(t *testing.T) {
 	})
 }
 
+func TestMutationObserverRejectsNestedGlobalWrites(t *testing.T) {
+	type leaf struct{ Value int }
+	type aggregate struct {
+		Child leaf
+		Items [1]leaf
+	}
+	for _, source := range []string{
+		`{% value.Child.Value = 2 %}`,
+		`{% value.Child.Value += 1 %}`,
+		`{% value.Items[0].Value = 2 %}`,
+		`{% value.Items[0].Value++ %}`,
+	} {
+		t.Run(source, func(t *testing.T) {
+			original := aggregate{Child: leaf{1}, Items: [1]leaf{{1}}}
+			value := original
+			rejectMutation(t, Files{"index.txt": []byte(source)}, "index.txt",
+				&BuildOptions{Globals: native.Declarations{"value": &value}}, nil,
+				MutationSetVariable, reflect.ValueOf(&value).Pointer())
+			if value != original {
+				t.Fatalf("global changed to %#v, want %#v", value, original)
+			}
+		})
+	}
+}
+
 func TestMutationObserverBuiltins(t *testing.T) {
 	t.Run("delete", func(t *testing.T) {
 		value := map[string]int{"key": 1}

@@ -1,1 +1,5 @@
-panic: interface conversion: int is not fmt.Formatter: missing method Format
+panic: interface conversion: int is not fmt.Formatter: missing method Format (value: 10)
+	
+	scriggo goroutine 1 [running]:
+	main.main()
+		main:9

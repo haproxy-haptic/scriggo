@@ -322,7 +322,7 @@ func (vm *VM) runFunc(fn *Function, vars []reflect.Value) error {
 		if len(vm.calls) == 0 {
 			break
 		}
-		vm.calls = append(vm.calls, callFrame{cl: callable{fn: vm.fn}, renderer: vm.renderer, fp: vm.fp, status: panicked})
+		vm.calls = append(vm.calls, callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc, status: panicked})
 		vm.fn = nil
 	}
 	if currentContext := vm.nativeEnv.ctx; currentContext != nil {
@@ -592,7 +592,7 @@ mainLoop:
 
 		// Call
 		case OpCallFunc:
-			call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges), rangesBase: vm.rangesBase}
+			call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges), rangesBase: vm.rangesBase}
 			fn := vm.fn.Functions[uint8(a)]
 			// Profiling: record function call entry.
 			if vm.profiler != nil {
@@ -629,7 +629,7 @@ mainLoop:
 				startNativeGoroutine = false
 				vm.pc++
 			} else {
-				call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges), rangesBase: vm.rangesBase}
+				call := callFrame{cl: callable{fn: vm.fn, vars: vm.vars}, renderer: vm.renderer, fp: vm.fp, pc: vm.pc + 1, ok: vm.ok, rangesLen: len(vm.ranges), rangesBase: vm.rangesBase}
 				fn := f.fn
 				// Profiling: record indirect Scriggo function call entry.
 				if vm.profiler != nil {
@@ -657,7 +657,6 @@ mainLoop:
 					vm.moreGeneralStack()
 				}
 				if fn.Macro {
-					call.renderer = vm.renderer
 					if b == ReturnString {
 						nr := newRenderer(&strings.Builder{})
 						if call.renderer != nil {
@@ -1128,11 +1127,8 @@ mainLoop:
 					v = vm.vars[index]
 				}
 			}
-			switch v.Kind() {
-			case reflect.Array, reflect.Struct:
-				v2 := reflect.New(v.Type()).Elem()
-				v2.Set(v)
-				v = v2
+			if v.Kind() == reflect.Array || v.Kind() == reflect.Struct {
+				v = snapshotValue(v)
 			}
 			vm.setFromReflectValue(c, v)
 
@@ -1766,13 +1762,7 @@ mainLoop:
 			case stringRegister:
 				vm.setString(c, vm.stringk(b, op < 0))
 			case generalRegister:
-				rv := vm.generalk(b, op < 0)
-				if k := rv.Kind(); k == reflect.Array || k == reflect.Struct {
-					newRv := reflect.New(rv.Type()).Elem()
-					newRv.Set(reflect.ValueOf(rv.Interface()))
-					rv = newRv
-				}
-				vm.setGeneral(c, rv)
+				vm.setGeneral(c, snapshotValue(vm.generalk(b, op < 0)))
 			}
 
 		// Mul

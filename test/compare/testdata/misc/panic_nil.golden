@@ -1,1 +1,5 @@
-panic: panic called with nil argument
+panic: runtime error: panic called with nil argument
+	
+	scriggo goroutine 1 [running]:
+	main.main()
+		main:6

@@ -13,15 +13,22 @@ the command line that compare the behavior of Scriggo with the behavior of gc.
 ## Running existing tests
 
 
-1. Ensure that the latest version of the `scriggo` command is installed and available
-   on your system.
-2. Enter `test/compare/cmd`
-3. Generate the sources with `go generate`
-4. Enter `test/compare`
-5. Build the `compare` command with `go build`
-6. Run the comparison tests with `./compare`; this step may take a while.
+From the repository root, run:
 
-You may want to run `./compare -h` to see the available options.
+```sh
+cd test/compare
+go run . -k -s
+```
+
+The runner builds its helper against the local checkout. The generated native
+package declarations are committed; no installed Scriggo binary is required.
+CI runs this command alongside the root and nested-module race suites.
+
+Use `go run . -h` to list options, or select tests by path:
+
+```sh
+go run . -k -s -p 'misc/runtime_panic.go'
+```
 
 ## Adding new tests
 

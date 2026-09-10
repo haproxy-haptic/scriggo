@@ -1127,6 +1127,10 @@ func (tc *typechecker) maybeConvertInterfaceOperand(
 	t1, t2 *typeInfo,
 	expr1, expr2 ast.Expression,
 ) (*typeInfo, *typeInfo, error) {
+	switch op {
+	case ast.OperatorEqual, ast.OperatorNotEqual, ast.OperatorContains, ast.OperatorNotContains:
+		return t1, t2, nil
+	}
 	t1IsIface := t1.IsEmptyInterface()
 	t2IsIface := t2.IsEmptyInterface()
 

@@ -1,1 +1,7 @@
 panic: f!
+	
+	scriggo goroutine 1 [running]:
+	main.f()
+		main:6
+	main.main()
+		main:10

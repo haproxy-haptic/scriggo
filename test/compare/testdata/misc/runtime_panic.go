@@ -56,8 +56,11 @@ func main() {
 
 }
 
-func recoverRuntimePanic(err string) {
+func recoverRuntimePanic(err string, scriggoError ...string) {
 	v := recover()
+	if _, scriggo := os.LookupEnv("SCRIGGO"); scriggo && len(scriggoError) == 1 {
+		err = scriggoError[0]
+	}
 	if v == nil {
 		log.Printf("expected error %q, got nil", err)
 		os.Exit(1)
@@ -157,7 +160,7 @@ func test7() {
 }
 
 func test8() {
-	defer recoverRuntimePanic("interface conversion: interface {} is int, not testpkg.S")
+	defer recoverRuntimePanic("interface conversion: interface {} is int, not testpkg.S", "interface conversion: interface {} is int, not testpkg.S (value: 5)")
 	var a interface{} = 5
 	_ = a.(testpkg.S)
 }
@@ -169,7 +172,7 @@ func test8b() {
 }
 
 func test8c() {
-	defer recoverRuntimePanic("interface conversion: testpkg.T is not testpkg.I: missing method M")
+	defer recoverRuntimePanic("interface conversion: testpkg.T is not testpkg.I: missing method M", "interface conversion: testpkg.T is not testpkg.I: missing method M (value: 0)")
 	var a interface{} = testpkg.T(0)
 	_ = a.(testpkg.I)
 }

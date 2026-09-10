@@ -11,10 +11,60 @@ import (
 	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
+type assignmentWriteback struct {
+	variable int
+	storage  int8
+	typ      reflect.Type
+}
+
+func (writeback *assignmentWriteback) refresh(em *emitter) {
+	em.fb.enterStack()
+	reg := em.fb.newRegister(writeback.typ.Kind())
+	em.fb.emitGetVar(writeback.variable, reg, writeback.typ.Kind())
+	em.changeRegister(false, reg, -writeback.storage, writeback.typ, writeback.typ)
+	em.fb.exitStack()
+}
+
+func (em *emitter) emitAssignmentReceiver(expr ast.Expression) (int8, *assignmentWriteback) {
+	typ := em.typ(expr)
+	if typ.Kind() != reflect.Array && typ.Kind() != reflect.Struct {
+		return em.emitExpr(expr, typ), nil
+	}
+	if index, ok := em.varStore.nonLocalVarIndex(expr); ok {
+		reg := em.fb.newRegister(reflect.Pointer)
+		em.fb.emitNew(typ, reg)
+		writeback := &assignmentWriteback{variable: index, storage: reg, typ: typ}
+		writeback.refresh(em)
+		return -reg, writeback
+	}
+	switch expr := expr.(type) {
+	case *ast.Selector:
+		receiver, writeback := em.emitAssignmentReceiver(expr.Expr)
+		receiverType := em.typ(expr.Expr)
+		if receiverType.Kind() == reflect.Pointer {
+			receiverType = receiverType.Elem()
+		}
+		field, _ := receiverType.FieldByName(expr.Ident)
+		index := em.fb.makeFieldIndex(field.Index)
+		reg := em.fb.newRegister(typ.Kind())
+		em.fb.emitField(receiver, index, reg, typ.Kind())
+		return reg, writeback
+	case *ast.Index:
+		receiver, writeback := em.emitAssignmentReceiver(expr.Expr)
+		index, constant := em.emitExprK(expr.Index, intType)
+		reg := em.fb.newRegister(typ.Kind())
+		em.fb.emitIndex(constant, receiver, index, reg, em.typ(expr.Expr), expr.Pos(), true)
+		return reg, writeback
+	default:
+		return em.emitExpr(expr, typ), nil
+	}
+}
+
 // address represents an element on the left side of an assignment.
 // The meaning of the various fields is explained in the constructor methods for
 // this type.
 type address struct {
+	writeback     *assignmentWriteback
 	em            *emitter           // a reference to the current emitter.
 	target        assignmentTarget   // target of the assignment.
 	addressedType reflect.Type       // type of the addressed type (see the methods below).
@@ -230,6 +280,9 @@ func (em *emitter) addressNonLocalStructSelector(structIndex int, localStructReg
 // assign assigns value, with type valueType, to the address. If k is true
 // value is a constant otherwise is a register.
 func (a address) assign(k bool, value int8, valueType reflect.Type) {
+	if a.writeback != nil {
+		a.writeback.refresh(a.em)
+	}
 	switch a.target {
 	case assignNonLocalVar:
 		a.em.fb.emitSetVar(k, value, a.nonLocal, a.addressedType.Kind())
@@ -257,6 +310,9 @@ func (a address) assign(k bool, value int8, valueType reflect.Type) {
 	case assignNonLocalStructSelector:
 		a.em.fb.emitSetField(k, a.op1, a.op2, value, valueType.Kind())
 		a.em.fb.emitSetVar(false, a.op1, a.nonLocal, a.addressedType.Kind())
+	}
+	if writeback := a.writeback; writeback != nil {
+		a.em.fb.emitSetVar(false, -writeback.storage, writeback.variable, writeback.typ.Kind())
 	}
 }
 
@@ -320,10 +376,16 @@ func (em *emitter) emitAssignmentOperation(addr address, rh ast.Expression) {
 		assignNonLocalSliceIndex:
 		em.fb.emitIndex(false, addr.op1, addr.op2, c, addrTyp, addr.pos, false)
 	case assignPtrIndirection:
-		em.changeRegister(false, addr.op1, c, addrTyp, addrTyp)
+		em.changeRegister(false, -addr.op1, c, typ, typ)
 	case assignLocalStructSelector,
 		assignNonLocalStructSelector:
 		em.fb.emitField(addr.op1, addr.op2, c, typ.Kind())
+	}
+	if typ.Kind() == reflect.Interface {
+		operationType := em.typ(rh)
+		converted := em.fb.newRegister(operationType.Kind())
+		em.changeRegister(false, c, converted, typ, operationType)
+		c, typ = converted, operationType
 	}
 
 	// Emit the code that evaluates the right side of the assignment.
@@ -346,7 +408,6 @@ func (em *emitter) emitAssignmentOperation(addr address, rh ast.Expression) {
 		em.fb.emitCallNative(index, 0, stackShift, addr.pos)
 		em.changeRegister(false, ret, c, typ, typ)
 		em.fb.exitScope()
-		addr.assign(false, c, typ)
 	} else {
 		switch addr.operator {
 		case ast.AssignmentAddition:
@@ -379,6 +440,11 @@ func (em *emitter) emitAssignmentOperation(addr address, rh ast.Expression) {
 	}
 
 	// Put back the result into the left side of the assignment.
+	if targetType := addr.targetType(); targetType != typ {
+		converted := em.fb.newRegister(targetType.Kind())
+		em.changeRegister(false, c, converted, typ, targetType)
+		c, typ = converted, targetType
+	}
 	addr.assign(false, c, typ)
 
 }

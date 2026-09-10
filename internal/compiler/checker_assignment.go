@@ -112,7 +112,7 @@ func (tc *typechecker) checkAssignmentOperation(node *ast.Assignment) {
 	node.Lhs[0] = tc.checkAssignTo(lh, node.Lhs[0])
 
 	op := operatorFromAssignmentType(node.Type)
-	_, err := tc.binaryOp(node.Lhs[0], op, node.Rhs[0])
+	result, err := tc.binaryOp(node.Lhs[0], op, node.Rhs[0])
 	if err != nil {
 		if err == errDivisionByZero {
 			panic(tc.errorf(node, "%s", err))
@@ -120,7 +120,12 @@ func (tc *typechecker) checkAssignmentOperation(node *ast.Assignment) {
 		panic(tc.errorf(node, "invalid operation: %s (%s)", node, err))
 	}
 
-	rh.setValue(lh.Type)
+	if lh.IsEmptyInterface() {
+		tc.compilation.typeInfos[node.Lhs[0]] = lh
+		rh.setValue(result.Type)
+	} else {
+		rh.setValue(lh.Type)
+	}
 }
 
 // checkBalancedConstantDeclaration type checks that a constant declaration is
