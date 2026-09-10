@@ -180,10 +180,10 @@ func readModulePath(fsys fs.FS) (string, error) {
 	}
 	path := modulePath(src)
 	if path == "" {
-		return "", &GoModError{path: "go.mod", pos: ast.Position{1, 1, 0, 0}, msg: "no module declaration in go.mod"}
+		return "", &GoModError{path: "go.mod", pos: ast.Position{Line: 1, Column: 1, Start: 0, End: 0}, msg: "no module declaration in go.mod"}
 	}
 	if !validModulePath(path) {
-		return "", &GoModError{path: "go.mod", pos: ast.Position{1, 1, 0, 0}, msg: "invalid module path in go.mod"}
+		return "", &GoModError{path: "go.mod", pos: ast.Position{Line: 1, Column: 1, Start: 0, End: 0}, msg: "invalid module path in go.mod"}
 	}
 	return path, nil
 }

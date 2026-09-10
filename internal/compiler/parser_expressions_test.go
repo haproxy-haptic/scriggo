@@ -264,9 +264,9 @@ var exprTests = []struct {
 	{"[]int{1,2,3}", ast.NewCompositeLiteral(p(1, 6, 0, 11),
 		ast.NewSliceType(p(1, 1, 0, 4), ast.NewIdentifier(p(1, 3, 2, 4), "int")),
 		[]ast.KeyValue{
-			{nil, ast.NewBasicLiteral(p(1, 7, 6, 6), ast.IntLiteral, "1")},
-			{nil, ast.NewBasicLiteral(p(1, 9, 8, 8), ast.IntLiteral, "2")},
-			{nil, ast.NewBasicLiteral(p(1, 11, 10, 10), ast.IntLiteral, "3")},
+			{Key: nil, Value: ast.NewBasicLiteral(p(1, 7, 6, 6), ast.IntLiteral, "1")},
+			{Key: nil, Value: ast.NewBasicLiteral(p(1, 9, 8, 8), ast.IntLiteral, "2")},
+			{Key: nil, Value: ast.NewBasicLiteral(p(1, 11, 10, 10), ast.IntLiteral, "3")},
 		})},
 	{`map[int]interface{}{a: "text", b: 3}`,
 		ast.NewCompositeLiteral(
@@ -276,12 +276,12 @@ var exprTests = []struct {
 				ast.NewInterface(p(1, 9, 8, 18))),
 			[]ast.KeyValue{
 				{
-					ast.NewIdentifier(p(1, 21, 20, 20), "a"),
-					ast.NewBasicLiteral(p(1, 24, 23, 28), ast.StringLiteral, `"text"`),
+					Key:   ast.NewIdentifier(p(1, 21, 20, 20), "a"),
+					Value: ast.NewBasicLiteral(p(1, 24, 23, 28), ast.StringLiteral, `"text"`),
 				},
 				{
-					ast.NewIdentifier(p(1, 32, 31, 31), "b"),
-					ast.NewBasicLiteral(p(1, 35, 34, 34), ast.IntLiteral, "3"),
+					Key:   ast.NewIdentifier(p(1, 32, 31, 31), "b"),
+					Value: ast.NewBasicLiteral(p(1, 35, 34, 34), ast.IntLiteral, "3"),
 				},
 			},
 		),
@@ -296,23 +296,23 @@ var exprTests = []struct {
 					ast.NewIdentifier(p(1, 5, 4, 6), "int"),
 				)),
 			[]ast.KeyValue{
-				{nil, ast.NewCompositeLiteral(
+				{Key: nil, Value: ast.NewCompositeLiteral(
 					p(1, 9, 8, 10),
 					nil,
 					[]ast.KeyValue{
-						{nil, ast.NewBasicLiteral(p(1, 10, 9, 9), ast.IntLiteral, "1")},
+						{Key: nil, Value: ast.NewBasicLiteral(p(1, 10, 9, 9), ast.IntLiteral, "1")},
 					})},
-				{nil, ast.NewCompositeLiteral(p(1, 13, 12, 16), nil,
+				{Key: nil, Value: ast.NewCompositeLiteral(p(1, 13, 12, 16), nil,
 					[]ast.KeyValue{
-						{nil, ast.NewBasicLiteral(p(1, 14, 13, 13), ast.IntLiteral, "2")},
-						{nil, ast.NewBasicLiteral(p(1, 16, 15, 15), ast.IntLiteral, "3")},
+						{Key: nil, Value: ast.NewBasicLiteral(p(1, 14, 13, 13), ast.IntLiteral, "2")},
+						{Key: nil, Value: ast.NewBasicLiteral(p(1, 16, 15, 15), ast.IntLiteral, "3")},
 					})}})},
 	{"map[int]bool", ast.NewMapType(p(1, 1, 0, 11), ast.NewIdentifier(p(1, 5, 4, 6), "int"), ast.NewIdentifier(p(1, 9, 8, 11), "bool"))},
 	{`map[int]string{1: "uno", 2: "due"}`, ast.NewCompositeLiteral(p(1, 15, 0, 33),
 		ast.NewMapType(p(1, 1, 0, 13), ast.NewIdentifier(p(1, 5, 4, 6), "int"), ast.NewIdentifier(p(1, 9, 8, 13), "string")),
 		[]ast.KeyValue{
-			{ast.NewBasicLiteral(p(1, 16, 15, 15), ast.IntLiteral, "1"), ast.NewBasicLiteral(p(1, 19, 18, 22), ast.StringLiteral, `"uno"`)},
-			{ast.NewBasicLiteral(p(1, 26, 25, 25), ast.IntLiteral, "2"), ast.NewBasicLiteral(p(1, 29, 28, 32), ast.StringLiteral, `"due"`)},
+			{Key: ast.NewBasicLiteral(p(1, 16, 15, 15), ast.IntLiteral, "1"), Value: ast.NewBasicLiteral(p(1, 19, 18, 22), ast.StringLiteral, `"uno"`)},
+			{Key: ast.NewBasicLiteral(p(1, 26, 25, 25), ast.IntLiteral, "2"), Value: ast.NewBasicLiteral(p(1, 29, 28, 32), ast.StringLiteral, `"due"`)},
 		})},
 	{"[]int(s)", ast.NewCall(p(1, 6, 0, 7),
 		ast.NewSliceType(p(1, 1, 0, 4), ast.NewIdentifier(p(1, 3, 2, 4), "int")),
@@ -323,9 +323,9 @@ var exprTests = []struct {
 		ast.NewSliceType(p(1, 1, 0, 7), ast.NewIdentifier(p(1, 3, 2, 7), "string")), nil)},
 	{`[3]string{"a", "b", "c"}`,
 		ast.NewCompositeLiteral(p(1, 10, 0, 23), ast.NewArrayType(p(1, 1, 0, 8), ast.NewBasicLiteral(p(1, 2, 1, 1), ast.IntLiteral, "3"), ast.NewIdentifier(p(1, 4, 3, 8), "string")), []ast.KeyValue{
-			{nil, ast.NewBasicLiteral(p(1, 11, 10, 12), ast.StringLiteral, `"a"`)},
-			{nil, ast.NewBasicLiteral(p(1, 16, 15, 17), ast.StringLiteral, `"b"`)},
-			{nil, ast.NewBasicLiteral(p(1, 21, 20, 22), ast.StringLiteral, `"c"`)},
+			{Key: nil, Value: ast.NewBasicLiteral(p(1, 11, 10, 12), ast.StringLiteral, `"a"`)},
+			{Key: nil, Value: ast.NewBasicLiteral(p(1, 16, 15, 17), ast.StringLiteral, `"b"`)},
+			{Key: nil, Value: ast.NewBasicLiteral(p(1, 21, 20, 22), ast.StringLiteral, `"c"`)},
 		})},
 	{"[][]int{[]int{2}, []int{-2, 10}}",
 		ast.NewCompositeLiteral(p(1, 8, 0, 31),
@@ -333,22 +333,22 @@ var exprTests = []struct {
 				ast.NewSliceType( // []int
 					p(1, 3, 2, 6),
 					ast.NewIdentifier(p(1, 5, 4, 6), "int"))),
-			[]ast.KeyValue{{nil,
-				ast.NewCompositeLiteral( // []int{2}
+			[]ast.KeyValue{{Key: nil,
+				Value: ast.NewCompositeLiteral( // []int{2}
 					p(1, 14, 8, 15),
 					ast.NewSliceType(p(1, 9, 8, 12), ast.NewIdentifier(p(1, 11, 10, 12), "int")),
-					[]ast.KeyValue{{nil, ast.NewBasicLiteral(p(1, 15, 14, 14), ast.IntLiteral, "2")}}),
+					[]ast.KeyValue{{Key: nil, Value: ast.NewBasicLiteral(p(1, 15, 14, 14), ast.IntLiteral, "2")}}),
 			},
-				{nil,
-					ast.NewCompositeLiteral( // []int{-2, 10}
+				{Key: nil,
+					Value: ast.NewCompositeLiteral( // []int{-2, 10}
 						p(1, 24, 18, 30),
 						ast.NewSliceType(p(1, 19, 18, 22), ast.NewIdentifier(p(1, 21, 20, 22), "int")),
 						[]ast.KeyValue{
-							{nil, ast.NewUnaryOperator(p(1, 25, 24, 25), ast.OperatorSubtraction, ast.NewBasicLiteral(p(1, 26, 25, 25), ast.IntLiteral, "2"))},
-							{nil, ast.NewBasicLiteral(p(1, 29, 28, 29), ast.IntLiteral, "10")},
+							{Key: nil, Value: ast.NewUnaryOperator(p(1, 25, 24, 25), ast.OperatorSubtraction, ast.NewBasicLiteral(p(1, 26, 25, 25), ast.IntLiteral, "2"))},
+							{Key: nil, Value: ast.NewBasicLiteral(p(1, 29, 28, 29), ast.IntLiteral, "10")},
 						})}})},
 	{"[]int{42}", ast.NewCompositeLiteral(p(1, 6, 0, 8), ast.NewSliceType(p(1, 1, 0, 4),
-		ast.NewIdentifier(p(1, 3, 2, 4), "int")), []ast.KeyValue{{nil, ast.NewBasicLiteral(p(1, 7, 6, 7), ast.IntLiteral, "42")}})},
+		ast.NewIdentifier(p(1, 3, 2, 4), "int")), []ast.KeyValue{{Key: nil, Value: ast.NewBasicLiteral(p(1, 7, 6, 7), ast.IntLiteral, "42")}})},
 	{"42 + [1]int{-30}[0]", ast.NewBinaryOperator(
 		p(1, 4, 0, 18),
 		ast.OperatorAddition,
@@ -356,7 +356,7 @@ var exprTests = []struct {
 		ast.NewIndex(
 			p(1, 17, 5, 18),
 			ast.NewCompositeLiteral(p(1, 12, 5, 15), ast.NewArrayType(p(1, 6, 5, 10), ast.NewBasicLiteral(p(1, 7, 6, 6), ast.IntLiteral, "1"), ast.NewIdentifier(p(1, 9, 8, 10), "int")),
-				[]ast.KeyValue{{nil, ast.NewUnaryOperator(p(1, 13, 12, 14), ast.OperatorSubtraction,
+				[]ast.KeyValue{{Key: nil, Value: ast.NewUnaryOperator(p(1, 13, 12, 14), ast.OperatorSubtraction,
 					ast.NewBasicLiteral(p(1, 14, 13, 14), ast.IntLiteral, "30"))}},
 			),
 			ast.NewBasicLiteral(p(1, 18, 17, 17), ast.IntLiteral, "0"),
@@ -368,7 +368,7 @@ var exprTests = []struct {
 			ast.NewIndex(
 				p(1, 12, 0, 13),
 				ast.NewCompositeLiteral(p(1, 7, 0, 10), ast.NewArrayType(p(1, 1, 0, 5), ast.NewBasicLiteral(p(1, 2, 1, 1), ast.IntLiteral, "1"), ast.NewIdentifier(p(1, 4, 3, 5), "int")),
-					[]ast.KeyValue{{nil, ast.NewUnaryOperator(p(1, 8, 7, 9), ast.OperatorSubtraction,
+					[]ast.KeyValue{{Key: nil, Value: ast.NewUnaryOperator(p(1, 8, 7, 9), ast.OperatorSubtraction,
 						ast.NewBasicLiteral(p(1, 9, 8, 9), ast.IntLiteral, "30"))}},
 				),
 				ast.NewBasicLiteral(p(1, 13, 12, 12), ast.IntLiteral, "0"),
@@ -394,8 +394,8 @@ var exprTests = []struct {
 							ast.NewIdentifier(p(1, 9, 8, 12), "float"),
 						),
 						[]ast.KeyValue{
-							{nil, ast.NewBasicLiteral(p(1, 15, 14, 16), ast.FloatLiteral, "3.0")},
-							{nil, ast.NewBasicLiteral(p(1, 20, 19, 21), ast.FloatLiteral, "4.0")},
+							{Key: nil, Value: ast.NewBasicLiteral(p(1, 15, 14, 16), ast.FloatLiteral, "3.0")},
+							{Key: nil, Value: ast.NewBasicLiteral(p(1, 20, 19, 21), ast.FloatLiteral, "4.0")},
 						},
 					),
 					ast.NewBasicLiteral(p(1, 25, 24, 24), ast.IntLiteral, "0"),
@@ -410,7 +410,7 @@ var exprTests = []struct {
 			ast.NewIdentifier(p(1, 6, 5, 7), "int"),
 		),
 		[]ast.KeyValue{
-			{nil, ast.NewBasicLiteral(p(1, 10, 9, 9), ast.IntLiteral, "1")}, {nil, ast.NewBasicLiteral(p(1, 13, 12, 12), ast.IntLiteral, "4")}, {nil, ast.NewBasicLiteral(p(1, 16, 15, 15), ast.IntLiteral, "9")}}),
+			{Key: nil, Value: ast.NewBasicLiteral(p(1, 10, 9, 9), ast.IntLiteral, "1")}, {Key: nil, Value: ast.NewBasicLiteral(p(1, 13, 12, 12), ast.IntLiteral, "4")}, {Key: nil, Value: ast.NewBasicLiteral(p(1, 16, 15, 15), ast.IntLiteral, "9")}}),
 	},
 	{"[]*int", ast.NewSliceType(p(1, 1, 0, 5),
 		ast.NewUnaryOperator(
@@ -459,16 +459,16 @@ var exprTests = []struct {
 						),
 						[]ast.KeyValue{ // k1: *v1, k2: v2
 							{
-								ast.NewIdentifier(p(1, 19, 18, 19), "k1"), // k1
-								ast.NewUnaryOperator( // *v1
+								Key: ast.NewIdentifier(p(1, 19, 18, 19), "k1"), // k1
+								Value: ast.NewUnaryOperator( // *v1
 									p(1, 23, 22, 24),
 									ast.OperatorPointer,
 									ast.NewIdentifier(p(1, 24, 23, 24), "v1"),
 								),
 							},
 							{
-								ast.NewIdentifier(p(1, 28, 27, 28), "k2"), // k2
-								ast.NewIdentifier(p(1, 32, 31, 32), "v2"), // v2
+								Key:   ast.NewIdentifier(p(1, 28, 27, 28), "k2"), // k2
+								Value: ast.NewIdentifier(p(1, 32, 31, 32), "v2"), // v2
 							},
 						},
 					),
@@ -497,8 +497,8 @@ var exprTests = []struct {
 						p(1, 20, 5, 38),
 						ast.NewMapType(p(1, 6, 5, 18), ast.NewIdentifier(p(1, 10, 9, 14), "string"), ast.NewIdentifier(p(1, 17, 16, 18), "int")),
 						[]ast.KeyValue{
-							{ast.NewBasicLiteral(p(1, 21, 20, 24), ast.StringLiteral, `"uno"`), ast.NewBasicLiteral(p(1, 28, 27, 27), ast.IntLiteral, "1")},
-							{ast.NewBasicLiteral(p(1, 31, 30, 34), ast.StringLiteral, `"due"`), ast.NewBasicLiteral(p(1, 38, 37, 37), ast.IntLiteral, "2")},
+							{Key: ast.NewBasicLiteral(p(1, 21, 20, 24), ast.StringLiteral, `"uno"`), Value: ast.NewBasicLiteral(p(1, 28, 27, 27), ast.IntLiteral, "1")},
+							{Key: ast.NewBasicLiteral(p(1, 31, 30, 34), ast.StringLiteral, `"due"`), Value: ast.NewBasicLiteral(p(1, 38, 37, 37), ast.IntLiteral, "2")},
 						},
 					),
 					ast.NewBasicLiteral(p(1, 41, 40, 44), ast.StringLiteral, `"due"`),
@@ -512,9 +512,9 @@ var exprTests = []struct {
 			p(1, 9, 0, 29),
 			ast.NewIdentifier(p(1, 1, 0, 7), "myStruct"),
 			[]ast.KeyValue{
-				{nil, ast.NewIdentifier(p(1, 10, 9, 14), "value1")},
-				{nil, ast.NewBasicLiteral(p(1, 18, 17, 24), ast.StringLiteral, `"value2"`)},
-				{nil, ast.NewBasicLiteral(p(1, 28, 27, 28), ast.IntLiteral, "33")},
+				{Key: nil, Value: ast.NewIdentifier(p(1, 10, 9, 14), "value1")},
+				{Key: nil, Value: ast.NewBasicLiteral(p(1, 18, 17, 24), ast.StringLiteral, `"value2"`)},
+				{Key: nil, Value: ast.NewBasicLiteral(p(1, 28, 27, 28), ast.IntLiteral, "33")},
 			},
 		),
 	},
@@ -523,9 +523,9 @@ var exprTests = []struct {
 			p(1, 11, 0, 31),
 			ast.NewSelector(p(1, 4, 0, 9), ast.NewIdentifier(p(1, 1, 0, 2), "pkg"), "Struct"),
 			[]ast.KeyValue{
-				{nil, ast.NewIdentifier(p(1, 12, 11, 16), "value1")},
-				{nil, ast.NewBasicLiteral(p(1, 20, 19, 26), ast.StringLiteral, `"value2"`)},
-				{nil, ast.NewBasicLiteral(p(1, 30, 29, 30), ast.IntLiteral, "33")},
+				{Key: nil, Value: ast.NewIdentifier(p(1, 12, 11, 16), "value1")},
+				{Key: nil, Value: ast.NewBasicLiteral(p(1, 20, 19, 26), ast.StringLiteral, `"value2"`)},
+				{Key: nil, Value: ast.NewBasicLiteral(p(1, 30, 29, 30), ast.IntLiteral, "33")},
 			},
 		),
 	},
@@ -534,9 +534,9 @@ var exprTests = []struct {
 			p(1, 11, 0, 49),
 			ast.NewSelector(p(1, 4, 0, 9), ast.NewIdentifier(p(1, 1, 0, 2), "pkg"), "Struct"),
 			[]ast.KeyValue{
-				{ast.NewIdentifier(p(1, 12, 11, 14), "Key1"), ast.NewIdentifier(p(1, 18, 17, 22), "value1")},
-				{ast.NewIdentifier(p(1, 26, 25, 28), "Key2"), ast.NewBasicLiteral(p(1, 32, 31, 38), ast.StringLiteral, `"value2"`)},
-				{ast.NewIdentifier(p(1, 42, 41, 44), "Key3"), ast.NewBasicLiteral(p(1, 48, 47, 48), ast.IntLiteral, "33")},
+				{Key: ast.NewIdentifier(p(1, 12, 11, 14), "Key1"), Value: ast.NewIdentifier(p(1, 18, 17, 22), "value1")},
+				{Key: ast.NewIdentifier(p(1, 26, 25, 28), "Key2"), Value: ast.NewBasicLiteral(p(1, 32, 31, 38), ast.StringLiteral, `"value2"`)},
+				{Key: ast.NewIdentifier(p(1, 42, 41, 44), "Key3"), Value: ast.NewBasicLiteral(p(1, 48, 47, 48), ast.IntLiteral, "33")},
 			},
 		),
 	},
@@ -551,9 +551,9 @@ var exprTests = []struct {
 				ast.NewInterface(p(1, 3, 2, 12)),
 			),
 			[]ast.KeyValue{
-				{nil, ast.NewBasicLiteral(p(1, 15, 14, 14), ast.IntLiteral, "1")},
-				{nil, ast.NewBasicLiteral(p(1, 17, 16, 16), ast.IntLiteral, "2")},
-				{nil, ast.NewBasicLiteral(p(1, 19, 18, 18), ast.IntLiteral, "3")},
+				{Key: nil, Value: ast.NewBasicLiteral(p(1, 15, 14, 14), ast.IntLiteral, "1")},
+				{Key: nil, Value: ast.NewBasicLiteral(p(1, 17, 16, 16), ast.IntLiteral, "2")},
+				{Key: nil, Value: ast.NewBasicLiteral(p(1, 19, 18, 18), ast.IntLiteral, "3")},
 			})},
 	{`1 + interface{}(2) + 4`,
 		ast.NewBinaryOperator(

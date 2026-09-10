@@ -62,7 +62,7 @@ func (p *parsing) parseFunc(tok token, kind funcKindToParse) (ast.Node, token) {
 	// Make the nodes.
 	typ := ast.NewFuncType(pos, isMacro, parameters, result, isVariadic)
 	if kind == parseFuncType || kind&parseFuncType != 0 && tok.typ != tokenLeftBrace {
-		typ.Position = &ast.Position{pos.Line, pos.Column, pos.Start, pos.End}
+		typ.Position = &ast.Position{Line: pos.Line, Column: pos.Column, Start: pos.Start, End: pos.End}
 		return typ, tok
 	}
 	node := ast.NewFunc(pos, ident, typ, nil, false, ast.Format(tok.ctx))
@@ -117,7 +117,7 @@ func (p *parsing) parseFuncParameters(tok token, isMacro, isResult bool) ([]*ast
 		if isMacro {
 			switch name := string(tok.txt); name {
 			case "string", "html", "css", "js", "json", "markdown":
-				return []*ast.Parameter{{nil, ast.NewIdentifier(tok.pos, name)}}, false, tok.pos, p.next()
+				return []*ast.Parameter{{Ident: nil, Type: ast.NewIdentifier(tok.pos, name)}}, false, tok.pos, p.next()
 			}
 			return nil, false, nil, tok
 		}

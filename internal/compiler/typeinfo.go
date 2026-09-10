@@ -71,6 +71,15 @@ type typeInfo struct {
 	replacement        ast.Node     // Replacement node.
 }
 
+func (ti *typeInfo) copyIfConstant() *typeInfo {
+	if !ti.IsConstant() {
+		return ti
+	}
+	// setValue encodes a constant for its use site, not its shared declaration.
+	copied := *ti
+	return &copied
+}
+
 type nativeProvenance struct {
 	Declaration *NativeDeclaration
 	Path        string

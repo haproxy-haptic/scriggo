@@ -609,14 +609,14 @@ func (tc *typechecker) rebalancedRightSide(node ast.Node) []ast.Expression {
 			v2 := ast.NewTypeAssertion(v.Pos(), v.Expr, v.Type)
 			ti := tc.checkExpr(rhExpr)
 			tc.compilation.typeInfos[v1] = &typeInfo{Type: ti.Type}
-			tc.compilation.typeInfos[v2] = untypedBoolTypeInfo
+			tc.compilation.typeInfos[v2] = newUntypedBoolTypeInfo()
 			return []ast.Expression{v1, v2}
 		case *ast.Selector:
 			if ti := tc.checkExpr(rhExpr); ti.IsMapSelector() {
 				v1 := ast.NewSelector(v.Pos(), v.Expr, v.Ident)
 				v2 := ast.NewSelector(v.Pos(), v.Expr, v.Ident)
 				tc.compilation.typeInfos[v1] = &typeInfo{Type: ti.Type, Properties: ti.Properties, replacement: ti.replacement}
-				tc.compilation.typeInfos[v2] = untypedBoolTypeInfo
+				tc.compilation.typeInfos[v2] = newUntypedBoolTypeInfo()
 				return []ast.Expression{v1, v2}
 			}
 		case *ast.Index:
@@ -624,7 +624,7 @@ func (tc *typechecker) rebalancedRightSide(node ast.Node) []ast.Expression {
 			v2 := ast.NewIndex(v.Pos(), v.Expr, v.Index)
 			ti := tc.checkExpr(rhExpr)
 			tc.compilation.typeInfos[v1] = &typeInfo{Type: ti.Type}
-			tc.compilation.typeInfos[v2] = untypedBoolTypeInfo
+			tc.compilation.typeInfos[v2] = newUntypedBoolTypeInfo()
 			return []ast.Expression{v1, v2}
 		case *ast.UnaryOperator:
 			if v.Op == ast.OperatorReceive {
@@ -632,7 +632,7 @@ func (tc *typechecker) rebalancedRightSide(node ast.Node) []ast.Expression {
 				v2 := ast.NewUnaryOperator(v.Pos(), ast.OperatorReceive, v.Expr)
 				ti := tc.checkExpr(rhExpr)
 				tc.compilation.typeInfos[v1] = &typeInfo{Type: ti.Type}
-				tc.compilation.typeInfos[v2] = untypedBoolTypeInfo
+				tc.compilation.typeInfos[v2] = newUntypedBoolTypeInfo()
 				return []ast.Expression{v1, v2}
 			}
 		}

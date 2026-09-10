@@ -1274,10 +1274,10 @@ var checkerStmts = map[string]string{
 	`var t boolType = false; for ; t; { }`:                             ok,
 
 	// For statements with 'range' clause.
-	`for range "abc" { }`:                                                            ok,
-	`for _, _ = range "abc" { }`:                                                     ok,
-	`for _, _ = range []int{1,2,3} { }`:                                              ok,
-	`for k, v := range ([...]int{}) { var _, _ int = k, v }`:                         ok,
+	`for range "abc" { }`:                                    ok,
+	`for _, _ = range "abc" { }`:                             ok,
+	`for _, _ = range []int{1,2,3} { }`:                      ok,
+	`for k, v := range ([...]int{}) { var _, _ int = k, v }`: ok,
 	`for k, v := range map[float64]string{} { var _ float64 = k; var _ string = v }`: ok,
 	`for _, _ = range (&[...]int{}) { }`:                                             ok,
 	`for _, _ = range 0 { }`:                                                         `cannot range over 0 (type untyped number)`,
@@ -2145,7 +2145,7 @@ func tiBoolConst(b bool) *typeInfo {
 }
 
 func tiUntypedBool() *typeInfo {
-	return untypedBoolTypeInfo
+	return newUntypedBoolTypeInfo()
 }
 
 // float type infos.
