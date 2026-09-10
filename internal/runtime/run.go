@@ -253,11 +253,9 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args *paralle
 		putPooledVM(nvm)
 		putStringBuilder(buf)
 		if r := recover(); r != nil {
-			switch err := r.(type) {
-			case stopError:
-				future.err <- err
-			case *PanicError:
-				future.err <- err
+			switch r.(type) {
+			case stopError, envFatalError, *PanicError:
+				future.err <- r.(error)
 			default:
 				future.err <- panicErrorWithContext(r, fnName, fnPkg)
 			}
@@ -266,7 +264,7 @@ func runScriggoMacroParallel(fn *Function, fnVars []reflect.Value, args *paralle
 
 	if err := nvm.runFunc(fn, nvm.vars); err != nil {
 		switch err.(type) {
-		case *PanicError, stopError:
+		case *PanicError, stopError, envFatalError:
 			future.err <- err
 		default:
 			future.err <- stopError{err}
@@ -284,9 +282,10 @@ func runNativeMacroParallel(nativeFn *NativeFunction, args []reflect.Value, futu
 
 	defer func() {
 		if r := recover(); r != nil {
-			if pe, ok := r.(*PanicError); ok {
-				future.err <- pe
-			} else {
+			switch r.(type) {
+			case *PanicError, envFatalError:
+				future.err <- r.(error)
+			default:
 				future.err <- panicErrorWithContext(r, fnName, fnPkg)
 			}
 		}
@@ -1246,7 +1245,8 @@ mainLoop:
 		// GoRenderWait - wait for all pending parallel renders and flush output
 		case OpGoRenderWait:
 			if err := vm.renderer.flushWithFutures(); err != nil {
-				if _, ok := err.(stopError); ok {
+				switch err.(type) {
+				case stopError, envFatalError:
 					panic(err)
 				}
 				panic(vm.newPanic(err))

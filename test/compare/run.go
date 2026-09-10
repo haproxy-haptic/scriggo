@@ -122,6 +122,7 @@ func main() {
 	countTotal := int64(0)
 	countSkipped := int64(0)
 	countIncompatible := int64(0)
+	countFailed := int64(0)
 
 	for _, path := range paths {
 
@@ -175,10 +176,13 @@ func main() {
 			if mode == "skip" {
 				atomic.AddInt64(&countSkipped, 1)
 			} else {
-				err = test(src, mode, path, opts, *keepTestingOnFail)
+				err = test(src, mode, path, opts)
 				if err != nil {
-					_, _ = fmt.Fprintln(os.Stderr, err)
-					os.Exit(1)
+					_, _ = fmt.Fprintf(os.Stderr, "\n%s: %v\n", path, err)
+					atomic.AddInt64(&countFailed, 1)
+					if !*keepTestingOnFail {
+						os.Exit(1)
+					}
 				}
 			}
 			// Print output when the test is completed.
@@ -204,6 +208,10 @@ func main() {
 	}
 
 	wg.Wait()
+	if countFailed > 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "\n%d tests failed\n", countFailed)
+		os.Exit(1)
+	}
 
 	// Print output after all tests are completed.
 	if *verbose || *stat {
@@ -522,7 +530,7 @@ func runGc(path string) (int, []byte, []byte, error) {
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	scriggoAbsPath, err := filepath.Abs("../../../scriggo")
+	scriggoAbsPath, err := filepath.Abs("../..")
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -542,7 +550,7 @@ func runGc(path string) (int, []byte, []byte, error) {
 		}
 		goMod := strings.Join([]string{
 			`module gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg`,
-			`replace gitlab.com/haproxy-haptic/scriggo => ` + scriggoAbsPath,
+			`replace gitlab.com/haproxy-haptic/scriggo => ` + strconv.Quote(scriggoAbsPath),
 			`require gitlab.com/haproxy-haptic/scriggo v0.0.0`,
 		}, "\n")
 		err = os.WriteFile(filepath.Join(tmpDir, "testpkg", "go.mod"), []byte(goMod), 0664)
@@ -576,7 +584,7 @@ func runGc(path string) (int, []byte, []byte, error) {
 		data := strings.Join([]string{
 			`module scriggo-gc-test`,
 			`replace gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg => ./testpkg`,
-			`replace gitlab.com/haproxy-haptic/scriggo => ` + scriggoAbsPath,
+			`replace gitlab.com/haproxy-haptic/scriggo => ` + strconv.Quote(scriggoAbsPath),
 		}, "\n")
 		err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(data), 0664)
 		if err != nil {
@@ -678,19 +686,11 @@ func goBaseVersion(v string) string {
 	return fmt.Sprintf("go1.%d", next)
 }
 
-// test execute test on the given source code with the specified mode.
-// When a test fails, test calls os.Exit with an non-zero error code, unless
-// keepTestingOnFail is set.
-func test(src []byte, mode, filePath string, opts []string, keepTestingOnFail bool) error {
+func test(src []byte, mode, filePath string, opts []string) (err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			absPath, _ := filepath.Abs(filePath)
-			_, _ = fmt.Fprintf(os.Stderr, "\n%s: %s\n", absPath, r)
-			if keepTestingOnFail {
-				return
-			}
-			os.Exit(1)
+			err = fmt.Errorf("test panicked: %v", r)
 		}
 	}()
 

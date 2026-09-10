@@ -86,7 +86,7 @@ func (env *nativeEnv) Context() context.Context {
 func (env *nativeEnv) Fatal(v any) {
 	release := env.acquireVectorGeneration()
 	defer release()
-	panic(&fatalError{env: env.env, msg: v})
+	panic(envFatalError{value: v})
 }
 
 func (env *nativeEnv) MarkdownConverter() Converter {

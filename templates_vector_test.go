@@ -589,12 +589,13 @@ func TestTemplateVMNativeVectorBoundaryAbortsOnPreflightFailure(t *testing.T) {
 
 func TestTemplateVMNativeVectorBoundaryAbortsOnFatalPanic(t *testing.T) {
 	boundary := native.NewVectorBoundary()
+	fatalValue := errors.New("fatal vector execution")
 	template, err := BuildTemplate(Files{
 		"index.txt": []byte(`{% boundary.Begin(0) %}{% fatal() %}`),
 	}, "index.txt", &BuildOptions{Globals: native.Declarations{
 		"boundary": native.Synchronous((**native.VectorBoundary)(nil), "Begin", "End"),
 		"fatal": native.Synchronous(func(env native.Env) {
-			env.Fatal("fatal vector execution")
+			env.Fatal(fatalValue)
 		}),
 	}})
 	if err != nil {
@@ -612,14 +613,14 @@ func TestTemplateVMNativeVectorBoundaryAbortsOnFatalPanic(t *testing.T) {
 			},
 		})
 	}()
-	if recovered == nil {
-		t.Fatal("run did not panic")
+	if recovered != fatalValue {
+		t.Fatalf("recovered %T, want original fatal value", recovered)
 	}
 	if got, want := strings.Join(lifecycle.calls, ","), "begin:0,abort:0"; got != want {
 		t.Fatalf("calls = %q, want %q", got, want)
 	}
-	if lifecycle.abortErr == nil {
-		t.Fatal("Abort received a nil error")
+	if lifecycle.abortErr != fatalValue {
+		t.Fatalf("Abort received %T, want original fatal value", lifecycle.abortErr)
 	}
 }
 
