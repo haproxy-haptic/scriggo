@@ -5,9 +5,38 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestComparisonReportsRecoveredPanic(t *testing.T) {
+	if err := buildCmd(); err != nil {
+		t.Fatal(err)
+	}
+	src := []byte("package main\nfunc main() {\n_ = missing // ERROR \"[\"\n}\n")
+	err := test(src, "errorcheck", "main.go", nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "test panicked: regexp:") {
+		t.Fatalf("got %v, want regexp panic reported as failure", err)
+	}
+}
+
+func TestRunGcUsesCheckout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.go")
+	src := []byte(`package main
+import "gitlab.com/haproxy-haptic/scriggo/native"
+func main() { var env native.Env; println(env == nil) }
+`)
+	if err := os.WriteFile(path, src, 0600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr, err := runGc(path)
+	if err != nil || code != 0 || len(stdout) != 0 || string(stderr) != "true\n" {
+		t.Fatalf("gc: code=%d stdout=%q stderr=%q err=%v", code, stdout, stderr, err)
+	}
+}
 
 func Test_errorcheck(t *testing.T) {
 

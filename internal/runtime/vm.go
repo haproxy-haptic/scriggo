@@ -771,6 +771,8 @@ func (vm *VM) Run(fn *Function, typeof TypeOfFunc, globals []reflect.Value) erro
 			}
 		case *fatalError:
 			panic(e.Error())
+		case envFatalError:
+			panic(e.value)
 		case stopError:
 			err = e.err
 		}

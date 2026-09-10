@@ -14,6 +14,13 @@ import (
 
 var errNilPointer = runtimeError("runtime error: invalid memory address or nil pointer dereference")
 
+// envFatalError carries the original value across VM boundaries without running defers.
+type envFatalError struct {
+	value any
+}
+
+func (envFatalError) Error() string { return "execution stopped by Env.Fatal" }
+
 // fatalError represents a fatal error. A fatal error cannot be recovered by
 // the running program.
 type fatalError struct {
@@ -233,6 +240,8 @@ func (vm *VM) newReflectPanic(msg string, operandReg int8) *PanicError {
 func (vm *VM) convertPanic(msg any) error {
 	switch err := msg.(type) {
 	case stopError:
+		return err
+	case envFatalError:
 		return err
 	case outError:
 		return vm.newPanic(err)
