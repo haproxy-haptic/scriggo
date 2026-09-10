@@ -1402,12 +1402,14 @@ func BenchmarkTemplateNativeFunctionTrampoline(b *testing.B) {
 }
 
 func BenchmarkTemplateNativeInterfaceMethodFrame(b *testing.B) {
-	template, err := BuildTemplate(Files{
+	files := Files{
 		"index.txt": []byte(`{% for range iterations %}{% _, _ = selector.Select("key") %}{% end %}`),
-	}, "index.txt", &BuildOptions{Globals: native.Declarations{
+	}
+	buildOptions := &BuildOptions{Globals: native.Declarations{
 		"iterations": (*[]int)(nil),
 		"selector":   native.Synchronous((*nativeFunctionTrampolineInterface)(nil), "Select"),
-	}})
+	}}
+	template, err := BuildTemplate(files, "index.txt", buildOptions)
 	if err != nil {
 		b.Fatalf("build: %v", err)
 	}
@@ -1423,10 +1425,19 @@ func BenchmarkTemplateNativeInterfaceMethodFrame(b *testing.B) {
 			frame.SetResultBool(1, true)
 		},
 	)
-	general := cloneNativeFunctionValueCallOpcodes(template, map[runtime.Operation]runtime.Operation{
+	general, err := BuildTemplate(files, "index.txt", buildOptions)
+	if err != nil {
+		b.Fatalf("build general: %v", err)
+	}
+	replacements := map[runtime.Operation]runtime.Operation{
 		runtime.OpMethodValueFrame:      runtime.OpMethodValue,
 		runtime.OpCallNativeFrameMethod: runtime.OpCallIndirect,
-	})
+	}
+	for index := range general.fn.Body {
+		if replacement, found := replacements[general.fn.Body[index].Op]; found {
+			general.fn.Body[index].Op = replacement
+		}
+	}
 	iterations := make([]int, 128)
 	values := map[string]any{
 		"iterations": iterations,
@@ -1449,22 +1460,6 @@ func BenchmarkTemplateNativeInterfaceMethodFrame(b *testing.B) {
 			}
 		})
 	}
-}
-
-func cloneNativeFunctionValueCallOpcodes(
-	template *Template,
-	replacements map[runtime.Operation]runtime.Operation,
-) *Template {
-	clonedTemplate := *template
-	clonedFunction := *template.fn
-	clonedFunction.Body = append([]runtime.Instruction(nil), template.fn.Body...)
-	for index := range clonedFunction.Body {
-		if replacement, found := replacements[clonedFunction.Body[index].Op]; found {
-			clonedFunction.Body[index].Op = replacement
-		}
-	}
-	clonedTemplate.fn = &clonedFunction
-	return &clonedTemplate
 }
 
 func BenchmarkTemplateNativeFunctionCallFrameTypedArgument(b *testing.B) {

@@ -503,40 +503,40 @@ var positionTests = []struct {
 	pos []ast.Position
 }{
 	{"a", []ast.Position{
-		{1, 1, 0, 0}}},
+		{Line: 1, Column: 1, Start: 0, End: 0}}},
 	{"\n", []ast.Position{
-		{1, 1, 0, 0}}},
+		{Line: 1, Column: 1, Start: 0, End: 0}}},
 	{"\n\r", []ast.Position{
-		{1, 1, 0, 1}}},
+		{Line: 1, Column: 1, Start: 0, End: 1}}},
 	{"{{a}}", []ast.Position{
-		{1, 1, 0, 1}, {1, 3, 2, 2}, {1, 4, 3, 4}}},
+		{Line: 1, Column: 1, Start: 0, End: 1}, {Line: 1, Column: 3, Start: 2, End: 2}, {Line: 1, Column: 4, Start: 3, End: 4}}},
 	{"\n{{a}}", []ast.Position{
-		{1, 1, 0, 0},
-		{2, 1, 1, 2}, {2, 3, 3, 3}, {2, 4, 4, 5}}},
+		{Line: 1, Column: 1, Start: 0, End: 0},
+		{Line: 2, Column: 1, Start: 1, End: 2}, {Line: 2, Column: 3, Start: 3, End: 3}, {Line: 2, Column: 4, Start: 4, End: 5}}},
 	{"\n\r{{a}}", []ast.Position{
-		{1, 1, 0, 1},
-		{2, 1, 2, 3}, {2, 3, 4, 4}, {2, 4, 5, 6}}},
+		{Line: 1, Column: 1, Start: 0, End: 1},
+		{Line: 2, Column: 1, Start: 2, End: 3}, {Line: 2, Column: 3, Start: 4, End: 4}, {Line: 2, Column: 4, Start: 5, End: 6}}},
 	{"{{`a`}}", []ast.Position{
-		{1, 1, 0, 1}, {1, 3, 2, 4}, {1, 6, 5, 6}}},
+		{Line: 1, Column: 1, Start: 0, End: 1}, {Line: 1, Column: 3, Start: 2, End: 4}, {Line: 1, Column: 6, Start: 5, End: 6}}},
 	{"{{a.b}}", []ast.Position{
-		{1, 1, 0, 1}, {1, 3, 2, 2}, {1, 4, 3, 3}, {1, 5, 4, 4}, {1, 6, 5, 6}}},
+		{Line: 1, Column: 1, Start: 0, End: 1}, {Line: 1, Column: 3, Start: 2, End: 2}, {Line: 1, Column: 4, Start: 3, End: 3}, {Line: 1, Column: 5, Start: 4, End: 4}, {Line: 1, Column: 6, Start: 5, End: 6}}},
 	{"{{1\t+\n2}}", []ast.Position{
-		{1, 1, 0, 1}, {1, 3, 2, 2}, {1, 5, 4, 4}, {2, 1, 6, 6}, {2, 2, 7, 8}}},
+		{Line: 1, Column: 1, Start: 0, End: 1}, {Line: 1, Column: 3, Start: 2, End: 2}, {Line: 1, Column: 5, Start: 4, End: 4}, {Line: 2, Column: 1, Start: 6, End: 6}, {Line: 2, Column: 2, Start: 7, End: 8}}},
 	{"{{a}}\n{{b}}", []ast.Position{
-		{1, 1, 0, 1}, {1, 3, 2, 2}, {1, 4, 3, 4}, {1, 6, 5, 5},
-		{2, 1, 6, 7}, {2, 3, 8, 8}, {2, 4, 9, 10}}},
+		{Line: 1, Column: 1, Start: 0, End: 1}, {Line: 1, Column: 3, Start: 2, End: 2}, {Line: 1, Column: 4, Start: 3, End: 4}, {Line: 1, Column: 6, Start: 5, End: 5},
+		{Line: 2, Column: 1, Start: 6, End: 7}, {Line: 2, Column: 3, Start: 8, End: 8}, {Line: 2, Column: 4, Start: 9, End: 10}}},
 	{"<b c=\n{{\na}}>", []ast.Position{
-		{1, 1, 0, 5}, {2, 1, 6, 7}, {3, 1, 9, 9}, {3, 2, 10, 11}, {3, 4, 12, 12}}},
+		{Line: 1, Column: 1, Start: 0, End: 5}, {Line: 2, Column: 1, Start: 6, End: 7}, {Line: 3, Column: 1, Start: 9, End: 9}, {Line: 3, Column: 2, Start: 10, End: 11}, {Line: 3, Column: 4, Start: 12, End: 12}}},
 	{"{{a}}\n<b\nc=\"{{a}}\">\n{{a}}", []ast.Position{
-		{1, 1, 0, 1}, {1, 3, 2, 2}, {1, 4, 3, 4}, {1, 6, 5, 11},
-		{3, 4, 12, 13}, {3, 6, 14, 14}, {3, 7, 15, 16}, {3, 9, 17, 19},
-		{4, 1, 20, 21}, {4, 3, 22, 22}, {4, 4, 23, 24}}},
+		{Line: 1, Column: 1, Start: 0, End: 1}, {Line: 1, Column: 3, Start: 2, End: 2}, {Line: 1, Column: 4, Start: 3, End: 4}, {Line: 1, Column: 6, Start: 5, End: 11},
+		{Line: 3, Column: 4, Start: 12, End: 13}, {Line: 3, Column: 6, Start: 14, End: 14}, {Line: 3, Column: 7, Start: 15, End: 16}, {Line: 3, Column: 9, Start: 17, End: 19},
+		{Line: 4, Column: 1, Start: 20, End: 21}, {Line: 4, Column: 3, Start: 22, End: 22}, {Line: 4, Column: 4, Start: 23, End: 24}}},
 	{"a<![CDATA[a\nb]]>b{{a}}", []ast.Position{
-		{1, 1, 0, 16}, {2, 6, 17, 18}, {2, 8, 19, 19}, {2, 9, 20, 21}}},
+		{Line: 1, Column: 1, Start: 0, End: 16}, {Line: 2, Column: 6, Start: 17, End: 18}, {Line: 2, Column: 8, Start: 19, End: 19}, {Line: 2, Column: 9, Start: 20, End: 21}}},
 	{"a{# a #}b", []ast.Position{
-		{1, 1, 0, 0}, {1, 2, 1, 7}, {1, 9, 8, 8}}},
+		{Line: 1, Column: 1, Start: 0, End: 0}, {Line: 1, Column: 2, Start: 1, End: 7}, {Line: 1, Column: 9, Start: 8, End: 8}}},
 	{"a{# 本 #}b", []ast.Position{
-		{1, 1, 0, 0}, {1, 2, 1, 9}, {1, 9, 10, 10}}},
+		{Line: 1, Column: 1, Start: 0, End: 0}, {Line: 1, Column: 2, Start: 1, End: 9}, {Line: 1, Column: 9, Start: 10, End: 10}}},
 }
 
 var scanTagTests = []struct {

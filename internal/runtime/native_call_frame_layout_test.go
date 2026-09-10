@@ -46,8 +46,12 @@ func TestNativeFunctionFrameLayoutMatchesFallback(t *testing.T) {
 				output:        [4]Addr{55, 66, 77, 88},
 				variadicCount: test.variadicCount,
 			}
-			fallback := fast
-			fallback.frameLayout = nil
+			fallback := nativeFunctionCallState{
+				functionType:  test.functionType,
+				input:         fast.input,
+				output:        fast.output,
+				variadicCount: test.variadicCount,
+			}
 			last := test.functionType.NumIn()
 			if test.functionType.IsVariadic() && test.variadicCount != NoVariadicArgs {
 				last--

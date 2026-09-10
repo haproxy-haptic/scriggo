@@ -17,7 +17,9 @@ import (
 	"gitlab.com/haproxy-haptic/scriggo/internal/compiler/types"
 )
 
-var untypedBoolTypeInfo = &typeInfo{Type: boolType, Properties: propertyUntyped}
+func newUntypedBoolTypeInfo() *typeInfo {
+	return &typeInfo{Type: boolType, Properties: propertyUntyped}
+}
 
 // checkIdentifier checks an identifier. If used, ident is marked as "used".
 func (tc *typechecker) checkIdentifier(ident *ast.Identifier, used bool) *typeInfo {
@@ -144,6 +146,7 @@ func (tc *typechecker) checkIdentifier(ident *ast.Identifier, used bool) *typeIn
 		tc.compilation.iteaToUsingCheck[ident.Name] = uc
 	}
 
+	ti = ti.copyIfConstant()
 	tc.compilation.typeInfos[ident] = ti
 	return ti
 }
@@ -1276,7 +1279,7 @@ func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2
 							op != ast.OperatorContains && op != ast.OperatorNotContains {
 							return nil, fmt.Errorf("operator %s not defined on %s", op, t2.Type.Kind())
 						}
-						return untypedBoolTypeInfo, nil
+						return newUntypedBoolTypeInfo(), nil
 					}
 					t1.setValue(t2.Type)
 					t1 = &typeInfo{Type: t2.Type, Constant: c}
@@ -1293,7 +1296,7 @@ func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2
 							op != ast.OperatorContains && op != ast.OperatorNotContains {
 							return nil, fmt.Errorf("operator %s not defined on %s", op, t1.Type.Kind())
 						}
-						return untypedBoolTypeInfo, nil
+						return newUntypedBoolTypeInfo(), nil
 					}
 					t2.setValue(t1.Type)
 					t2 = &typeInfo{Type: t1.Type, Constant: c}
@@ -1394,7 +1397,7 @@ func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2
 		} else {
 			t2.setValue(nil)
 		}
-		return untypedBoolTypeInfo, nil
+		return newUntypedBoolTypeInfo(), nil
 	}
 
 	if isUntyped {
@@ -1473,7 +1476,7 @@ func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2
 		} else if !isOrdered(t1) {
 			return nil, fmt.Errorf("operator %s not defined on %s", op, t1.Type.Kind())
 		}
-		return untypedBoolTypeInfo, nil
+		return newUntypedBoolTypeInfo(), nil
 	}
 
 	if t1.Type != t2.Type {
@@ -2804,6 +2807,7 @@ func (tc *typechecker) checkDefault(expr *ast.Default, show bool) typeInfoPair {
 
 	toBeEmitted := tc.toBeEmitted
 	if tis[0] != nil {
+		tis[0] = tis[0].copyIfConstant()
 		tc.compilation.typeInfos[expr.Expr1] = tis[0]
 		tc.toBeEmitted = false
 	}
@@ -3239,6 +3243,7 @@ func (tc *typechecker) checkPackageSelector(expr *ast.Selector) (*typeInfo, bool
 			}
 		}
 	}
+	ti = ti.copyIfConstant()
 	tc.compilation.typeInfos[expr] = ti
 	tc.scopes.Use(ident.Name)
 
