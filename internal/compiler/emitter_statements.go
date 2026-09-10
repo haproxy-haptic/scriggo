@@ -578,7 +578,7 @@ func (em *emitter) emitAssignmentNode(node *ast.Assignment) {
 
 		case *ast.Index:
 			exprType := em.typ(v.Expr)
-			expr := em.emitExpr(v.Expr, exprType)
+			expr, writeback := em.emitAssignmentReceiver(v.Expr)
 			indexType := intType
 			if exprType.Kind() == reflect.Map {
 				indexType = exprType.Key()
@@ -592,7 +592,10 @@ func (em *emitter) emitAssignmentNode(node *ast.Assignment) {
 					addresses[i] = em.addressLocalMapIndex(expr, index, exprType, pos, node.Type)
 				}
 			case reflect.Slice, reflect.Array:
-				if nonLocalSlice, ok := em.varStore.nonLocalVarIndex(v.Expr); ok {
+				if writeback != nil {
+					addresses[i] = em.addressSliceIndex(expr, index, exprType, pos, node.Type)
+					addresses[i].writeback = writeback
+				} else if nonLocalSlice, ok := em.varStore.nonLocalVarIndex(v.Expr); ok {
 					addresses[i] = em.addressGlobalSliceIndex(nonLocalSlice, expr, index, exprType, pos, node.Type)
 				} else {
 					addresses[i] = em.addressSliceIndex(expr, index, exprType, pos, node.Type)
@@ -608,7 +611,7 @@ func (em *emitter) emitAssignmentNode(node *ast.Assignment) {
 				expr = op.Expr
 			}
 			typ := em.typ(expr)
-			reg := em.emitExpr(expr, typ)
+			reg, writeback := em.emitAssignmentReceiver(expr)
 			var field reflect.StructField
 			if typ.Kind() == reflect.Pointer {
 				field, _ = typ.Elem().FieldByName(v.Ident)
@@ -616,7 +619,10 @@ func (em *emitter) emitAssignmentNode(node *ast.Assignment) {
 				field, _ = typ.FieldByName(v.Ident)
 			}
 			index := em.fb.makeFieldIndex(field.Index)
-			if nonLocalStruct, ok := em.varStore.nonLocalVarIndex(expr); ok {
+			if writeback != nil {
+				addresses[i] = em.addressLocalStructSelector(reg, index, typ, pos, node.Type)
+				addresses[i].writeback = writeback
+			} else if nonLocalStruct, ok := em.varStore.nonLocalVarIndex(expr); ok {
 				addresses[i] = em.addressNonLocalStructSelector(nonLocalStruct, reg, index, typ, pos, node.Type)
 			} else {
 				addresses[i] = em.addressLocalStructSelector(reg, index, typ, pos, node.Type)

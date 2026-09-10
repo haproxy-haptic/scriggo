@@ -16,10 +16,10 @@ func main() {
 
 	var t IntSlice
 	_ = t
-	_ = append(t, []bool{}...)      // ERROR `cannot use []bool{} (type []bool) as type []int in append`
-	_ = append(t, map[int]int{}...) // ERROR `cannot use map[int]int{} (type map[int]int) as type []int in append`
-	_ = append(t, 5 ...)   // ERROR `cannot use 5 (type untyped int) as type []int in append`
-	_ = append(t, []Int{}...)      // ERROR `cannot use []Int{} (type []Int) as type []int in append`
+	_ = append(t, []bool{}...)      // ERROR `cannot use []bool{} (type []bool) as type IntSlice in append`
+	_ = append(t, map[int]int{}...) // ERROR `cannot use map[int]int{} (type map[int]int) as type IntSlice in append`
+	_ = append(t, 5 ...)   // ERROR `cannot use 5 (type untyped int) as type IntSlice in append`
+	_ = append(t, []Int{}...)      // ERROR `cannot use []Int{} (type []Int) as type IntSlice in append`
 	_ = append(t, []int{}...)
 
 	var p []Int
@@ -32,9 +32,9 @@ func main() {
 
 	var q []interface{}
 	_ = q
-	_ = append(q, []bool{}...)
+	_ = append(q, []bool{}...) // ERROR `cannot use []bool{} (type []bool) as type []interface {} in append`
 	_ = append(q, map[int]int{}...) // ERROR `cannot use map[int]int{} (type map[int]int) as type []interface {} in append`
 	_ = append(q, 5 ...)   // ERROR `cannot use 5 (type untyped int) as type []interface {} in append`
-	_ = append(q, []int{}...)
-	_ = append(q, []Int{}...)
+	_ = append(q, []int{}...) // ERROR `cannot use []int{} (type []int) as type []interface {} in append`
+	_ = append(q, []Int{}...) // ERROR `cannot use []Int{} (type []Int) as type []interface {} in append`
 }

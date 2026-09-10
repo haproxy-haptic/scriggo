@@ -907,12 +907,18 @@ func (em *emitter) emitTypeConversionToRegister(
 	markdownToHTML bool,
 ) int8 {
 	reg := em.fb.newRegister(convertType.Kind())
+	em.emitTypeConversion(argReg, reg, argType, convertType, markdownToHTML)
+	return reg
+}
+
+func (em *emitter) emitTypeConversion(argReg, reg int8, argType, convertType reflect.Type, markdownToHTML bool) {
 	if markdownToHTML {
 		em.changeRegisterConvertFormat(false, argReg, reg, argType, convertType)
+	} else if convertType.Kind() == reflect.String && argType.Kind() != reflect.String && argType.Kind() != reflect.Interface {
+		em.fb.emitConvert(argReg, convertType, reg, argType.Kind())
 	} else {
 		em.changeRegister(false, argReg, reg, argType, convertType)
 	}
-	return reg
 }
 
 // emitBuiltin emits instructions for a builtin call, writing the result, if

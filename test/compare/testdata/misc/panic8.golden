@@ -1,1 +1,8 @@
-panic: runtime error: integer divide by zero
+panic: runtime error: integer divide by zero [recovered]
+		panic: runtime error: integer divide by zero
+	
+	scriggo goroutine 1 [running]:
+	main.()
+		main:19
+	main.main()
+		main:???

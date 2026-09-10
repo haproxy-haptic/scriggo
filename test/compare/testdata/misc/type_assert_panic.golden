@@ -1,1 +1,5 @@
-panic: interface conversion: interface {} is int, not string
+panic: interface conversion: interface {} is int, not string (value: 10)
+	
+	scriggo goroutine 1 [running]:
+	main.main()
+		main:7

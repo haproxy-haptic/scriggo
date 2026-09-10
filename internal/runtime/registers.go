@@ -376,6 +376,15 @@ func (vm *VM) markBatchValueEscaped(value reflect.Value) {
 	}
 }
 
+func snapshotValue(v reflect.Value) reflect.Value {
+	if v.Kind() != reflect.Array && v.Kind() != reflect.Struct && !v.CanAddr() {
+		return v
+	}
+	copied := reflect.New(v.Type()).Elem()
+	copied.Set(v)
+	return copied
+}
+
 func (vm *VM) setFromReflectValue(r int8, v reflect.Value) registerType {
 	switch v.Kind() {
 	case reflect.Bool:
@@ -399,8 +408,11 @@ func (vm *VM) setFromReflectValue(r int8, v reflect.Value) registerType {
 	case reflect.Interface:
 		vm.setGeneral(r, v.Elem())
 		return generalRegister
-	default:
+	case reflect.Array, reflect.Struct:
 		vm.setGeneral(r, v)
+		return generalRegister
+	default:
+		vm.setGeneral(r, snapshotValue(v))
 		return generalRegister
 	}
 }

@@ -1,2 +1,8 @@
 panic: 1 [recovered]
 		panic: 2
+	
+	scriggo goroutine 1 [running]:
+	main.()
+		main:8
+	main.main()
+		main:???

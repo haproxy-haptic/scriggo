@@ -1,1 +1,5 @@
 panic: a panic!
+	
+	scriggo goroutine 1 [running]:
+	main.main()
+		main:6

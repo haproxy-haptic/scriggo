@@ -177,6 +177,9 @@ func (vm *VM) captureStackFrames() []StackFrame {
 			ppc = vm.pc - 1
 		} else {
 			call := vm.calls[i]
+			if call.status == deferred {
+				continue
+			}
 			fn = call.cl.fn
 			if call.status == tailed {
 				ppc = call.pc - 1
@@ -275,18 +278,7 @@ func (vm *VM) convertPanic(msg any) error {
 		}
 		fallthrough
 	case OpCallNative, OpCallNativeValue, OpCallNativeFrameMethod:
-		switch msg := msg.(type) {
-		case runtimeError:
-			break
-		case *fatalError:
-			// TODO: check env.
-			return msg
-		case runtime.Error:
-			// TODO: check env.
-			break
-		default:
-			return vm.newPanic(msg)
-		}
+		return vm.nativePanic(msg)
 	case OpClose:
 		if err, ok := msg.(runtime.Error); ok {
 			switch s := err.Error(); s {
@@ -315,6 +307,14 @@ func (vm *VM) convertPanic(msg any) error {
 			return err
 		}
 	case OpIf, -OpIf:
+		if message, ok := msg.(string); ok {
+			const prefix = "reflect.Value.Equal: values of type "
+			const suffix = " are not comparable"
+			if strings.HasPrefix(message, prefix) && strings.HasSuffix(message, suffix) {
+				typ := strings.TrimSuffix(strings.TrimPrefix(message, prefix), suffix)
+				return vm.newPanic(runtimeError("runtime error: comparing uncomparable type " + typ))
+			}
+		}
 		if err, ok := msg.(runtime.Error); ok {
 			if s := err.Error(); strings.HasPrefix(s, "runtime error: comparing uncomparable type ") {
 				return vm.newPanic(runtimeError(s))
@@ -395,6 +395,21 @@ func (vm *VM) convertPanic(msg any) error {
 		msg:  msg,
 		pos:  info.Position,
 		path: info.Path,
+	}
+}
+
+func (vm *VM) nativePanic(value any) error {
+	switch err := value.(type) {
+	case stopError:
+		return err
+	case envFatalError:
+		return err
+	case *fatalError:
+		return err
+	case *PanicError:
+		return err
+	default:
+		return vm.newPanic(value)
 	}
 }
 

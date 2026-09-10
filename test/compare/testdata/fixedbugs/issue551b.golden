@@ -1,1 +1,5 @@
 panic: interface conversion: interface is nil, not io.Reader
+	
+	scriggo goroutine 1 [running]:
+	main.main()
+		main:11
