@@ -1556,6 +1556,10 @@ func (tc *typechecker) checkBuiltinCall(expr *ast.Call) []*typeInfo {
 			}
 			arg1 := expr.Args[1]
 			t := tc.checkExpr(arg1)
+			if t.Nil() {
+				tc.compilation.typeInfos[arg1] = tc.nilOf(slice.Type)
+				return []*typeInfo{{Type: slice.Type}}
+			}
 			// Handle the special case:
 			//
 			//     append(t, s...)
@@ -1604,7 +1608,11 @@ func (tc *typechecker) checkBuiltinCall(expr *ast.Call) []*typeInfo {
 						panic(tc.errorf(expr, "%s", err))
 					}
 				}
-				t.setValue(elemType)
+				if t.Nil() {
+					tc.compilation.typeInfos[el] = tc.nilOf(elemType)
+				} else {
+					t.setValue(elemType)
+				}
 			}
 		}
 		return []*typeInfo{{Type: slice.Type}}
