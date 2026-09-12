@@ -3,10 +3,19 @@
   "extends": [
     "gitlab>haproxy-haptic/renovate-runner"
   ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__fixtures__/**"
+  ],
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.gitlab-ci\\.yml$/"],
+      "managerFilePatterns": [
+        "/^\\.gitlab-ci\\.yml$/"
+      ],
       "matchStrings": [
         "GO_VERSION:\\s*[\"']?(?<currentValue>[\\d.]+)[\"']?"
       ],
@@ -16,6 +25,9 @@
     }
   ],
   "gomod": {
-    "managerFilePatterns": ["go.mod", "test/go.mod"]
+    "managerFilePatterns": [
+      "go.mod",
+      "test/go.mod"
+    ]
   }
 }
