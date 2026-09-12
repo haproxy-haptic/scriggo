@@ -520,7 +520,10 @@ func (vm *VM) appendSlice(first int8, length int, slice reflect.Value) reflect.V
 		}
 		regs := vm.regs.general[vm.fp[3]+Addr(first):]
 		for i, j := 0, ol; i < length; i, j = i+1, j+1 {
-			s[j] = regs[i].Interface()
+			s[j] = nil
+			if regs[i].IsValid() {
+				s[j] = regs[i].Interface()
+			}
 		}
 		return reflect.ValueOf(s)
 	default:
@@ -568,7 +571,11 @@ func (vm *VM) appendSlice(first int8, length int, slice reflect.Value) reflect.V
 		default:
 			regs := vm.regs.general[vm.fp[3]+Addr(first):]
 			for i, j := 0, ol; i < length; i, j = i+1, j+1 {
-				slice.Index(j).Set(regs[i])
+				if regs[i].IsValid() {
+					slice.Index(j).Set(regs[i])
+				} else {
+					slice.Index(j).SetZero()
+				}
 			}
 		}
 		return slice
