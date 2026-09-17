@@ -11,9 +11,65 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"weak"
 
 	"gitlab.com/haproxy-haptic/scriggo/native"
 )
+
+func TestPutPooledVMReleasesExposedVectorEnvironment(t *testing.T) {
+	for _, leased := range []bool{false, true} {
+		name := "unleased"
+		if leased {
+			name = "leased"
+		}
+		t.Run(name, func(t *testing.T) {
+			vm, payload := pooledVectorPayload(t, leased)
+			runtime.GC()
+			if payload.Value() != nil {
+				t.Fatal("idle pooled VM retains the previous vector invocation")
+			}
+			runtime.KeepAlive(vm)
+		})
+	}
+}
+
+func pooledVectorPayload(t *testing.T, leased bool) (*VM, weak.Pointer[[1024]byte]) {
+	t.Helper()
+	type contextKey struct{}
+	payload := new([1024]byte)
+	ctx := context.WithValue(context.Background(), contextKey{}, payload)
+	authority := native.NewVectorAuthority()
+	state, err := NewVectorState(authority, 1, nil, []context.Context{ctx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Activate(authority, 0); err != nil {
+		t.Fatal(err)
+	}
+	environment := &env{ctx: ctx, vector: state}
+	vm := getPooledVM(environment, ctx)
+	vm.nativeEnv.vectorGeneration = state.capture()
+	if leased {
+		lease, err := state.acquireInvocation(state.capture())
+		if err != nil {
+			t.Fatal(err)
+		}
+		vm.nativeEnv.vectorLease = lease
+	}
+	exposed := vm.nativeEnvForExposure()
+	if exposed.Context().Value(contextKey{}) != payload {
+		t.Fatal("native call did not receive the invocation context")
+	}
+	if leased {
+		vm.nativeEnv.vectorLease.close()
+	}
+	state.Close()
+	putPooledVM(vm)
+	if exposed.env != environment || environment.ctx != ctx {
+		t.Fatal("pool return mutated an escaped native environment")
+	}
+	return vm, weak.Make(payload)
+}
 
 // A VM returned to the pool must hold nothing from the render it just ran.
 //
