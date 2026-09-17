@@ -126,6 +126,9 @@ func putPooledVM(vm *VM) {
 	vm.profiler = nil
 	clear(vm.nativeArgs[:])
 	vm.nativeCall = NativeFunction{}
+	vm.exposedNativeEnv = nil
+	vm.exposedVectorGeneration = 0
+	vm.exposedVectorLease = nil
 
 	// Reset stack pointers to full capacity
 	vm.st[0] = Addr(len(vm.regs.int))
