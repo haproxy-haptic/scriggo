@@ -296,6 +296,9 @@ func (em *emitter) setFunctionVarRefs(fn *runtime.Function, closureVars []ast.Up
 		if v.Declaration == nil {
 			refs[i] = em.varStore.predefVarIndex(v.NativeValue, v.NativeValueType, v.NativePkg, v.NativeName)
 			globalRefs[i] = refs[i]
+			if em.fb.fn.VarRefs != nil {
+				globalRefs[i] = em.fb.fn.GlobalVarRefs[refs[i]]
+			}
 			em.varStore.setPredefVarRef(fn, v.NativeValue, int16(i))
 			continue
 		}
