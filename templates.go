@@ -268,8 +268,12 @@ func (t *Template) Run(out io.Writer, vars map[string]any, options *RunOptions) 
 	if err := validateVectorRunInput(vars, options); err != nil {
 		return err
 	}
-	vm := runtime.NewVM()
-	return t.run(vm, out, initGlobalVariables(t.globals, vars), options)
+	if t.BatchSafe() {
+		vm := runtime.AcquireVM()
+		defer runtime.ReleaseVM(vm)
+		return t.run(vm, out, initGlobalVariables(t.globals, vars), options)
+	}
+	return t.run(runtime.NewVM(), out, initGlobalVariables(t.globals, vars), options)
 }
 
 // BatchRun describes one isolated execution in [Template.RunBatch].
