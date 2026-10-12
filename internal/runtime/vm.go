@@ -415,6 +415,20 @@ func NewVM() *VM {
 	return vm
 }
 
+// AcquireVM borrows a VM for an execution certified by ValidateBatchProgram.
+func AcquireVM() *VM {
+	vm := vmPool.get()
+	vm.main = true
+	vm.installExecutionState()
+	return vm
+}
+
+// ReleaseVM releases every execution reference before returning a borrowed VM.
+func ReleaseVM(vm *VM) {
+	vm.main = false
+	putPooledVM(vm)
+}
+
 func (vm *VM) installExecutionState() {
 	state := &executionState{}
 	state.nativeEnv.env = &state.env
