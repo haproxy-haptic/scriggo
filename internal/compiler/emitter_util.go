@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // changeRegister emits the code that move the content of register src to

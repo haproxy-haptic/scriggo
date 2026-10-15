@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 func TestVectorStatePrevalidatesEverySlotBeforeMutation(t *testing.T) {

@@ -7,7 +7,7 @@ package types
 import (
 	"reflect"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // definedType represents a type defined in the Scriggo compiled code with a

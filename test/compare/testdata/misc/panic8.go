@@ -7,7 +7,7 @@ package main
 import (
 	"runtime"
 
-	"gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
+	"github.com/haproxy-haptic/scriggo/test/compare/testpkg"
 )
 
 func main() {

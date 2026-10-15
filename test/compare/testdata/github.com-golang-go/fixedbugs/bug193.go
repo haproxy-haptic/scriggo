@@ -1,4 +1,4 @@
-// skip : problem in mode 'errorcheck' https://gitlab.com/haproxy-haptic/scriggo/issues/417
+// skip : problem in mode 'errorcheck' https://github.com/open2b/scriggo/issues/417
 
 // errorcheck
 

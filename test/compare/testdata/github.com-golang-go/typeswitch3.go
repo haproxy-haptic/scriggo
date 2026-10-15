@@ -1,4 +1,4 @@
-// skip : interface definition (see https://gitlab.com/haproxy-haptic/scriggo/issues/194)
+// skip : interface definition (see https://github.com/open2b/scriggo/issues/194)
 
 // errorcheck
 

@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"time"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 // A Duration represents the elapsed time between two instants

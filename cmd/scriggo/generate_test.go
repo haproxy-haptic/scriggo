@@ -36,7 +36,7 @@ func Test_renderPackages(t *testing.T) {
 				"fmt"
 			)
 
-			import "gitlab.com/haproxy-haptic/scriggo/native"
+			import "github.com/haproxy-haptic/scriggo/native"
 			import "reflect"
 
 			func init() {
@@ -91,7 +91,7 @@ func Test_renderPackages(t *testing.T) {
 				tar "archive/tar"
 			)
 
-			import "gitlab.com/haproxy-haptic/scriggo/native"
+			import "github.com/haproxy-haptic/scriggo/native"
 			import "reflect"
 
 			func init() {
@@ -148,7 +148,7 @@ func Test_renderPackages(t *testing.T) {
 				"fmt"
 			)
 
-			import "gitlab.com/haproxy-haptic/scriggo/native"
+			import "github.com/haproxy-haptic/scriggo/native"
 			import "reflect"
 
 			func init() {
@@ -208,7 +208,7 @@ func Test_renderPackages(t *testing.T) {
 				"fmt"
 			)
 
-			import "gitlab.com/haproxy-haptic/scriggo/native"
+			import "github.com/haproxy-haptic/scriggo/native"
 
 			func init() {
 				packages = make(native.Packages, 1)
@@ -365,7 +365,7 @@ func init() {
 	conf := &pkgs.Config{
 		Mode: 1023, // this value has been taken from 'generate.go'.
 	}
-	packages, err := pkgs.Load(conf, "gitlab.com/haproxy-haptic/scriggo/cmd/scriggo/testpkg")
+	packages, err := pkgs.Load(conf, "github.com/haproxy-haptic/scriggo/cmd/scriggo/testpkg")
 	if err != nil {
 		panic(err)
 	}

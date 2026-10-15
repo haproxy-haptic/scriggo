@@ -15,8 +15,8 @@ import (
 	"sync"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 type nativeFunctionTrampolineContextKey struct{}

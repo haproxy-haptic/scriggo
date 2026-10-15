@@ -12,8 +12,8 @@ import (
 	"io/fs"
 	"os"
 
-	"gitlab.com/haproxy-haptic/scriggo"
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 //go:generate scriggo import -v -o packages.go

@@ -13,11 +13,11 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/ast/astutil"
-	"gitlab.com/haproxy-haptic/scriggo/internal/compiler"
-	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast/astutil"
+	"github.com/haproxy-haptic/scriggo/internal/compiler"
+	"github.com/haproxy-haptic/scriggo/internal/fstest"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 func TestInitGlobals(t *testing.T) {

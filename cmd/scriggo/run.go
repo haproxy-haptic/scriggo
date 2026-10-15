@@ -19,8 +19,8 @@ import (
 	"time"
 	"unicode"
 
-	"gitlab.com/haproxy-haptic/scriggo"
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 // runBufSize is the size of the i/o buffer used by the run command.

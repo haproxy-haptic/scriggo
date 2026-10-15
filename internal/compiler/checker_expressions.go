@@ -13,8 +13,8 @@ import (
 	"strings"
 	"unicode"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/compiler/types"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/compiler/types"
 )
 
 func newUntypedBoolTypeInfo() *typeInfo {
@@ -1470,11 +1470,11 @@ func (tc *typechecker) binaryOp(expr1 ast.Expression, op ast.OperatorType, expr2
 		if op == ast.OperatorEqual || op == ast.OperatorNotEqual ||
 			op == ast.OperatorContains || op == ast.OperatorNotContains {
 			if !t1.Type.Comparable() {
-				// https://gitlab.com/haproxy-haptic/scriggo/issues/368
+				// https://github.com/open2b/scriggo/issues/368
 				return nil, fmt.Errorf("%s cannot be compared", t1.Type)
 			}
 			if !t2.Type.Comparable() {
-				// https://gitlab.com/haproxy-haptic/scriggo/issues/368
+				// https://github.com/open2b/scriggo/issues/368
 				return nil, fmt.Errorf("%s cannot be compared", t2.Type)
 			}
 		} else if !isOrdered(t1) {

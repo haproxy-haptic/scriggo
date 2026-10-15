@@ -15,7 +15,7 @@ import (
 	"strings"
 	"unicode"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // panicErrorWithStack creates a PanicError from a recovered value with Go stack trace.

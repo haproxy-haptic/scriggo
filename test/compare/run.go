@@ -424,7 +424,7 @@ func goldenCompare(testPath string, got []byte) error {
 // at https://pkg.go.dev/go/build#hdr-Build_Constraints.
 //
 // TODO(Gianluca): this function still needs to support the old format of build
-// tags. Please refer to the issue https://gitlab.com/haproxy-haptic/scriggo/issues/956.
+// tags. Please refer to the issue https://github.com/open2b/scriggo/issues/956.
 func isBuildConstraints(line string) bool {
 	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, "//") {
@@ -549,9 +549,9 @@ func runGc(path string) (int, []byte, []byte, error) {
 			return 0, nil, nil, err
 		}
 		goMod := strings.Join([]string{
-			`module gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg`,
-			`replace gitlab.com/haproxy-haptic/scriggo => ` + strconv.Quote(scriggoAbsPath),
-			`require gitlab.com/haproxy-haptic/scriggo v0.0.0`,
+			`module github.com/haproxy-haptic/scriggo/test/compare/testpkg`,
+			`replace github.com/haproxy-haptic/scriggo => ` + strconv.Quote(scriggoAbsPath),
+			`require github.com/haproxy-haptic/scriggo v0.0.0`,
 		}, "\n")
 		err = os.WriteFile(filepath.Join(tmpDir, "testpkg", "go.mod"), []byte(goMod), 0664)
 		if err != nil {
@@ -583,8 +583,8 @@ func runGc(path string) (int, []byte, []byte, error) {
 	{
 		data := strings.Join([]string{
 			`module scriggo-gc-test`,
-			`replace gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg => ./testpkg`,
-			`replace gitlab.com/haproxy-haptic/scriggo => ` + strconv.Quote(scriggoAbsPath),
+			`replace github.com/haproxy-haptic/scriggo/test/compare/testpkg => ./testpkg`,
+			`replace github.com/haproxy-haptic/scriggo => ` + strconv.Quote(scriggoAbsPath),
 		}, "\n")
 		err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(data), 0664)
 		if err != nil {

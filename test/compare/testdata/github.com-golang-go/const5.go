@@ -1,4 +1,4 @@
-// skip : constant declaration depending from a variable https://gitlab.com/haproxy-haptic/scriggo/issues/206
+// skip : constant declaration depending from a variable https://github.com/open2b/scriggo/issues/206
 
 // errorcheck
 

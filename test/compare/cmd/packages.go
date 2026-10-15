@@ -4,7 +4,7 @@
 package main
 
 import (
-	testpkg "gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
+	testpkg "github.com/haproxy-haptic/scriggo/test/compare/testpkg"
 	tar "archive/tar"
 	bufio "bufio"
 	bytes "bytes"
@@ -40,7 +40,7 @@ import (
 	utf8 "unicode/utf8"
 )
 
-import "gitlab.com/haproxy-haptic/scriggo/native"
+import "github.com/haproxy-haptic/scriggo/native"
 
 func init() {
 	packages = make(native.Packages, 34)
@@ -296,7 +296,7 @@ func init() {
 		Name:         "fmt",
 		Declarations: decs,
 	}
-	// "gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
+	// "github.com/haproxy-haptic/scriggo/test/compare/testpkg"
 	decs = make(native.Declarations, 64)
 	decs["A"] = &testpkg.A
 	decs["B"] = &testpkg.B
@@ -362,7 +362,7 @@ func init() {
 	decs["TruePtr"] = reflect.TypeFor[testpkg.TruePtr]()
 	decs["Tv"] = reflect.TypeFor[testpkg.Tv]()
 	decs["Value"] = &testpkg.Value
-	packages["gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"] = native.Package{
+	packages["github.com/haproxy-haptic/scriggo/test/compare/testpkg"] = native.Package{
 		Name:         "testpkg",
 		Declarations: decs,
 	}

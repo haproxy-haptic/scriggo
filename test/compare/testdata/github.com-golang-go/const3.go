@@ -1,4 +1,4 @@
-// skip : methods declarations not supported (see https://gitlab.com/haproxy-haptic/scriggo/issues/194)
+// skip : methods declarations not supported (see https://github.com/open2b/scriggo/issues/194)
 
 // run
 

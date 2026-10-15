@@ -178,7 +178,7 @@ var commandsHelp = map[string]func(){
 var commands = map[string]func(){
 	"bug": func() {
 		flag.Usage = commandsHelp["bug"]
-		fmt.Fprintf(os.Stdout, "If you encountered an issue, report it at:\n\n\thttps://gitlab.com/haproxy-haptic/scriggo/issues/new\n\n")
+		fmt.Fprintf(os.Stdout, "If you encountered an issue, report it at:\n\n\thttps://github.com/haproxy-haptic/scriggo/issues/new\n\n")
 		exit(0)
 	},
 	"build": func() {

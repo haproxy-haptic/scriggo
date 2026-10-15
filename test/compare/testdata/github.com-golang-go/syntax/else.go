@@ -1,4 +1,4 @@
-// skip : misleading error message with 'else' (https://gitlab.com/haproxy-haptic/scriggo/issues/825)
+// skip : misleading error message with 'else' (https://github.com/open2b/scriggo/issues/825)
 
 // errorcheck
 

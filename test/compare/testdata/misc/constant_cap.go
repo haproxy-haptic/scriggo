@@ -1,6 +1,6 @@
 // run
 
-// For the commented code see issue https://gitlab.com/haproxy-haptic/scriggo/issues/206.
+// For the commented code see issue https://github.com/open2b/scriggo/issues/206.
 
 package main
 

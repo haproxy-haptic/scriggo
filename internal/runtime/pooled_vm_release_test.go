@@ -13,7 +13,7 @@ import (
 	"testing"
 	"weak"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 func TestPutPooledVMReleasesExposedVectorEnvironment(t *testing.T) {

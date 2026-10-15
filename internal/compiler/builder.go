@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"strconv"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // Define some constants that define limits of the implementation.
@@ -589,7 +589,7 @@ func (fb *functionBuilder) end() {
 		fb.emitGoRenderWait()
 	}
 	fb.emitReturn()
-	// https://gitlab.com/haproxy-haptic/scriggo/issues/537
+	// https://github.com/open2b/scriggo/issues/537
 	// if len(fn.Body) == 0 || fn.Body[len(fn.Body)-1].Op != runtime.OpReturn {
 	// 	fb.emitReturn()
 	// }

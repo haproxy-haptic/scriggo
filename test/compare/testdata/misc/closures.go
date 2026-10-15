@@ -60,7 +60,7 @@ func main() {
 		println(a)
 	}
 
-	// https://gitlab.com/haproxy-haptic/scriggo/issues/412
+	// https://github.com/open2b/scriggo/issues/412
 	// {
 	// 	a := 2
 	// 	g := func() {

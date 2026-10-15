@@ -11,9 +11,9 @@ import (
 	"reflect"
 	"strings"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/compiler/types"
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/compiler/types"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 // checkingMod represents the checking modality.

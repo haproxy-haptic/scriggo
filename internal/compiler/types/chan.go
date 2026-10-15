@@ -7,7 +7,7 @@ package types
 import (
 	"reflect"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // ChanOf behaves like reflect.ChanOf except when t is a Scriggo type; in such

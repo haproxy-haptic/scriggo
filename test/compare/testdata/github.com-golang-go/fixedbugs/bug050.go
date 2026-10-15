@@ -1,4 +1,4 @@
-// skip : this cannot be tested with the current implementation of the testing framework https://gitlab.com/haproxy-haptic/scriggo/issues/417
+// skip : this cannot be tested with the current implementation of the testing framework https://github.com/open2b/scriggo/issues/417
 
 // errorcheck
 

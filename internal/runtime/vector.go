@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 var (

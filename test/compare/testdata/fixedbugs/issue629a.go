@@ -1,4 +1,4 @@
-// skip : this is related to the variables in for loops. See the issue https://gitlab.com/haproxy-haptic/scriggo/issues/952, in the section about Go 1.22.
+// skip : this is related to the variables in for loops. See the issue https://github.com/open2b/scriggo/issues/952, in the section about Go 1.22.
 
 package main
 

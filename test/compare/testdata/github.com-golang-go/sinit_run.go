@@ -1,4 +1,4 @@
-// skip : calls system command 'go tool compile -S sinit.go' https://gitlab.com/haproxy-haptic/scriggo/issues/417
+// skip : calls system command 'go tool compile -S sinit.go' https://github.com/open2b/scriggo/issues/417
 
 // +build !nacl,!js
 // run

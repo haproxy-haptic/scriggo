@@ -8,7 +8,7 @@ import (
 	"io"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 // BenchmarkNativeCallsTemplateClosure measures the cost of a native function

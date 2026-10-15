@@ -2,7 +2,7 @@
 
 package main
 
-import "gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
+import "github.com/haproxy-haptic/scriggo/test/compare/testpkg"
 
 func swap(a, b int) (int, int) {
 	return b, a

@@ -1,4 +1,4 @@
-// skip : require labeled 'break' and 'continue' : https://gitlab.com/haproxy-haptic/scriggo/issues/83
+// skip : require labeled 'break' and 'continue' : https://github.com/open2b/scriggo/issues/83
 
 // run
 
