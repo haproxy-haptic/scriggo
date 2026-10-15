@@ -7,9 +7,9 @@ package astutil_test
 import (
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/ast/astutil"
-	"gitlab.com/haproxy-haptic/scriggo/internal/compiler"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast/astutil"
+	"github.com/haproxy-haptic/scriggo/internal/compiler"
 )
 
 type TestVisitor struct {

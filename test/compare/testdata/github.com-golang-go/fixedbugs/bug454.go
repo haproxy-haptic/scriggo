@@ -1,4 +1,4 @@
-// skip : cannot iterate over pointer to array (https://gitlab.com/haproxy-haptic/scriggo/issues/821)
+// skip : cannot iterate over pointer to array (https://github.com/open2b/scriggo/issues/821)
 
 // run
 

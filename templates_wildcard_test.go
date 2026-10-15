@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 // TestWildcardForRange exercises the wildcard-slice-access fork

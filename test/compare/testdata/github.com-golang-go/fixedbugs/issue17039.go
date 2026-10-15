@@ -1,4 +1,4 @@
-// skip : false positive loop in type definition (https://gitlab.com/haproxy-haptic/scriggo/issues/440)
+// skip : false positive loop in type definition (https://github.com/open2b/scriggo/issues/440)
 
 // run
 

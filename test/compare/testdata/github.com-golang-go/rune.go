@@ -1,4 +1,4 @@
-// skip : false positive 'cannot use ..' (https://gitlab.com/haproxy-haptic/scriggo/issues/896)
+// skip : false positive 'cannot use ..' (https://github.com/open2b/scriggo/issues/896)
 
 // compile
 

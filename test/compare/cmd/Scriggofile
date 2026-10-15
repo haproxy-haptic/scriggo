@@ -1,6 +1,6 @@
 SET VARIABLE packages
 
-IMPORT gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg
+IMPORT github.com/haproxy-haptic/scriggo/test/compare/testpkg
 
 IMPORT archive/tar
 IMPORT bufio

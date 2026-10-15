@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strings"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // StructOf behaves like reflect.StructOf except when at least one of the

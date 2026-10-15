@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 var sp = fmt.Sprint

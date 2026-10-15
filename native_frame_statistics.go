@@ -4,7 +4,7 @@
 
 package scriggo
 
-import "gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+import "github.com/haproxy-haptic/scriggo/internal/runtime"
 
 // NativeFrameCallStatistics reports compiled frame dispatch outcomes.
 type NativeFrameCallStatistics = runtime.NativeFrameCallStatistics

@@ -1,4 +1,4 @@
-// skip : cannot recover from runtime error (https://gitlab.com/haproxy-haptic/scriggo/issues/811)
+// skip : cannot recover from runtime error (https://github.com/open2b/scriggo/issues/811)
 
 // Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style

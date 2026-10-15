@@ -6,7 +6,7 @@ import "fmt"
 
 func main() {
 
-	// https://gitlab.com/haproxy-haptic/scriggo/issues/258
+	// https://github.com/open2b/scriggo/issues/258
 	// var _ = nil == interface{}(nil)
 
 	_ = nil == interface{}(nil)

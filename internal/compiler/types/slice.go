@@ -7,7 +7,7 @@ package types
 import (
 	"reflect"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // SliceOf behaves like reflect.SliceOf except when elem is a Scriggo type; in

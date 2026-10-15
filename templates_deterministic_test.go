@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 func runDeterministicTemplate(t *testing.T, files Files, globals native.Declarations) (string, error) {

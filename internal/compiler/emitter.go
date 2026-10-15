@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/compiler/types"
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/compiler/types"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // An emitter emits instructions for the VM.

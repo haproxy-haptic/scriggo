@@ -7,9 +7,9 @@ package compiler
 import (
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/internal/fstest"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 type synchronousNativeFieldStore struct {

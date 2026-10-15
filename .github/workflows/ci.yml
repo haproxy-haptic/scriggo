@@ -1,0 +1,34 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - {name: main, dir: ., run: go test -race -v ./...}
+          - {name: integration, dir: test, run: go mod tidy && go test -race -v ./...}
+          - {name: comparison, dir: test/compare, run: go run . -k -s}
+    name: test-${{ matrix.suite.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: '**/go.sum'
+      - working-directory: ${{ matrix.suite.dir }}
+        env:
+          SUITE: ${{ matrix.suite.run }}
+        run: bash -c "$SUITE"

@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "gitlab>haproxy-haptic/renovate-runner"
+    "github>haproxy-haptic/renovate-runner"
   ],
   "ignorePaths": [
     "**/node_modules/**",
@@ -9,20 +9,6 @@
     "**/vendor/**",
     "**/examples/**",
     "**/__fixtures__/**"
-  ],
-  "customManagers": [
-    {
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/^\\.gitlab-ci\\.yml$/"
-      ],
-      "matchStrings": [
-        "GO_VERSION:\\s*[\"']?(?<currentValue>[\\d.]+)[\"']?"
-      ],
-      "depNameTemplate": "golang",
-      "datasourceTemplate": "docker",
-      "versioningTemplate": "docker"
-    }
   ],
   "gomod": {
     "managerFilePatterns": [

@@ -1,4 +1,4 @@
-// skip : defined types are not print correctly (https://gitlab.com/haproxy-haptic/scriggo/issues/483)
+// skip : defined types are not print correctly (https://github.com/open2b/scriggo/issues/483)
 
 // run
 

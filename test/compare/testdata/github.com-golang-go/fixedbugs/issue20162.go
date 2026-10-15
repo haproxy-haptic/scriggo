@@ -1,4 +1,4 @@
-// skip : mode 'compile -c=4' not supported https://gitlab.com/haproxy-haptic/scriggo/issues/417
+// skip : mode 'compile -c=4' not supported https://github.com/open2b/scriggo/issues/417
 
 // compile -c=4
 

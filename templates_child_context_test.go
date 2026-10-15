@@ -14,7 +14,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 type childContextTestKey struct{}

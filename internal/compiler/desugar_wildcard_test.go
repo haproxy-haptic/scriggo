@@ -7,7 +7,7 @@ package compiler
 import (
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // wildcardPos is a sentinel Position used to assert that synthetic

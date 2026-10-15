@@ -431,7 +431,7 @@ Limitations
     * compilation of non-main packages without importing them (issue #521)
 
     For a comprehensive list of not-yet-implemented features
-    see https://gitlab.com/haproxy-haptic/scriggo/labels/missing-feature.
+    see https://github.com/haproxy-haptic/scriggo/labels/missing-feature.
 
 Limitations due to maintain the interoperability with Go official compiler 'gc'
 

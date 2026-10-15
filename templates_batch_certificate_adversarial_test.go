@@ -9,7 +9,7 @@ import (
 	"reflect"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 type batchCertificateFunctionStore struct {

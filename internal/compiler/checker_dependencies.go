@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"slices"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // Makes a dependency analysis after parsing and before the type checking. See

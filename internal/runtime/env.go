@@ -10,7 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 type PrintFunc func(any)

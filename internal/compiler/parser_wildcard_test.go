@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // TestParseWildcardIndex_OK exercises the parser's wildcard-slice-access

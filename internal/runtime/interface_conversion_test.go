@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo"
+	"github.com/haproxy-haptic/scriggo"
 )
 
 func TestImplicitInterfaceConversion(t *testing.T) {

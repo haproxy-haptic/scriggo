@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/internal/fstest"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 func TestEmitterRecordsRangeTypesAcrossFunctionGraph(t *testing.T) {

@@ -7,7 +7,7 @@ package compiler
 import (
 	"strconv"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // buildLoweredPipeline emits the statements implementing a lowered chain:

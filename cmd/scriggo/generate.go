@@ -93,7 +93,7 @@ func renderPackages(w io.Writer, dir string, sf *scriggofile, goos string, flags
 				}
 				if isPredeclaredIdentifier(newName) {
 					if newName == "print" || newName == "println" {
-						// https://gitlab.com/haproxy-haptic/scriggo/issues/361.
+						// https://github.com/open2b/scriggo/issues/361.
 					} else {
 						return fmt.Errorf("%q is not a valid identifier as it conflicts with Go predeclared identifier %q: remove 'uncapitalized' or change declaration name in package %q", newName, newName, imp.path)
 					}
@@ -215,7 +215,7 @@ import (
 {{- end}}
 )
 
-import "gitlab.com/haproxy-haptic/scriggo/native"
+import "github.com/haproxy-haptic/scriggo/native"
 {{- if .MustImportReflect}}
 import "reflect"
 {{- end}}
@@ -289,7 +289,7 @@ func loadGoPackage(path, dir, goos string, flags buildFlags, including, excludin
 		Mode: 1023,
 	}
 	if goos != "" {
-		// https://gitlab.com/haproxy-haptic/scriggo/issues/388
+		// https://github.com/open2b/scriggo/issues/388
 		//  conf.Env = append(os.Environ(), "GOOS=", goos)
 	}
 

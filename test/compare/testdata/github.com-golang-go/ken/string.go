@@ -102,7 +102,7 @@ func main() {
 		panic("create int array " + c)
 	}
 
-	// https://gitlab.com/haproxy-haptic/scriggo/issues/827
+	// https://github.com/open2b/scriggo/issues/827
 	// /* create string with byte array pointer */
 	// z3 := new([3]byte)
 	// z3[0] = 'a'

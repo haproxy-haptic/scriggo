@@ -9,7 +9,7 @@ import (
 	"errors"
 	"reflect"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 // ErrMutationObserverDetachedGo is returned before a detached Scriggo

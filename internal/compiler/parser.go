@@ -10,8 +10,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/ast/astutil"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast/astutil"
 )
 
 // SyntaxError records a parsing error with the path and the position where the

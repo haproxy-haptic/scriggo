@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 func TestPooledVMWithCancellableContext(t *testing.T) {

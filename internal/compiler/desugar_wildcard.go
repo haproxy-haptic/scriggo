@@ -4,7 +4,7 @@
 
 package compiler
 
-import "gitlab.com/haproxy-haptic/scriggo/ast"
+import "github.com/haproxy-haptic/scriggo/ast"
 
 // desugarWildcards rewrites every for-range whose range expression
 // contains one or more `[*]` wildcards into a chain of nested

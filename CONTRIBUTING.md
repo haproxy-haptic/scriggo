@@ -11,16 +11,16 @@ Any help is appreciated, whether it's code, documentation or spelling correction
 
 ## Contributor Checklist
 
-1. Create a [GitLab account](https://gitlab.com/users/sign_up).
-2. [Fork Scriggo](https://gitlab.com/haproxy-haptic/scriggo/fork).
+1. Create a [GitHub account](https://github.com/signup).
+2. [Fork Scriggo](https://github.com/haproxy-haptic/scriggo/fork).
 3. Make the changes.
 4. Add tests (if necessary) and run all the tests (see [the section
    below](#testing-scriggo))
-5. Open a Merge Request.
+5. Open a pull request.
 
 ## Contributing Code
 
-- If you plan on opening a Merge Request that introduces some major change, you should create an issue before sending such patch.
+- If you plan on opening a pull request that introduces some major change, you should create an issue before sending such patch.
 - Follow standard Go convention (formattation, documentation etc...).
 - Add tests (if necessary) and run all the tests (see [the section
   below](#testing-scriggo))

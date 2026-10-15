@@ -9,7 +9,7 @@ import (
 	"slices"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 type nativeValueAccessItem struct {

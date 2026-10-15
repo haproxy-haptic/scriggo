@@ -9,9 +9,9 @@ import (
 	"reflect"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/fstest"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // TestJinja2WhitespaceControl tests the Jinja2-style whitespace control markers.
