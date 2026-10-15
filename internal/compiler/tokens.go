@@ -7,7 +7,7 @@ package compiler
 import (
 	"fmt"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // Token type.

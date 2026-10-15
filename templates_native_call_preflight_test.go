@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 var errNativeCallPreflight = errors.New("native call preflight rejected")

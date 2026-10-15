@@ -26,7 +26,7 @@ func TestComparisonReportsRecoveredPanic(t *testing.T) {
 func TestRunGcUsesCheckout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "main.go")
 	src := []byte(`package main
-import "gitlab.com/haproxy-haptic/scriggo/native"
+import "github.com/haproxy-haptic/scriggo/native"
 func main() { var env native.Env; println(env == nil) }
 `)
 	if err := os.WriteFile(path, src, 0600); err != nil {

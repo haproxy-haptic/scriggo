@@ -13,7 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // FormatFS is the interface implemented by a file system that can determine

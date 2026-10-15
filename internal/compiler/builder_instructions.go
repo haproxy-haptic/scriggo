@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"slices"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // emitNop appends a new "Nop" instruction to the function body.

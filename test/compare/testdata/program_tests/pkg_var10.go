@@ -5,7 +5,7 @@ package main
 import (
 	"fmt"
 
-	"gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
+	"github.com/haproxy-haptic/scriggo/test/compare/testpkg"
 )
 
 var Center = "msg"

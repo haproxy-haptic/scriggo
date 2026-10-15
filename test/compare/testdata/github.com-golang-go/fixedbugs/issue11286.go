@@ -1,4 +1,4 @@
-// skip : type declaration depending from constant decl. not supported (https://gitlab.com/haproxy-haptic/scriggo/issues/813)
+// skip : type declaration depending from constant decl. not supported (https://github.com/open2b/scriggo/issues/813)
 
 // run
 

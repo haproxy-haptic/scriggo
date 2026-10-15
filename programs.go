@@ -10,10 +10,10 @@ import (
 	"io/fs"
 	"reflect"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/compiler"
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/compiler"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 // BuildOptions contains options for building programs and templates.

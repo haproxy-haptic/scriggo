@@ -3,7 +3,7 @@ package compiler
 import (
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 func TestComplex128(t *testing.T) {

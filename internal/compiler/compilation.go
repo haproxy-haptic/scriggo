@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strconv"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // A compilation holds the state of a single compilation.

@@ -7,8 +7,8 @@ package misc
 import (
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo"
-	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
+	"github.com/haproxy-haptic/scriggo"
+	"github.com/haproxy-haptic/scriggo/internal/fstest"
 )
 
 func TestProgramImport(t *testing.T) {

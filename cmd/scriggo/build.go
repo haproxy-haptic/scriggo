@@ -19,10 +19,10 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.com/haproxy-haptic/scriggo"
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/ast/astutil"
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast/astutil"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 // build the template.

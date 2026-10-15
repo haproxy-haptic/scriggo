@@ -7,7 +7,7 @@ package compiler
 import (
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 var maxInt64Plus1 = "9223372036854775808"

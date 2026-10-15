@@ -8,8 +8,8 @@ import (
 	"bytes"
 	"reflect"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // textStartPos returns the source position of the first rendered byte of a Text

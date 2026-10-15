@@ -46,7 +46,7 @@ func test64(f float64) {
 }
 
 func main() {
-	// issue https://gitlab.com/haproxy-haptic/scriggo/issues/536
+	// issue https://github.com/open2b/scriggo/issues/536
 	//if f := -x0; f != 0 || !math.Signbit(float64(f)) {
 	//	println("BUG: got", f, "want -0.0")
 	//}
@@ -57,7 +57,7 @@ func main() {
 	test32(x2)
 	test32(x3)
 
-	// issue https://gitlab.com/haproxy-haptic/scriggo/issues/536
+	// issue https://github.com/open2b/scriggo/issues/536
 	//if f := -y0; f != 0 || !math.Signbit(f) {
 	//	println("BUG: got", f, "want -0.0")
 	//}

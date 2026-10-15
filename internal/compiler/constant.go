@@ -14,8 +14,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
-	"gitlab.com/haproxy-haptic/scriggo/internal/thirdparties"
+	"github.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/internal/thirdparties"
 )
 
 var errNotRepresentable = errors.New("not representable")

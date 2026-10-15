@@ -1,4 +1,4 @@
-// skip : cannot declare a type with name 'init' https://gitlab.com/haproxy-haptic/scriggo/issues/532
+// skip : cannot declare a type with name 'init' https://github.com/open2b/scriggo/issues/532
 
 // errorcheck
 

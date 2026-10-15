@@ -3,10 +3,10 @@
 
 The world’s most powerful template engine and [Go](https://go.dev/) embeddable interpreter.
 
-[![Go Reference](https://pkg.go.dev/badge/gitlab.com/haproxy-haptic/scriggo/.svg)](https://pkg.go.dev/gitlab.com/haproxy-haptic/scriggo/)
-[![Go Report Card](https://goreportcard.com/badge/gitlab.com/haproxy-haptic/scriggo)](https://goreportcard.com/report/gitlab.com/haproxy-haptic/scriggo)
+[![Go Reference](https://pkg.go.dev/badge/github.com/haproxy-haptic/scriggo/.svg)](https://pkg.go.dev/github.com/haproxy-haptic/scriggo/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/haproxy-haptic/scriggo)](https://goreportcard.com/report/github.com/haproxy-haptic/scriggo)
 
-[Website](https://scriggo.com/) | [Get Started](https://scriggo.com/get-started) | [Documentation](https://scriggo.com/what-is-scriggo) | [Community](https://gitlab.com/haproxy-haptic/scriggo/discussions) | [Contributing](https://gitlab.com/haproxy-haptic/scriggo/blob/main/CONTRIBUTING.md)
+[Website](https://scriggo.com/) | [Get Started](https://scriggo.com/get-started) | [Documentation](https://scriggo.com/what-is-scriggo) | [Community](https://github.com/haproxy-haptic/scriggo/discussions) | [Contributing](https://github.com/haproxy-haptic/scriggo/blob/main/CONTRIBUTING.md)
 
 ## Features
 
@@ -23,7 +23,7 @@ Execute a Go program embedded in your application:
 ```go
 package main
 
-import "gitlab.com/haproxy-haptic/scriggo"
+import "github.com/haproxy-haptic/scriggo"
 
 func main() {
 
@@ -84,9 +84,9 @@ package main
 import (
 	"os"
 
-	"gitlab.com/haproxy-haptic/scriggo"
-	"gitlab.com/haproxy-haptic/scriggo/builtin"
-	"gitlab.com/haproxy-haptic/scriggo/native"
+	"github.com/haproxy-haptic/scriggo"
+	"github.com/haproxy-haptic/scriggo/builtin"
+	"github.com/haproxy-haptic/scriggo/native"
 )
 
 func main() {

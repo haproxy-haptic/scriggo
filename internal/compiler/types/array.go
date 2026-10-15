@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strconv"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // ArrayOf is equivalent to reflect.ArrayOf except when elem is a Scriggo type;

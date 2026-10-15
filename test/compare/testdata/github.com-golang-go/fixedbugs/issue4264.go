@@ -1,4 +1,4 @@
-// skip : should be a type checking error, got runtime panic https://gitlab.com/haproxy-haptic/scriggo/issues/530
+// skip : should be a type checking error, got runtime panic https://github.com/open2b/scriggo/issues/530
 
 // errorcheck
 

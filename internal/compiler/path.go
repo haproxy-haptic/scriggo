@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // validModulePath reports whether path is a valid module path.

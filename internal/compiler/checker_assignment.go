@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strings"
 
-	"gitlab.com/haproxy-haptic/scriggo/ast"
+	"github.com/haproxy-haptic/scriggo/ast"
 )
 
 // typeInfoPair represents a pair of type infos. It is used checking

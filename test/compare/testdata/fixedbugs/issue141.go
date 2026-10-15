@@ -2,7 +2,7 @@
 
 package main
 
-import . "gitlab.com/haproxy-haptic/scriggo/test/compare/testpkg"
+import . "github.com/haproxy-haptic/scriggo/test/compare/testpkg"
 
 func main() {
 	t := T(0)

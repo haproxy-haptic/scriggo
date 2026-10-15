@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/fstest"
+	"github.com/haproxy-haptic/scriggo/internal/fstest"
 )
 
 // TestForRangeOverMapDoesNotClobberOuterVar pins a regression first

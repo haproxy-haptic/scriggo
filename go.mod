@@ -1,4 +1,4 @@
-module gitlab.com/haproxy-haptic/scriggo
+module github.com/haproxy-haptic/scriggo
 
 go 1.27.0
 

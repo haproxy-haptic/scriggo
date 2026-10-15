@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"gitlab.com/haproxy-haptic/scriggo/internal/runtime"
+	"github.com/haproxy-haptic/scriggo/internal/runtime"
 )
 
 // Types allows to create and manage types and values, as the reflect package

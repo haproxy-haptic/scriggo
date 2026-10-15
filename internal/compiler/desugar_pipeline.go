@@ -4,7 +4,7 @@
 
 package compiler
 
-import "gitlab.com/haproxy-haptic/scriggo/ast"
+import "github.com/haproxy-haptic/scriggo/ast"
 
 // Compile-time lowering of collection pipelines.
 //
