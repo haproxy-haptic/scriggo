@@ -288,6 +288,9 @@ type Global struct {
 	FunctionPath     string
 	FunctionName     string
 	FunctionPosition ast.Position
+	// Hidden marks a global the compiler allocated for itself; no template
+	// identifier refers to it.
+	Hidden bool
 }
 
 type NativeDeclarationKind uint8

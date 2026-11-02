@@ -85,6 +85,10 @@ type emitter struct {
 	// which the initialization code has already been emitted.
 	alreadyInitializedTemplatePkgs map[string]bool
 
+	// templatePkgInitGuards holds, per template package path, the hidden global
+	// its first import site sets once it has initialized the package.
+	templatePkgInitGuards map[string]int16
+
 	initVarsFuncs map[*ast.Package]*runtime.Function
 }
 
@@ -111,6 +115,7 @@ func newEmitter(typeInfos map[ast.Node]*typeInfo, formatTypes map[ast.Format]ref
 		alreadyEmittedFuncs:            map[*ast.Func]*runtime.Function{},
 		alreadyInitializedVars:         map[*ast.Identifier]int16{},
 		alreadyInitializedTemplatePkgs: map[string]bool{},
+		templatePkgInitGuards:          map[string]int16{},
 		initVarsFuncs:                  map[*ast.Package]*runtime.Function{},
 	}
 	em.fnStore = newFunctionStore(em)

@@ -712,9 +712,11 @@ func (t *Template) Format() Format {
 // UsedVars returns the names of the global variables used in the template.
 // A variable used in dead code may not be returned as used.
 func (t *Template) UsedVars() []string {
-	vars := make([]string, len(t.globals))
-	for i, global := range t.globals {
-		vars[i] = global.Name
+	vars := make([]string, 0, len(t.globals))
+	for _, global := range t.globals {
+		if !global.Hidden {
+			vars = append(vars, global.Name)
+		}
 	}
 	sort.Strings(vars)
 	return vars
@@ -723,9 +725,12 @@ func (t *Template) UsedVars() []string {
 // UsedVariables returns the global variables referenced by the compiled
 // template. A variable used only in dead code may not be returned.
 func (t *Template) UsedVariables() []UsedVariable {
-	variables := make([]UsedVariable, len(t.globals))
-	for index, global := range t.globals {
-		variables[index] = UsedVariable{
+	variables := make([]UsedVariable, 0, len(t.globals))
+	for _, global := range t.globals {
+		if global.Hidden {
+			continue
+		}
+		variables = append(variables, UsedVariable{
 			Package:          global.Pkg,
 			Path:             global.Path,
 			Name:             global.Name,
@@ -733,7 +738,7 @@ func (t *Template) UsedVariables() []UsedVariable {
 			FunctionPath:     global.FunctionPath,
 			FunctionName:     global.FunctionName,
 			FunctionPosition: global.FunctionPosition,
-		}
+		})
 	}
 	sort.Slice(variables, func(i, j int) bool {
 		left, right := variables[i], variables[j]
