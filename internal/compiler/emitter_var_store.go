@@ -82,6 +82,13 @@ func (vs *varStore) bindScriggoPackageVar(pkg *ast.Package, name string, index i
 	vs.scriggoPackageVarRefs[pkg][name] = index
 }
 
+// createHiddenGlobal allocates a global no identifier refers to.
+func (vs *varStore) createHiddenGlobal(global Global) int16 {
+	index := int16(len(vs.globals))
+	vs.globals = append(vs.globals, global)
+	return index
+}
+
 func (vs *varStore) createScriggoPackageVar(pkg *ast.Package, global Global) int16 {
 	index := int16(len(vs.globals))
 	vs.globals = append(vs.globals, global)

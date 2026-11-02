@@ -107,12 +107,8 @@ func (em *emitter) emitNodes(nodes []ast.Node) {
 				// while node.Tree == nil indicates a native package import.
 				if node.Tree != nil {
 					inits := em.emitImport(node, true)
-					if len(inits) > 0 && !em.alreadyInitializedTemplatePkgs[node.Tree.Path] {
-						for _, initFunc := range inits {
-							index := em.fb.addFunction(initFunc)
-							em.fb.emitCallFunc(index, em.fb.currentStackShift(), nil)
-						}
-						em.alreadyInitializedTemplatePkgs[node.Tree.Path] = true
+					if len(inits) > 0 {
+						em.emitTemplatePkgInit(node, inits)
 					}
 				}
 			}
@@ -639,6 +635,42 @@ func (em *emitter) emitAssignmentNode(node *ast.Assignment) {
 		}
 	}
 	em.assignValuesToAddresses(addresses, node.Rhs)
+}
+
+// emitTemplatePkgInit initializes an imported template package. The first
+// import site emitted initializes it every time it runs and sets the package's
+// guard; every later site initializes it only while the guard is unset, because
+// the first site emitted can be inside a macro that runs after it, or never.
+func (em *emitter) emitTemplatePkgInit(node *ast.Import, inits []*runtime.Function) {
+	path := node.Tree.Path
+	guard, ok := em.templatePkgInitGuards[path]
+	if !ok {
+		global := newGlobal("$init", path, boolType, reflect.Value{})
+		global.Hidden = true
+		guard = em.varStore.createHiddenGlobal(global)
+		em.templatePkgInitGuards[path] = guard
+	}
+	em.fb.enterStack()
+	done := em.fb.newRegister(reflect.Bool)
+	var end label
+	first := !em.alreadyInitializedTemplatePkgs[path]
+	if !first {
+		em.fb.emitGetVar(int(guard), done, reflect.Bool)
+		em.fb.emitIf(false, done, runtime.ConditionZero, 0, reflect.Bool, node.Pos())
+		end = em.fb.newLabel()
+		em.fb.emitGoto(end)
+	}
+	em.fb.emitMove(true, 1, done, reflect.Bool)
+	em.fb.emitSetVar(false, done, int(guard), reflect.Bool)
+	for _, initFunc := range inits {
+		index := em.fb.addFunction(initFunc)
+		em.fb.emitCallFunc(index, em.fb.currentStackShift(), nil)
+	}
+	if !first {
+		em.fb.setLabelAddr(end)
+	}
+	em.fb.exitStack()
+	em.alreadyInitializedTemplatePkgs[path] = true
 }
 
 // emitImport emits an import node, returning the list of all 'init' functions
