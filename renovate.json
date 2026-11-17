@@ -11,6 +11,9 @@
     "**/__fixtures__/**"
   ],
   "gomod": {
+    "postUpdateOptions": [
+      "gomodTidyAll"
+    ],
     "managerFilePatterns": [
       "go.mod",
       "test/go.mod"
